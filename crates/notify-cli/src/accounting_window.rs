@@ -2,26 +2,26 @@
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 #[derive(Clone, Copy)]
-struct Policy {
-    lookback_seconds: i64,
-    overlap_seconds: i64,
+pub(super) struct Policy {
+    pub(super) lookback_seconds: i64,
+    pub(super) overlap_seconds: i64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Error {
+pub(super) enum Error {
     InvalidPolicy,
     InvalidTime,
     ClockRegressed,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Window {
-    start: String,
-    end: String,
+pub(super) struct Window {
+    pub(super) start: String,
+    pub(super) end: String,
     // True when downtime extends before the bounded query's start, not proof
     // that jobs were lost. Clipped overlap is reported separately.
-    catch_up_gap: bool,
-    overlap_clipped: bool,
+    pub(super) catch_up_gap: bool,
+    pub(super) overlap_clipped: bool,
 }
 
 fn timestamp(seconds: i64) -> Result<String, Error> {
@@ -73,7 +73,7 @@ fn parse_timestamp(value: &str) -> Result<i64, Error> {
     Ok(seconds)
 }
 
-fn plan(now: i64, checkpoint: Option<&str>, policy: Policy) -> Result<Window, Error> {
+pub(super) fn plan(now: i64, checkpoint: Option<&str>, policy: Policy) -> Result<Window, Error> {
     if policy.lookback_seconds <= 0
         || policy.overlap_seconds <= 0
         || policy.overlap_seconds >= policy.lookback_seconds

@@ -158,3 +158,7 @@ The private accounting-window experiment now uses explicit UTC overlap and
 lookback limits, with delayed-record restart tests and flags for clipped overlap
 or downtime beyond the bound. It does not guarantee complete historical recovery;
 see the [implementation plan](docs/architecture/implementation-plan.md).
+
+Private polling-cycle tests now compose restoration, window planning, and durable
+polling with a finite attempt budget and cancellation between cycles. The caller
+still supplies cadence and limits; no background monitoring loop is active.

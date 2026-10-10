@@ -579,3 +579,31 @@ contract, or executable behavior changed.
 Next: private bounded polling-cycle composition using this planner, including
 visible catch-up gaps and cancellation between cycles. Public contract review,
 SMTP, licensing, and operational activation remain pending.
+
+## Subsequent increment: private bounded polling cycles
+
+A caller-driven test-only controller composes durable state restoration, UTC
+window planning, and transactional polling. Each step restores the committed
+checkpoint and reconciler rather than retaining uncommitted candidate state.
+Successful steps return event counts and window gap/clipping flags. Errors
+retain their storage, window, or scheduler category. The caller supplies all
+limits, destinations, initial event policy, timestamps, and cycle cadence.
+
+The finite positive attempt budget is consumed before restoration/planning,
+including failed cycles. Cancellation is checked before each cycle and does not
+consume budget or touch storage. Exhaustion also prevents storage/query work.
+Cancellation does not interrupt an in-flight query; the existing per-poll
+scheduler deadline applies. This adds no sleep loop, background process,
+persistent cycle budget, default polling interval, or operational CLI. The caller
+must retain state ownership and obey cluster policy when integrating execution.
+
+Five tests verify cancellation/exhaustion, failure budget consumption, restart
+from the last committed checkpoint, duplicate suppression, visible downtime gaps,
+clock regression, atomic rollback on checkpoint write failure, and corrupt-state
+rejection before queries. The full shared suite passes: 104 Rust tests plus one
+ignored helper, ten custom process scenarios, eight SQLite tests, and six hook
+tests. No dependencies, migrations, public contracts, or runtime defaults changed.
+
+Next: private retention planning for terminal snapshots and completed outbox
+records, preserving deduplication and pending-delivery protection. Public contract
+review, SMTP, licensing, cluster validation, and runtime activation remain pending.
