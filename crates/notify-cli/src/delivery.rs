@@ -11,11 +11,20 @@ pub(super) struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    fn valid(&self) -> bool {
+    pub(super) fn valid(&self) -> bool {
         self.max_attempts > 0
             && self.initial_delay_seconds > 0
             && self.max_delay_seconds >= self.initial_delay_seconds
             && (0..=self.max_delay_seconds).contains(&self.jitter_seconds)
+    }
+
+    pub(super) fn valid_at(&self, now: i64) -> bool {
+        self.valid()
+            && now >= 0
+            && now
+                .checked_add(self.max_delay_seconds)
+                .and_then(|time| time.checked_add(self.jitter_seconds))
+                .is_some()
     }
 
     // Stable non-cryptographic spreading; the seed and bound are explicit inputs.
@@ -105,13 +114,7 @@ pub(super) fn deliver_due_with_clock(
     mut send: impl FnMut(&DueDelivery) -> ProviderOutcome,
     mut clock: impl FnMut() -> Option<i64>,
 ) -> Result<BatchReport, WorkerError> {
-    if !policy.valid()
-        || now < 0
-        || now
-            .checked_add(policy.max_delay_seconds)
-            .and_then(|time| time.checked_add(policy.jitter_seconds))
-            .is_none()
-    {
+    if !policy.valid_at(now) {
         return Err(WorkerError::InvalidPolicy);
     }
     let items = store

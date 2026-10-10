@@ -821,3 +821,37 @@ Next: private orchestration preflight validation of all caller-supplied policies
 and limits before poll or delivery side effects, with rejection and boundary tests.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: private orchestration preflight
+
+The tick validates caller settings and maintenance policies before storage reads,
+queries, sends, or poll-budget consumption. Checks cover nonempty command paths,
+user/cluster, timeout/output limit, restoration capacity, nonempty unique
+destinations, accounting window policy, retry policy, maintenance row limits,
+retention age, and staleness threshold. Numeric probes must be representable;
+output limits must permit the runner's extra-byte overflow probe. Shared retry
+and window validation functions prevent policy drift between preflight and their
+component implementations.
+
+Cancellation still takes precedence. Static invalid policies are rejected before
+sampling the clock. A valid UTC planner time and nonoverflowing retry schedule
+are then required before the poll. The report has a separate preflight result;
+rejections leave all stage results absent, do not consume the attempt budget,
+and do not increment the poll-failure streak. Later clock, provider delay, storage,
+and query failures remain checked at their existing boundaries. Validation does
+not establish executable availability, cluster policy, credential validity, or
+an arbitrary maximum allowed operational resource allocation. Those remain
+separate decisions. No dependencies, public contract, default, or production
+executable behavior changed; private destination lists now require at least one
+unique nonempty destination at the orchestration boundary.
+
+Two tests cover 27 invalid static configurations with callbacks that must never
+run, unchanged budget/streak/checkpoint, invalid/unsupported clock values, retry
+schedule overflow, and small valid limits. The full suite passes: 121 Rust tests
+plus one ignored helper, twelve custom process scenarios, eight SQLite tests,
+and six hook tests.
+
+Next: owned orchestration acceptance for supervised HTTP timeout and durable
+retry recovery, ensuring later maintenance does not erase pending sends.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and activation remain pending.

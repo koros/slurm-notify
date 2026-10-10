@@ -7,6 +7,14 @@ pub(super) struct Policy {
     pub(super) overlap_seconds: i64,
 }
 
+impl Policy {
+    pub(super) fn valid(&self) -> bool {
+        self.lookback_seconds > 0
+            && self.overlap_seconds > 0
+            && self.overlap_seconds < self.lookback_seconds
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
     InvalidPolicy,
@@ -74,10 +82,7 @@ pub(super) fn parse_timestamp(value: &str) -> Result<i64, Error> {
 }
 
 pub(super) fn plan(now: i64, checkpoint: Option<&str>, policy: Policy) -> Result<Window, Error> {
-    if policy.lookback_seconds <= 0
-        || policy.overlap_seconds <= 0
-        || policy.overlap_seconds >= policy.lookback_seconds
-    {
+    if !policy.valid() {
         return Err(Error::InvalidPolicy);
     }
     let end = timestamp(now)?;

@@ -117,6 +117,7 @@ pub(super) enum StageError {
 #[derive(Debug, Default)]
 pub(super) struct TickReport {
     pub(super) cancelled: bool,
+    pub(super) preflight: Option<Result<(), StageError>>,
     pub(super) poll: Option<Result<Outcome, StageError>>,
     pub(super) delivery: Option<Result<super::delivery::BatchReport, StageError>>,
     pub(super) cleanup: Option<Result<usize, StageError>>,
@@ -126,6 +127,37 @@ pub(super) struct TickReport {
 pub(super) struct Cycles {
     remaining: usize,
     health: PollHealth,
+}
+
+fn valid_settings(settings: &Settings<'_>, maintenance: &Maintenance) -> bool {
+    let probe = |limit: usize| {
+        limit > 0
+            && i64::try_from(limit)
+                .ok()
+                .and_then(|n| n.checked_add(1))
+                .is_some()
+    };
+    let mut destinations = std::collections::HashSet::new();
+    !settings.active_program.as_os_str().is_empty()
+        && !settings.accounting_program.as_os_str().is_empty()
+        && !settings.cluster.is_empty()
+        && !settings.user.is_empty()
+        && !settings.timeout.is_zero()
+        && settings.output_limit > 0
+        && settings.output_limit.checked_add(1).is_some()
+        && probe(settings.capacity)
+        && settings.window.valid()
+        && !settings.destinations.is_empty()
+        && settings
+            .destinations
+            .iter()
+            .all(|name| !name.is_empty() && destinations.insert(*name))
+        && maintenance.retry.valid()
+        && probe(maintenance.delivery_limit)
+        && probe(maintenance.cleanup_limit)
+        && probe(maintenance.health_sample_limit)
+        && maintenance.retain_seconds > 0
+        && maintenance.stale_after > 0
 }
 
 impl Cycles {
@@ -159,10 +191,23 @@ impl Cycles {
             report.cancelled = true;
             return report;
         }
+        if !valid_settings(settings, maintenance) {
+            report.preflight = Some(Err(StageError::Policy));
+            return report;
+        }
         let Some(now) = (hooks.clock)().filter(|time| *time >= 0) else {
-            report.poll = Some(Err(StageError::Time));
+            report.preflight = Some(Err(StageError::Time));
             return report;
         };
+        if accounting_window::plan(now, None, settings.window).is_err() {
+            report.preflight = Some(Err(StageError::Time));
+            return report;
+        }
+        if !maintenance.retry.valid_at(now) {
+            report.preflight = Some(Err(StageError::Policy));
+            return report;
+        }
+        report.preflight = Some(Ok(()));
         let poll = self.step(settings, store, false, now, &mut hooks.query);
         let stop = matches!(
             &poll,
@@ -440,6 +485,140 @@ mod tests {
             stale_after: 60,
             health_sample_limit: 10,
         }
+    }
+
+    #[test]
+    fn invalid_preflight_policies_never_query_send_sample_clock_or_mutate_state() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        for case in 0..27 {
+            let mut settings = settings();
+            let mut maintenance = maintenance();
+            match case {
+                0 => settings.active_program = Path::new(""),
+                1 => settings.accounting_program = Path::new(""),
+                2 => settings.cluster = "",
+                3 => settings.user = "",
+                4 => settings.timeout = Duration::ZERO,
+                5 => settings.output_limit = 0,
+                6 => settings.output_limit = usize::MAX,
+                7 => settings.capacity = 0,
+                8 => settings.capacity = usize::MAX,
+                9 => settings.window.lookback_seconds = 0,
+                10 => settings.window.overlap_seconds = 0,
+                11 => settings.window.overlap_seconds = settings.window.lookback_seconds,
+                12 => settings.destinations = &[],
+                13 => settings.destinations = &[""],
+                14 => settings.destinations = &["primary", "primary"],
+                15 => maintenance.retry.max_attempts = 0,
+                16 => maintenance.retry.initial_delay_seconds = 0,
+                17 => maintenance.retry.max_delay_seconds = 1,
+                18 => maintenance.retry.jitter_seconds = -1,
+                19 => maintenance.retry.jitter_seconds = 21,
+                20 => maintenance.delivery_limit = 0,
+                21 => maintenance.cleanup_limit = 0,
+                22 => maintenance.health_sample_limit = 0,
+                23 => maintenance.delivery_limit = usize::MAX,
+                24 => maintenance.health_sample_limit = usize::MAX,
+                25 => maintenance.retain_seconds = 0,
+                _ => maintenance.stale_after = 0,
+            }
+            let report = cycles.tick(
+                &settings,
+                &maintenance,
+                &mut store,
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("invalid preflight query"),
+                    send: |_: &super::super::storage::DueDelivery| panic!("invalid preflight send"),
+                    clock: || panic!("invalid preflight clock"),
+                    cancelled: || false,
+                },
+            );
+            assert_eq!(
+                report.preflight.unwrap(),
+                Err(StageError::Policy),
+                "case {case}"
+            );
+            assert!(
+                report.poll.is_none()
+                    && report.delivery.is_none()
+                    && report.cleanup.is_none()
+                    && report.health.is_none()
+            );
+            assert_eq!(cycles.remaining, 1);
+            assert_eq!(cycles.health.consecutive_failures, 0);
+            assert_eq!(store.restore("cluster", 10).unwrap().1, None);
+        }
+    }
+
+    #[test]
+    fn preflight_time_and_retry_overflow_reject_before_poll_and_valid_boundaries_run() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        for now in [None, Some(-1), Some(0), Some(i64::MAX)] {
+            let report = cycles.tick(
+                &settings(),
+                &maintenance(),
+                &mut store,
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("invalid time query"),
+                    send: |_: &super::super::storage::DueDelivery| panic!("invalid time send"),
+                    clock: || now,
+                    cancelled: || false,
+                },
+            );
+            assert_eq!(report.preflight.unwrap(), Err(StageError::Time));
+            assert!(report.poll.is_none());
+            assert_eq!(cycles.remaining, 1);
+        }
+        let mut limits = maintenance();
+        limits.retry.max_delay_seconds = i64::MAX;
+        let report = cycles.tick(
+            &settings(),
+            &limits,
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("overflow query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("overflow send"),
+                clock: || Some(7200),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Err(StageError::Policy));
+        assert_eq!(cycles.remaining, 1);
+        let mut settings = settings();
+        settings.capacity = 1;
+        settings.output_limit = 1;
+        settings.window = Policy {
+            lookback_seconds: 2,
+            overlap_seconds: 1,
+        };
+        let mut limits = maintenance();
+        limits.delivery_limit = 1;
+        limits.cleanup_limit = 1;
+        limits.health_sample_limit = 1;
+        limits.stale_after = 1;
+        limits.retain_seconds = 1;
+        limits.retry.max_attempts = 1;
+        limits.retry.initial_delay_seconds = 1;
+        limits.retry.max_delay_seconds = 1;
+        limits.retry.jitter_seconds = 1;
+        let report = cycles.tick(
+            &settings,
+            &limits,
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Ok(String::new()),
+                send: |_: &super::super::storage::DueDelivery| panic!("empty queue send"),
+                clock: || Some(1),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Ok(()));
+        assert!(report.poll.unwrap().is_ok() && report.health.unwrap().is_ok());
+        assert_eq!(cycles.remaining, 0);
     }
 
     #[test]

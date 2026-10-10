@@ -191,3 +191,7 @@ Payloads and scheduler records remain synthetic private fixtures.
 The process harness also verifies cancellation after a completed delivery batch
 and cleanup failure isolation: deliveries stay committed, cleanup rolls back,
 health reporting continues, and maintenance succeeds after restart without resends.
+
+Private orchestration now validates settings and policies before polling or
+mutating storage. Invalid preflight leaves the poll budget and failure streak
+unchanged; stage reports distinguish preflight rejection from a failed poll.
