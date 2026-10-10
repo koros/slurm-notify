@@ -667,3 +667,35 @@ Next: private storage health diagnostics for queue depth, protected retention
 records, and restoration capacity pressure, using bounded aggregate queries and
 sanitized reports. Terminal ledger compaction, public contract review, SMTP,
 licensing, cluster validation, and runtime activation remain pending.
+
+## Subsequent increment: private storage health snapshots
+
+A test-only read transaction collects a constant-size sanitized health report for
+one caller-selected cluster. Jobs and events are probed to capacity plus one,
+providing explicit over-capacity flags without loading full restoration history.
+Destination inspection stops at the caller's sample limit plus one, reporting
+truncation separately from sampled pending/due/delivered/failed counts. Cleanup
+eligibility uses the same latest terminal-attempt evidence and strict age cutoff
+as retention planning. Completed rows lacking such evidence are counted separately.
+Counts are samples when truncated, not exact global totals or an unbiased estimate.
+An exact-capacity sample is not flagged as already exceeding capacity.
+
+One read transaction keeps the probes consistent. Row limits bound returned and
+inspected rows, not SQLite execution time or underlying query scan/sort work.
+No hard database query deadline or large-history performance claim is made.
+The report contains only counts and flags; invalid input and database failures
+use static categories without raw errors, paths, identities, or destination data.
+This is not an integrity check and does not guarantee restoration succeeds for
+malformed records. No public status/doctor interface, operational default,
+dependency, migration, or production runtime behavior changed.
+
+Three tests cover queue/retention classification, strict age and epoch handling,
+cleanup and reopen consistency, cluster isolation, privacy, sample truncation,
+capacity overflow, invalid/overflowing limits, and sanitized database failure.
+The shared suite passes: 113 Rust tests plus one ignored helper, ten custom process
+scenarios, eight SQLite tests, and six hook tests.
+
+Next: private poll-health tracking for consecutive scheduler failures and stale
+successful checkpoints, composing storage counts without raw command output.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and runtime activation remain pending.

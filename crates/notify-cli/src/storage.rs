@@ -84,6 +84,29 @@ struct RetentionCandidate {
     status: String,
 }
 
+// Counts describe a bounded sample; truncation explicitly prevents exact totals.
+#[derive(Debug, PartialEq, Eq)]
+struct StorageHealth {
+    jobs_sampled: usize,
+    events_sampled: usize,
+    jobs_over_capacity: bool,
+    events_over_capacity: bool,
+    destinations_sampled: usize,
+    destinations_truncated: bool,
+    pending: usize,
+    due: usize,
+    delivered: usize,
+    failed: usize,
+    cleanup_eligible: usize,
+    completion_unproven: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HealthError {
+    InvalidInput,
+    Database,
+}
+
 impl Store {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(super) fn open_private(
@@ -132,6 +155,113 @@ impl Store {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             _owner: None,
         })
+    }
+
+    // Constant-size report; read transaction keeps all samples consistent.
+    // LIMIT bounds inspected rows, not SQLite wall time or underlying scan work.
+    fn health(
+        &mut self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        capacity: usize,
+        sample_limit: usize,
+    ) -> Result<StorageHealth, HealthError> {
+        if cluster.is_empty()
+            || now < 0
+            || retain_seconds <= 0
+            || capacity == 0
+            || sample_limit == 0
+        {
+            return Err(HealthError::InvalidInput);
+        }
+        let capacity_probe = i64::try_from(capacity)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or(HealthError::InvalidInput)?;
+        let sample_probe = i64::try_from(sample_limit)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or(HealthError::InvalidInput)?;
+        let cutoff = now.checked_sub(retain_seconds).unwrap_or(-1);
+        let report = (|| -> Result<StorageHealth, rusqlite::Error> {
+            let tx = self.db.transaction()?;
+            let jobs: usize = tx.query_row(
+                "SELECT count(*) FROM (SELECT 1 FROM jobs WHERE cluster=?1 LIMIT ?2)",
+                params![cluster, capacity_probe],
+                |r| r.get(0),
+            )?;
+            let events: usize = tx.query_row(
+                "SELECT count(*) FROM (SELECT 1 FROM events WHERE cluster=?1 LIMIT ?2)",
+                params![cluster, capacity_probe],
+                |r| r.get(0),
+            )?;
+            let mut health = StorageHealth {
+                jobs_sampled: jobs,
+                events_sampled: events,
+                jobs_over_capacity: jobs > capacity,
+                events_over_capacity: events > capacity,
+                destinations_sampled: 0,
+                destinations_truncated: false,
+                pending: 0,
+                due: 0,
+                delivered: 0,
+                failed: 0,
+                cleanup_eligible: 0,
+                completion_unproven: 0,
+            };
+            let mut statement = tx.prepare(
+                "SELECT o.status,o.next_attempt_at,a.attempted_at,a.outcome
+                FROM events e JOIN outbox o ON o.event_id=e.event_id
+                LEFT JOIN delivery_attempts a ON a.event_id=o.event_id AND a.destination=o.destination
+                    AND a.attempt_number=(SELECT MAX(last.attempt_number) FROM delivery_attempts last
+                        WHERE last.event_id=o.event_id AND last.destination=o.destination)
+                WHERE e.cluster=?1 ORDER BY o.event_id,o.destination LIMIT ?2")?;
+            let rows = statement.query_map(params![cluster, sample_probe], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (status, due_at, attempted_at, outcome) = row?;
+                if health.destinations_sampled == sample_limit {
+                    health.destinations_truncated = true;
+                    break;
+                }
+                health.destinations_sampled += 1;
+                match status.as_str() {
+                    "pending" => {
+                        health.pending += 1;
+                        if due_at <= now {
+                            health.due += 1;
+                        }
+                    }
+                    "delivered" | "failed" => {
+                        if status == "delivered" {
+                            health.delivered += 1;
+                        } else {
+                            health.failed += 1;
+                        }
+                        match (attempted_at, outcome.as_deref()) {
+                            (Some(time), Some("success" | "terminal_failure")) => {
+                                if time < cutoff {
+                                    health.cleanup_eligible += 1;
+                                }
+                            }
+                            _ => health.completion_unproven += 1,
+                        }
+                    }
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                }
+            }
+            drop(statement);
+            tx.commit()?;
+            Ok(health)
+        })();
+        report.map_err(|_| HealthError::Database)
     }
 
     // Preserve events/jobs/checkpoints: they are the restart deduplication ledger.
@@ -733,6 +863,117 @@ pub(super) mod tests {
             .find(|item| item.destination == "retired")
             .unwrap();
         store.retire_exhausted(&retired, 1).unwrap();
+    }
+
+    #[test]
+    fn health_reports_queue_protection_and_cleanup_changes_after_reopen() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let before = store.health("cluster", 100, 50, 10, 10).unwrap();
+        assert_eq!((before.jobs_sampled, before.events_sampled), (1, 1));
+        assert_eq!(
+            (before.pending, before.due, before.delivered, before.failed),
+            (1, 1, 1, 3)
+        );
+        assert_eq!(
+            (before.cleanup_eligible, before.completion_unproven),
+            (2, 2)
+        );
+        assert!(!before.destinations_truncated);
+        assert_eq!(
+            store
+                .health("cluster", 70, 50, 10, 10)
+                .unwrap()
+                .cleanup_eligible,
+            0
+        );
+        assert_eq!(store.health("cluster", 0, 50, 10, 10).unwrap().due, 0);
+        let plan = store.retention_plan("cluster", 100, 50, 10).unwrap();
+        store
+            .apply_retention("cluster", 100, 50, 10, &plan)
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let after = store.health("cluster", 100, 50, 10, 10).unwrap();
+        assert_eq!(
+            (
+                after.destinations_sampled,
+                after.cleanup_eligible,
+                after.completion_unproven
+            ),
+            (3, 0, 2)
+        );
+        assert_eq!(
+            (after.jobs_sampled, after.events_sampled, after.pending),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            store
+                .health("other", 100, 50, 10, 10)
+                .unwrap()
+                .destinations_sampled,
+            0
+        );
+        let display = format!("{after:?}");
+        for private in ["cluster", "alice", "internal-v1:", "unsent", "actual"] {
+            assert!(!display.contains(private));
+        }
+    }
+
+    #[test]
+    fn health_samples_are_explicitly_truncated_and_capacity_pressure_is_detected() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let sample = store.health("cluster", 100, 50, 1, 1).unwrap();
+        assert_eq!(sample.destinations_sampled, 1);
+        assert!(sample.destinations_truncated);
+        assert!(!sample.jobs_over_capacity && !sample.events_over_capacity);
+        store.db.execute_batch("INSERT INTO jobs VALUES ('cluster','2','s','actual','RUNNING',10); INSERT INTO events SELECT 'fixture-extra',cluster,job_id,submitted_at,started_at,'RUNNING',10 FROM jobs WHERE job_id='2';").unwrap();
+        let sample = store.health("cluster", 100, 50, 1, 5).unwrap();
+        assert!(sample.jobs_over_capacity && sample.events_over_capacity);
+        assert_eq!((sample.jobs_sampled, sample.events_sampled), (2, 2));
+        assert!(!sample.destinations_truncated);
+        assert!(matches!(
+            store.restore("cluster", 1),
+            Err(StorageError::Conflict)
+        ));
+    }
+
+    #[test]
+    fn health_errors_are_sanitized_and_invalid_limits_reject_before_reading() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        for (cluster, now, age, capacity, limit) in [
+            ("", 1, 1, 1, 1),
+            ("cluster", -1, 1, 1, 1),
+            ("cluster", 1, 0, 1, 1),
+            ("cluster", 1, 1, 0, 1),
+            ("cluster", 1, 1, 1, 0),
+            ("cluster", 1, 1, usize::MAX, 1),
+            ("cluster", 1, 1, 1, usize::MAX),
+        ] {
+            assert_eq!(
+                store.health(cluster, now, age, capacity, limit),
+                Err(HealthError::InvalidInput)
+            );
+        }
+        store
+            .db
+            .execute_batch("DROP TABLE delivery_attempts;")
+            .unwrap();
+        assert_eq!(
+            store.health("cluster", 100, 50, 10, 10),
+            Err(HealthError::Database)
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                store.health("cluster", 100, 50, 10, 10).unwrap_err()
+            ),
+            "Database"
+        );
     }
 
     #[test]

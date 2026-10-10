@@ -168,3 +168,8 @@ outbox destinations. Planning deletes nothing; private transactional application
 completed outbox destinations and their attempt history. Event/job history and pending or
 uncertain deliveries remain protected. Ledger growth still needs a retention
 horizon and tombstone design before terminal snapshots can be safely removed.
+
+Private storage health tests report sampled queue counts, cleanup eligibility,
+uncertain completion records, and restoration capacity pressure. Truncation is
+explicit; reports contain no job, user, destination, or event identifiers. These
+reports are not yet exposed through a `status` or `doctor` command.
