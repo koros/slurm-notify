@@ -53,3 +53,4 @@ the design handoff; no release has been published.
 - Private partial delivery failure reports with committed outcome counts, static failure/dispatch categories, and unrecorded-send uncertainty, retained by orchestration and verified in blocked-helper acceptance.
 - Mixed-outcome partial-progress tests matching retries, terminal rejection, and budget retirement to reopened durable state after a later commit failure; retirement rollback/recovery and sanitized error assertions.
 - Private delivery cancellation before storage reads and between destinations, retaining committed progress and pending attempts, with mid-send completion and retry-deadline restart tests.
+- Controlled delivery cancellation wired into private orchestration, with explicit cancelled stage/partial progress and owned supervised HTTP acceptance for mid-batch cancellation and restart recovery.

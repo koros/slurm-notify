@@ -217,4 +217,5 @@ outcomes remain excluded, and failed retirement can recover without sending.
 
 The private controlled delivery worker supports cancellation before a batch and
 between destinations. An active provider call completes its durable bookkeeping
-before cancellation stops later sends. Orchestration wiring remains a next step.
+before cancellation stops later sends. Orchestration now passes the cancellation
+signal through, with owned supervised HTTP restart acceptance coverage.

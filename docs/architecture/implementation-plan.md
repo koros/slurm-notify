@@ -1058,3 +1058,31 @@ Next: wire controlled delivery cancellation into private orchestration and proce
 acceptance, verifying mid-batch cancellation after a real supervised HTTP response.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: orchestrated mid-batch cancellation acceptance
+
+Private orchestration now passes its cancellation callback into the controlled
+worker. A cancelled batch marks the tick cancelled, preserves its detailed
+committed progress, returns the distinct cancelled delivery category, and skips
+cleanup/reporting. In-flight provider completion bookkeeping still finishes before
+checking the next destination. All existing infallible and fallible tick callers
+use this implementation; their cancellation callbacks now run between destinations
+as well as between stages and must be safe for repeated calls.
+
+The new owned process scenario raises cancellation after an actual supervised
+HTTP acknowledgment for the first of three destinations. Its outcome is committed,
+the report retains one delivered count without uncertain bookkeeping, and no later
+send or maintenance stage runs. Reopening owned storage preserves the remaining
+two destinations at attempt one. Successful real child delivery recovers both
+with the same event ID without resending the first; cleanup and health reporting
+resume and deduplication remains restorable. Existing post-batch cancellation
+acceptance still verifies cancellation after the complete batch.
+
+The full suite passes: 134 Rust tests plus one ignored helper, fifteen custom
+process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+migration, public contract, default, or normal executable behavior changed.
+
+Next: private orchestration preflight/recovery when the restored ledger exceeds
+capacity, making pressure visible without discarding deduplication history or
+sending from an inconsistent state. Terminal compaction, public contract review,
+SMTP, licensing, cluster validation, and activation remain pending.

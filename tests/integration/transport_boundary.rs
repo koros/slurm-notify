@@ -144,8 +144,9 @@ fn acceptance() {
     orchestrated_cleanup_failure_and_post_delivery_cancellation();
     orchestrated_timeout_retry_recovery();
     orchestrated_blocked_dispatch_restart();
+    orchestrated_mid_batch_cancellation_restart();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -574,7 +575,7 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
             clock: || Some(7200),
             cancelled: || {
                 checks += 1;
-                checks == 3
+                checks == 6
             },
         },
     );
@@ -882,6 +883,154 @@ fn orchestrated_blocked_dispatch_restart() {
         StageError::DispatchBlocked
     );
     assert!(blocked.cleanup.is_none() && blocked.health.is_none());
+    let first_request = server.join().unwrap();
+    let pending = store.due_deliveries("cluster", 7200, 10).unwrap();
+    assert_eq!(
+        pending
+            .iter()
+            .map(|item| item.destination.as_str())
+            .collect::<Vec<_>>(),
+        vec!["b", "c"]
+    );
+    let id = pending[0].event_id.clone();
+    assert!(first_request.contains(&id));
+    assert!(pending.iter().all(|item| item.attempt_number == 1));
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let (b_endpoint, b_server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let (c_endpoint, c_server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let recovered = Cycles::new(1).unwrap().tick_fallible(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                assert_eq!(item.event_id, id);
+                assert_eq!(item.attempt_number, 1);
+                let endpoint = match item.destination.as_str() {
+                    "b" => &b_endpoint,
+                    "c" => &c_endpoint,
+                    _ => panic!("completed destination replayed"),
+                };
+                supervised_provider::classify(request_for(
+                    endpoint,
+                    &item.event_id,
+                    "--child",
+                    Duration::from_secs(3),
+                ))
+                .into_dispatch()
+            },
+            clock: || Some(7300),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 2);
+    assert_eq!(recovered.cleanup.unwrap().unwrap(), 1);
+    assert!(recovered.health.unwrap().is_ok());
+    assert_eq!(
+        id_header(&first_request),
+        id_header(&b_server.join().unwrap())
+    );
+    assert_eq!(
+        id_header(&first_request),
+        id_header(&c_server.join().unwrap())
+    );
+    assert!(store
+        .due_deliveries("cluster", 7300, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_mid_batch_cancellation_restart() {
+    use polling_cycle::{Cycles, Hooks, Maintenance, Settings, StageError};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = Settings {
+        active_program: std::path::Path::new("/fixture/squeue"),
+        accounting_program: std::path::Path::new("/fixture/sacct"),
+        cluster: "cluster",
+        user: "alice",
+        timeout: Duration::from_secs(1),
+        output_limit: 4096,
+        emit_discovered: true,
+        capacity: 10,
+        destinations: &["a", "b", "c"],
+        window: accounting_window::Policy {
+            lookback_seconds: 3600,
+            overlap_seconds: 300,
+        },
+    };
+    let maintenance = Maintenance {
+        delivery_limit: 10,
+        retry: retry_policy(),
+        retain_seconds: 50,
+        cleanup_limit: 10,
+        stale_after: 60,
+        health_sample_limit: 10,
+    };
+    let fixture = |command: &mut Command, _, _| {
+        Ok(if command.get_program() == "/fixture/squeue" {
+            String::new()
+        } else {
+            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+        })
+    };
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let mut cycles = Cycles::new(1).unwrap();
+    let cancellation = std::cell::Cell::new(false);
+    let mut calls = 0;
+    let mut clocks = 0;
+    let cancelled = cycles.tick_fallible(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                calls += 1;
+                assert_eq!(item.destination, "a");
+                let classified = supervised_provider::classify(request_for(
+                    &endpoint,
+                    &item.event_id,
+                    "--child",
+                    Duration::from_secs(3),
+                ))
+                .into_dispatch();
+                cancellation.set(true);
+                classified
+            },
+            clock: || {
+                clocks += 1;
+                Some(7200)
+            },
+            cancelled: || cancellation.get(),
+        },
+    );
+    assert_eq!((calls, clocks), (1, 3));
+    assert!(cancelled.cancelled);
+    let failure = cancelled.delivery_failure.as_ref().unwrap();
+    assert_eq!(failure.committed.delivered, 1);
+    assert_eq!(failure.kind, delivery::FailureKind::Cancelled);
+    assert_eq!(failure.diagnostic, None);
+    assert!(!failure.acceptance_uncertain);
+    assert_eq!(
+        cancelled.delivery.unwrap().unwrap_err(),
+        StageError::Cancelled
+    );
+    assert!(cancelled.cleanup.is_none() && cancelled.health.is_none());
     let first_request = server.join().unwrap();
     let pending = store.due_deliveries("cluster", 7200, 10).unwrap();
     assert_eq!(

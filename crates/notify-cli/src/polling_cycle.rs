@@ -226,7 +226,7 @@ impl Cycles {
         C: FnMut() -> Option<i64>,
         X: FnMut() -> bool,
     {
-        use super::delivery::{deliver_due_detailed, FailureKind};
+        use super::delivery::{deliver_due_controlled, DeliveryHooks, FailureKind};
         let mut report = TickReport::default();
         if (hooks.cancelled)() {
             report.cancelled = true;
@@ -280,19 +280,25 @@ impl Cycles {
             report.delivery = Some(Err(StageError::Time));
             return report;
         };
-        let delivery = deliver_due_detailed(
+        let delivery = deliver_due_controlled(
             store,
             settings.cluster,
             delivery_now,
             maintenance.delivery_limit,
             maintenance.retry,
-            &mut hooks.send,
-            &mut clock,
+            DeliveryHooks {
+                send: &mut hooks.send,
+                clock: &mut clock,
+                cancelled: &mut hooks.cancelled,
+            },
         );
         let stop = delivery.is_err();
         report.delivery = Some(match delivery {
             Ok(batch) => Ok(batch),
             Err(failure) => {
+                if failure.kind == FailureKind::Cancelled {
+                    report.cancelled = true;
+                }
                 let error = match failure.kind {
                     FailureKind::Cancelled => StageError::Cancelled,
                     FailureKind::Storage => StageError::Storage,
