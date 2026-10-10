@@ -252,3 +252,8 @@ The [SMTP dependency assessment](docs/adr/0007-smtp-dependency-assessment.md)
 defers lettre’s transport: inspected versions conflict with the compiler pin or
 check reply lengths after line allocation. The next private experiment verifies
 implicit TLS using the existing test dependency and bounded reply reader.
+
+Private implicit-TLS fixtures now verify trusted greeting/multiline EHLO and
+certificate rejection before SMTP commands, with invalid greeting/EHLO checks.
+They use in-memory certificates and bounded socket waits; AUTH, submission,
+STARTTLS, and an absolute supervised SMTP deadline remain unimplemented.

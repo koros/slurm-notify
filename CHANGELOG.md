@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private implicit-TLS greeting/EHLO experiment with trusted, unknown-issuer, wrong-hostname, expired-certificate, and invalid-reply loopback fixtures; no SMTP submission or authentication.
+
 - Source-based SMTP dependency assessment deferring lettre transport for compiler and reply-allocation constraints, with a private TLS boundary experiment planned.
 
 - Initial folder scaffold and project README.

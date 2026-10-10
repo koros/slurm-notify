@@ -1296,3 +1296,32 @@ Next: private implicit-TLS greeting/EHLO fixtures with the existing rustls test
 dependency and bounded reply reader, verifying trust, hostname, and expiry failures
 before authentication or envelope submission. STARTTLS, supervised deadlines,
 message construction, public contracts, licensing, and activation remain pending.
+
+## Subsequent increment: private implicit-TLS greeting boundary
+
+A test-only rustls exchange explicitly finishes certificate-verified TLS before
+reading the bounded greeting or writing EHLO. It accepts only greeting 220 and
+EHLO 250, uses the existing bounded multiline reply reader, and returns static
+TLS, I/O, or reply errors without server text. It contains no AUTH or submission
+path. Fixture trust roots and ephemeral certificate keys remain in test code.
+
+Three tests verify trusted multiline EHLO, unknown issuer/wrong hostname/expiry
+rejection with zero observed SMTP command bytes, invalid greetings with no EHLO,
+and inconsistent EHLO replies with no subsequent commands. The fixture observes
+bounded command bytes and reports only counts and an exact synthetic EHLO match.
+Accept waits, connect, handshake I/O, and socket reads/writes have finite timeouts.
+Accepted sockets explicitly use blocking mode for cross-platform behavior.
+Socket inactivity timeouts do not establish an absolute drip-fed peer deadline;
+that remains a supervised-process acceptance requirement. TLS errors currently
+combine certificate and handshake I/O failures; future worker classification must
+distinguish policy blocks from transient network failure before integration.
+
+No dependencies, runtime defaults, persistence, or public interfaces changed.
+The full suite passes: 152 Rust tests plus one ignored helper, sixteen custom
+process scenarios, eight SQLite tests, and six hook tests.
+
+Next: private required-STARTTLS negotiation fixtures proving missing/refused
+upgrade stops before credentials/envelope, successful verified upgrade obtains a
+fresh EHLO, and certificate failures stop after upgrade. AUTH, message construction,
+supervised absolute deadlines, restart integration, public review, licensing,
+cluster validation, and activation remain pending.
