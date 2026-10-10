@@ -291,3 +291,22 @@ not restoration of the live reconciler or real process-crash recovery.
 Next: connect candidate reconciliation state and stable event IDs to transaction
 commit, restore deduplication after reopen, and test failed commits/restart across
 the mock pipeline. Secure production paths and delivery operations remain pending.
+
+## Contributor hooks and shared validation
+
+Added dependency-free, version-controlled pre-commit/pre-push hooks and an
+installer that sets repository-local core.hooksPath while preserving existing
+custom hook configuration. Pre-commit validates index blobs and checks a temporary
+export of the staged content; pre-push runs the shared suite in the working tree.
+CI independently invokes tracked-file checks and the same validation script.
+
+Guardrails cover common credential patterns, credential filenames, merge markers,
+trailing whitespace, and unsupported symlinks/submodules in staged snapshots.
+Six isolated Git-repository tests cover staged-vs-working-tree content, redacted
+failure output, markdown hard breaks, disallowed files, and symlink rejection.
+They clear inherited Git environment variables to avoid using the parent index.
+
+Local validation: 38 Rust tests, eight SQLite tests, and six hook tests pass,
+alongside formatting, strict Clippy, build, and executable smoke checks. Local
+hooks are installed in this checkout. Each clone requires its own install step;
+GitHub branch protection/required reviews remain separate repository settings.

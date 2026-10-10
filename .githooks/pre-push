@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+python3 scripts/check-staged.py --all
+printf 'Running checks before push...\n'
+sh scripts/check.sh

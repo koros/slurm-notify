@@ -15,22 +15,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install pinned development toolchain
         run: rustup toolchain install 1.74.0 --profile minimal --component rustfmt --component clippy
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Lint
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test
-        run: cargo test --workspace --locked
-      - name: Test SQLite schema experiment
-        run: python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
-      - name: Build
-        run: cargo build --workspace --locked
-      - name: Verify development placeholder
-        shell: bash
-        run: |
-          set +e
-          output=$(./target/debug/slurm-notify 2>&1)
-          status=$?
-          set -e
-          test "$status" -eq 1
-          test "$output" = "Slurm Notify is under development; monitoring is not implemented."
+      - name: Check tracked files
+        run: python3 scripts/check-staged.py --all
+      - name: Run shared checks
+        run: sh scripts/check.sh

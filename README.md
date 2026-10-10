@@ -88,6 +88,10 @@ schema. Neither prototype is connected to the executable.
 The proposed CLI commands are not implemented. See [contributor guidance](CONTRIBUTING.md)
 and the [implementation plan](docs/architecture/implementation-plan.md).
 
+Install local pre-commit/pre-push checks with `sh scripts/install-hooks.sh`.
+Run the shared verification suite with `sh scripts/check.sh`. See
+[contributor guidance](CONTRIBUTING.md#local-git-hooks) for how staged checks work.
+
 ## Implementation milestones
 
 1. **Repository foundation:** approve the Phase 0 plan, record architecture

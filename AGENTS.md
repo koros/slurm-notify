@@ -18,3 +18,7 @@ working notifications until the relevant acceptance criteria have been verified.
 - Validate cluster policy before real-cluster monitoring or tests.
 - Do not publish releases without explicit authorization. Licensing, support
   baselines, and unresolved design decisions must remain explicit.
+
+Local hooks live under `.githooks`; install with `sh scripts/install-hooks.sh`.
+Run `sh scripts/check.sh` for the full shared local/CI suite. Pre-commit checks the
+staged snapshot. Do not bypass failing hooks; fix the staged content and rerun.

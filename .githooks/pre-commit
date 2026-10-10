@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+# Export the index rather than checking an unstaged working-tree variant.
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/slurm-notify-index.XXXXXX")
+trap 'rm -rf "$snapshot"' EXIT HUP INT TERM
+git checkout-index --all --prefix="$snapshot/"
+python3 "$snapshot/scripts/check-staged.py"
+export CARGO_TARGET_DIR="$root/target/hooks"
+cd "$snapshot"
+printf 'Running checks against staged content...\n'
+sh scripts/check.sh
