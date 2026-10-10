@@ -416,3 +416,20 @@ cleanup behavior rather than assuming Unix guarantees elsewhere.
 The worker also needs actual completion time for attempts and HTTP-date scheduling.
 Public payload/configuration review, secure credential/state handling, and runtime
 activation remain pending. The executable still cannot monitor or notify.
+
+## Current increment: private transport-supervision boundary
+
+Added a test-only Linux/macOS child supervisor with bounded concurrent stdin/stdout,
+cleared environment, discarded stderr, total monotonic deadline, process-group
+cleanup, and strict successful-exit acknowledgment parsing. Framing checks total
+size before allocation. Six supervisor tests and one worker/reopen test bring the
+suite to 76 passing Rust tests, eight SQLite tests, and six hook tests. Formatting,
+strict Clippy, locked build, and executable smoke checks pass. No dependencies,
+public contracts, or product defaults changed. ADR 0004 records cleanup limits.
+
+The actual HTTP adapter remains in-process. Next: connect it to a trusted private
+child entry point with bounded frame decoding, test blocked DNS and real HTTP
+results across the process boundary, and use attempt completion timestamps for
+retry scheduling. Avoid presenting the supervisor fixture as working notifications
+or a completed production deadline guarantee. Runtime activation and public
+payload/configuration decisions remain pending.

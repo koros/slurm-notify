@@ -31,7 +31,7 @@ fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, QueryError> 
 
 // Linux/macOS C ABI for kill(2). Keep the unsafe boundary small and private.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn kill_group(pid: u32) -> io::Result<()> {
+pub(super) fn kill_group(pid: u32) -> io::Result<()> {
     extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }

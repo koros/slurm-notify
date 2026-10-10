@@ -392,6 +392,45 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn transport_timeout_remains_pending_across_reopen_and_reuses_id() {
+        use crate::transport::{supervise, Error};
+        use std::process::Command;
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let mut id = String::new();
+        let report = deliver_due(&mut store, "cluster", 10, 10, policy(), |item| {
+            id = item.event_id.clone();
+            let mut child = Command::new("python3");
+            child.args(["-c", "import time; time.sleep(30)"]);
+            assert_eq!(
+                supervise(&mut child, vec![], Duration::from_millis(100), 16, 32),
+                Err(Error::Timeout)
+            );
+            ProviderOutcome::Retry // Timeout is uncertain acceptance, never delivery.
+        })
+        .unwrap();
+        assert_eq!(report.retrying, 1);
+        drop(store);
+        let mut store = open(&directory);
+        assert!(store.due_deliveries("cluster", 14, 10).unwrap().is_empty());
+        assert_eq!(
+            deliver_due(&mut store, "cluster", 15, 10, policy(), |item| {
+                assert_eq!(item.event_id, id);
+                let mut child = Command::new("python3");
+                child.args([
+                    "-c",
+                    "import sys; sys.stdin.buffer.read(); sys.stdout.write('OK\\n')",
+                ]);
+                supervise(&mut child, vec![], Duration::from_secs(2), 16, 32).unwrap()
+            })
+            .unwrap()
+            .delivered,
+            1
+        );
+    }
+
+    #[test]
     fn webhook_rate_limit_is_committed_and_acknowledgment_stops_retries() {
         use crate::webhook::{tests::server, Webhook};
         let directory = Directory::new();
