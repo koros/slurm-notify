@@ -1086,3 +1086,31 @@ Next: private orchestration preflight/recovery when the restored ledger exceeds
 capacity, making pressure visible without discarding deduplication history or
 sending from an inconsistent state. Terminal compaction, public contract review,
 SMTP, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: restored-ledger capacity preflight
+
+After static/time validation, orchestration reads the existing bounded storage
+health snapshot before any scheduler query or send. Job or event history above
+the caller's restoration capacity rejects preflight with a distinct capacity
+category and sanitized pressure snapshot. Poll, delivery, cleanup, and normal
+health stages remain unrun; budget, failure streak, checkpoints, and pending
+outbox rows remain unchanged. Storage-health failure also rejects preflight with
+a static storage category. The probe introduces no mutation or automatic growth
+of configured limits.
+
+Tests seed valid durable lifecycle events, reopen the store with a smaller limit,
+and verify no callbacks or history deletion. An explicitly larger caller limit
+allows restoration and delivery at the original attempt numbers. Another test
+covers one job with multiple event states: event-ledger pressure is reported even
+when the job count fits. Exact capacity is accepted. Capacity growth caused by a
+new poll still uses existing atomic reconciliation/commit checks. Limits do not
+bound SQLite wall time; serialized state ownership remains required.
+
+The full shared suite passes: 136 Rust tests plus one ignored helper, fifteen
+custom process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+migration, public contract, runtime default, or executable behavior changed.
+
+Next: private preflight checkpoint validation before maintenance when polling is
+exhausted, preventing delivery under a regressed/invalid accounting clock while
+preserving pending rows. Terminal compaction, public contract review, SMTP,
+licensing, cluster validation, and activation remain pending.

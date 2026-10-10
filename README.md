@@ -219,3 +219,7 @@ The private controlled delivery worker supports cancellation before a batch and
 between destinations. An active provider call completes its durable bookkeeping
 before cancellation stops later sends. Orchestration now passes the cancellation
 signal through, with owned supervised HTTP restart acceptance coverage.
+
+Private orchestration now checks stored job/event capacity before polling or
+sending. Over-capacity state produces a sanitized pressure report and preserves
+history and pending deliveries; recovery requires an explicit caller limit change.

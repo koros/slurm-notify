@@ -89,8 +89,8 @@ pub(super) struct RetentionCandidate {
 pub(super) struct StorageHealth {
     jobs_sampled: usize,
     events_sampled: usize,
-    jobs_over_capacity: bool,
-    events_over_capacity: bool,
+    pub(super) jobs_over_capacity: bool,
+    pub(super) events_over_capacity: bool,
     destinations_sampled: usize,
     destinations_truncated: bool,
     pending: usize,

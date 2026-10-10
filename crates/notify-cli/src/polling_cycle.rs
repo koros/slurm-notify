@@ -108,6 +108,7 @@ pub(super) struct Hooks<Q, S, C, X> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StageError {
+    Capacity,
     Cancelled,
     Poll,
     Storage,
@@ -120,6 +121,7 @@ pub(super) enum StageError {
 pub(super) struct TickReport {
     pub(super) cancelled: bool,
     pub(super) delivery_failure: Option<super::delivery::BatchFailure>,
+    pub(super) capacity_pressure: Option<super::storage::StorageHealth>,
     pub(super) preflight: Option<Result<(), StageError>>,
     pub(super) poll: Option<Result<Outcome, StageError>>,
     pub(super) delivery: Option<Result<super::delivery::BatchReport, StageError>>,
@@ -246,6 +248,24 @@ impl Cycles {
         }
         if !maintenance.retry.valid_at(now) {
             report.preflight = Some(Err(StageError::Policy));
+            return report;
+        }
+        let storage_health = match store.health(
+            settings.cluster,
+            now,
+            maintenance.retain_seconds,
+            settings.capacity,
+            maintenance.health_sample_limit,
+        ) {
+            Ok(health) => health,
+            Err(_) => {
+                report.preflight = Some(Err(StageError::Storage));
+                return report;
+            }
+        };
+        if storage_health.jobs_over_capacity || storage_health.events_over_capacity {
+            report.preflight = Some(Err(StageError::Capacity));
+            report.capacity_pressure = Some(storage_health);
             return report;
         }
         report.preflight = Some(Ok(()));
@@ -541,6 +561,103 @@ mod tests {
             stale_after: 60,
             health_sample_limit: 10,
         }
+    }
+
+    #[test]
+    fn capacity_preflight_preserves_pending_history_and_recovers_with_explicit_limit() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        cycles
+            .step(&settings(), &mut store, false, 7200, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0\ncluster|2|alice|s|actual|FAILED|1:0"
+                        .into()
+                })
+            })
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        let mut smaller = settings();
+        smaller.capacity = 1;
+        let report = cycles.tick(
+            &smaller,
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("pressure query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("pressure send"),
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Err(StageError::Capacity));
+        let pressure = report.capacity_pressure.unwrap();
+        assert!(pressure.jobs_over_capacity && pressure.events_over_capacity);
+        assert!(report.poll.is_none() && report.delivery.is_none() && report.cleanup.is_none());
+        assert_eq!(cycles.remaining, 1);
+        assert_eq!(cycles.health.consecutive_failures, 0);
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("1970-01-01T02:00:00")
+        );
+        assert_eq!(store.due_deliveries("cluster", 7300, 10).unwrap().len(), 2);
+        smaller.capacity = 2;
+        let recovered = cycles.tick(
+            &smaller,
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Ok(String::new()),
+                send: |item: &super::super::storage::DueDelivery| {
+                    assert_eq!(item.attempt_number, 1);
+                    super::super::delivery::ProviderOutcome::Delivered
+                },
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(recovered.preflight.unwrap(), Ok(()));
+        assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 2);
+        assert_eq!(store.restore("cluster", 2).unwrap().0.emitted.len(), 2);
+    }
+
+    #[test]
+    fn event_history_pressure_is_visible_even_when_job_count_fits() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(3).unwrap();
+        for (state, now) in [("RUNNING", 7200), ("COMPLETED", 7260)] {
+            cycles
+                .step(&settings(), &mut store, false, now, |command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        String::new()
+                    } else {
+                        format!("cluster|1|alice|s|actual|{state}|0:0")
+                    })
+                })
+                .unwrap();
+        }
+        let mut smaller = settings();
+        smaller.capacity = 1;
+        let blocked = cycles.tick(
+            &smaller,
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("ledger pressure query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("ledger pressure send"),
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        let pressure = blocked.capacity_pressure.unwrap();
+        assert!(!pressure.jobs_over_capacity && pressure.events_over_capacity);
+        assert_eq!(blocked.preflight.unwrap(), Err(StageError::Capacity));
+        assert_eq!(store.restore("cluster", 2).unwrap().0.emitted.len(), 2);
+        assert_eq!(cycles.remaining, 1);
     }
 
     #[test]
