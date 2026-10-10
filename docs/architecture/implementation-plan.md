@@ -334,3 +334,25 @@ Next: committed outbox reads, atomic delivery outcomes/retry state, and mock pro
 integration. Production runtime activation also requires secure database creation,
 public interface decisions, a current dependency/security assessment, and explicit
 operational defaults. The executable still reports unavailable monitoring.
+
+## Current increment: committed outbox and mock provider delivery
+
+Added bounded due-record reads and atomic delivery attempt/outbox updates. A private
+worker executes injected providers outside transactions, isolates destination
+rejections, schedules capped retries with caller-specified limits, and retires
+exhausted delivery records. Stale results and transaction failures do not partially
+update the outbox. No schema migration, dependency, or public contract changed.
+
+Eight tests verify timed retry/reopen, stable event identity, destination isolation,
+attempt/batch bounds, lowered budgets, atomic failed-result recovery, stale attempts,
+and invalid/overflowing policy. One test explicitly permits replay after provider
+acceptance followed by failed local commit; at-least-once semantics remain intentional.
+
+Validation: 54 Rust tests, eight SQLite tests, and six hook tests pass, with formatting,
+strict Clippy, build, and executable smoke checks. No real delivery has occurred.
+
+Next: define the first private webhook adapter boundary, request/response classification,
+timeouts, bounded responses, redacted diagnostics, and Retry-After handling with
+local mock HTTP tests. Public event payload/config semantics require explicit
+review before exposure. Runtime activation, current dependency assessment, secure
+state creation, and real-cluster validation remain pending.

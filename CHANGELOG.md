@@ -24,3 +24,5 @@ the design handoff; no release has been published.
 - Version-controlled pre-commit/pre-push hooks, isolated staged verification, staged-file guardrails with six tests, and a shared local/CI check script.
 - Connected mock polling to atomic SQLite commits and bounded reconciliation restoration, with stable internal event IDs and restart/rollback tests.
 - Prevented durable checkpoint regression and removed obsolete pending identities during actual-attempt promotion.
+- Bounded committed-outbox reads and atomic delivery outcomes with stale-attempt protection.
+- Mock provider worker with explicit capped backoff, retry budgets, per-destination isolation, and delivery restart/rollback tests.

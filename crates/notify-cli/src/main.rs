@@ -1,6 +1,8 @@
 //! Repository foundation executable; monitoring is not implemented.
 
 #[cfg(test)]
+mod delivery;
+#[cfg(test)]
 mod lifecycle;
 #[cfg(test)]
 mod scheduler;

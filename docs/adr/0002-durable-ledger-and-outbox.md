@@ -142,3 +142,39 @@ real cluster semantics, multi-writer coordination, or external provider delivery
 Secure production database creation, hard peak-memory/retention policies, schema
 upgrade compatibility, delivery outcome operations, runtime activation, and a
 production-ready SQLite dependency/toolchain assessment remain pending.
+
+## Committed outbox and mock delivery worker
+
+The private worker reads a caller-limited batch of due pending records for one
+cluster in deterministic due/event/destination order. It validates event identity
+and reconstructs the minimal lifecycle record without reading Slurm or logs.
+Only committed rows are visible. Provider callbacks execute outside storage
+transactions; a separate connection can acquire a write transaction during a send.
+
+A result commits the attempt number/outcome and the outbox status/schedule in one
+transaction. A stale attempt fails visibly without adding a second attempt or
+changing status. Success and terminal rejection stop delivery to that destination;
+transient failures retry until the caller-specified budget is exhausted. Reducing
+the budget retires already-exhausted pending records without fabricating a send.
+Provider rejection is isolated, but a storage failure stops the batch so accepted
+and unrecorded sends cannot be silently treated as complete. Prior successful
+commits within that batch remain committed.
+
+The test-only retry policy requires explicit maximum attempts, positive initial
+delay, and a maximum backoff. Exponential delay is capped and integer-overflow
+checked before sending. There are no product defaults, jitter, Retry-After,
+transport timeouts, payload formatting, or real provider configuration yet.
+Observed/attempt times are injected Unix seconds. A production worker must use
+actual attempt completion time and handle provider rate-limit instructions.
+
+One delivery owner is required. Due reads are not claims or leases and do not
+prevent two workers sending the same row concurrently. External acceptance before
+a failed local result commit can cause replay with the same stable event ID;
+provider acknowledgement does not imply human receipt. Tests exercise this
+at-least-once limitation explicitly. No exactly-once guarantee is made.
+
+Eight added tests cover delivery/reopen, timed retries, provider isolation, batch
+bounds/retry exhaustion, reduced budgets, failed outcome transactions, stale
+attempts, and invalid/overflowing policy. There are now 54 passing Rust tests.
+The worker remains test-only; no network requests, email, or actual notifications
+are performed. Secure runtime activation and real provider integration remain pending.

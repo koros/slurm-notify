@@ -51,6 +51,21 @@ fn event_id(event: &super::lifecycle::Event) -> String {
     id
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct DueDelivery {
+    pub(super) event_id: String,
+    pub(super) destination: String,
+    pub(super) event: super::lifecycle::Event,
+    pub(super) attempt_number: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeliveryOutcome {
+    Success,
+    TransientFailure,
+    TerminalFailure,
+}
+
 pub(super) struct Store {
     db: Connection,
 }
@@ -77,6 +92,153 @@ impl Store {
             _ => return Err(StorageError::UnsupportedVersion),
         }
         Ok(Self { db })
+    }
+
+    pub(super) fn due_deliveries(
+        &self,
+        cluster: &str,
+        now: i64,
+        limit: usize,
+    ) -> Result<Vec<DueDelivery>, StorageError> {
+        use super::lifecycle::{Event as LifecycleEvent, Identity, State};
+        if cluster.is_empty() || now < 0 || limit == 0 {
+            return Err(StorageError::InvalidInput);
+        }
+        let limit = i64::try_from(limit).map_err(|_| StorageError::InvalidInput)?;
+        let mut statement = self.db.prepare("SELECT o.event_id,o.destination,e.job_id,e.submitted_at,
+            e.started_at,e.event_type,COALESCE((SELECT MAX(a.attempt_number) FROM delivery_attempts a
+                WHERE a.event_id=o.event_id AND a.destination=o.destination),0)+1
+            FROM outbox o JOIN events e ON e.event_id=o.event_id
+            WHERE e.cluster=?1 AND o.status='pending' AND o.next_attempt_at<=?2
+            ORDER BY o.next_attempt_at,o.event_id,o.destination LIMIT ?3")?;
+        let rows = statement.query_map(params![cluster, now, limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?;
+        let mut deliveries = Vec::new();
+        for row in rows {
+            let (id, destination, job, submit, start, code, attempt_number) = row?;
+            let event = LifecycleEvent {
+                identity: Identity {
+                    cluster: cluster.into(),
+                    job,
+                    submit,
+                    start,
+                },
+                state: State::parse(&code),
+            };
+            if event_id(&event) != id
+                || event.state.code() != code
+                || (!event.state.terminal() && event.state != State::Running)
+                || attempt_number <= 0
+            {
+                return Err(StorageError::Conflict);
+            }
+            deliveries.push(DueDelivery {
+                event_id: id,
+                destination,
+                event,
+                attempt_number,
+            });
+        }
+        Ok(deliveries)
+    }
+
+    pub(super) fn record_delivery(
+        &mut self,
+        item: &DueDelivery,
+        outcome: DeliveryOutcome,
+        attempted_at: i64,
+        retry_at: Option<i64>,
+    ) -> Result<(), StorageError> {
+        if attempted_at < 0
+            || item.attempt_number <= 0
+            || retry_at.map(|time| time <= attempted_at).unwrap_or(false)
+            || (outcome != DeliveryOutcome::TransientFailure && retry_at.is_some())
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let pending: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT next_attempt_at,
+            COALESCE((SELECT MAX(attempt_number) FROM delivery_attempts
+                WHERE event_id=?1 AND destination=?2),0)+1
+            FROM outbox WHERE event_id=?1 AND destination=?2 AND status='pending'",
+                params![item.event_id, item.destination],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if !matches!(pending,Some((due,attempt)) if due<=attempted_at && attempt==item.attempt_number)
+        {
+            return Err(StorageError::Conflict);
+        }
+        let code = match outcome {
+            DeliveryOutcome::Success => "success",
+            DeliveryOutcome::TransientFailure => "transient_failure",
+            DeliveryOutcome::TerminalFailure => "terminal_failure",
+        };
+        tx.execute(
+            "INSERT INTO delivery_attempts VALUES (?1,?2,?3,?4,?5)",
+            params![
+                item.event_id,
+                item.destination,
+                item.attempt_number,
+                attempted_at,
+                code
+            ],
+        )?;
+        let status = match (outcome, retry_at) {
+            (DeliveryOutcome::Success, _) => "delivered",
+            (DeliveryOutcome::TransientFailure, Some(_)) => "pending",
+            _ => "failed",
+        };
+        tx.execute(
+            "UPDATE outbox SET status=?1,next_attempt_at=?2 WHERE event_id=?3 AND destination=?4",
+            params![
+                status,
+                retry_at.unwrap_or(attempted_at),
+                item.event_id,
+                item.destination
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    // A lowered retry budget can retire already exhausted rows without inventing
+    // an attempt that was never sent. One delivery owner remains required.
+    pub(super) fn retire_exhausted(
+        &mut self,
+        item: &DueDelivery,
+        max_attempts: u32,
+    ) -> Result<(), StorageError> {
+        if max_attempts == 0 || item.attempt_number <= i64::from(max_attempts) {
+            return Err(StorageError::InvalidInput);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE outbox SET status='failed' WHERE event_id=?1 AND destination=?2
+            AND status='pending' AND (SELECT COALESCE(MAX(attempt_number),0) FROM delivery_attempts
+                WHERE event_id=?1 AND destination=?2)=?3",
+            params![item.event_id, item.destination, item.attempt_number - 1],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::Conflict);
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub(super) fn persist_reconciler(

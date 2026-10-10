@@ -81,9 +81,9 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Forty-six Rust
+The executable prints its development status and exits with code 1. Fifty-four Rust
 tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
-and SQLite commit/reopen recovery. One subprocess helper is intentionally ignored
+SQLite commit/reopen recovery, and a mock-provider outbox worker. One subprocess helper is intentionally ignored
 in the main suite and invoked by runner tests. Eight Python/SQLite schema tests and
 six Git-hook tests run separately. The integrated pipeline persists deduplication
 history and checkpoints, but remains test-only and is not exposed by the executable.
