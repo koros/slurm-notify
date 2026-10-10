@@ -239,3 +239,7 @@ dependency selection. SMTP implementation and public email contracts remain pend
 A private synthetic SMTP phase classifier now tests TLS/authentication ordering,
 final DATA acknowledgment, reply outcomes, and uncertainty. It performs no SMTP
 network I/O and is not yet connected to a client or delivery worker.
+
+The private SMTP reply experiment now bounds line bytes, total reply bytes, and
+line count, with multiline and malformed/truncated fixtures. It discards server
+text and performs no SMTP connection or TLS validation.

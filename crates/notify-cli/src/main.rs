@@ -30,6 +30,9 @@ mod supervised_provider;
 #[cfg(test)]
 mod smtp_policy;
 
+#[cfg(test)]
+mod smtp_reply;
+
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
     std::process::exit(1);

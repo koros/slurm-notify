@@ -1225,3 +1225,33 @@ Next: private bounded SMTP reply parsing with multiline, malformed/truncated, an
 reply-size limit fixtures before selecting a client dependency. Public contract
 review, persistence compaction, licensing, cluster validation, and activation remain
 pending.
+
+## Subsequent increment: bounded private SMTP reply reader
+
+A test-only reader consumes exactly one reply through caller-supplied line-byte,
+aggregate-byte, and line-count limits. It requires CRLF, a syntactically valid
+reply code, consistent codes across multiline replies, and continuation/final
+separators. Bare final codes are accepted. Its private ASCII text scope rejects
+non-ASCII and control bytes except tabs in text; broader server compatibility
+remains unvalidated. Following reply bytes remain unread. Only code, byte count,
+and line count are returned; raw reply text is discarded and never appears in
+static parse/I/O errors.
+
+The implementation reads bounded individual bytes to avoid unbounded line buffer
+allocation and hidden read-ahead. Limits include CRLF. Truncation, malformed data,
+and resource exhaustion are distinct; exhausting the budget before a terminator
+returns a limit error. Interrupted reads retry. Byte limits do not bound a blocked
+or repeatedly interrupted reader; socket and parent deadlines remain mandatory
+for network integration. No SMTP client, AUTH, TLS verification, or public wire
+contract is introduced.
+
+Four tests cover multiline/unread-next behavior, bare codes, malformed/truncated
+input, exact boundaries, line/total/count limits, invalid limits, static I/O errors,
+and interrupted reads. The full suite passes: 147 Rust tests plus one ignored
+helper, sixteen custom process scenarios, eight SQLite tests, and six hook tests.
+No dependencies, migration, runtime defaults, or executable behavior changed.
+
+Next: private loopback SMTP dialogue fixtures composing reply parsing and phase
+classification, including slow/truncated final acknowledgments, before client
+and TLS dependency assessment. Public contracts, persistence compaction, licensing,
+cluster validation, and activation remain pending.
