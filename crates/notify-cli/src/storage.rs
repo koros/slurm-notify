@@ -74,6 +74,14 @@ pub(super) struct Store {
     _owner: Option<super::state_path::Guard>,
 }
 
+// Advisory read-only plan; IDs must be revalidated transactionally before deletion.
+#[derive(Debug, PartialEq, Eq)]
+struct RetentionCandidate {
+    event_id: String,
+    destination: String,
+    completed_at: i64,
+}
+
 impl Store {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(super) fn open_private(
@@ -122,6 +130,44 @@ impl Store {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             _owner: None,
         })
+    }
+
+    // Preserve events/jobs/checkpoints: they are the restart deduplication ledger.
+    // Missing completion evidence is protected, including failed rows without attempt history.
+    fn retention_plan(
+        &self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        limit: usize,
+    ) -> Result<Vec<RetentionCandidate>, StorageError> {
+        if cluster.is_empty() || now < 0 || retain_seconds <= 0 || limit == 0 {
+            return Err(StorageError::InvalidInput);
+        }
+        let limit = i64::try_from(limit).map_err(|_| StorageError::InvalidInput)?;
+        let Some(cutoff) = now.checked_sub(retain_seconds).filter(|n| *n >= 0) else {
+            return Ok(Vec::new());
+        };
+        let mut statement = self.db.prepare(
+            "SELECT o.event_id,o.destination,MAX(a.attempted_at) AS completed_at
+            FROM outbox o JOIN events e ON e.event_id=o.event_id
+            JOIN delivery_attempts a ON a.event_id=o.event_id AND a.destination=o.destination
+            WHERE e.cluster=?1 AND o.status IN ('delivered','failed')
+            AND a.outcome IN ('success','terminal_failure')
+            AND a.attempt_number=(SELECT MAX(last.attempt_number) FROM delivery_attempts last
+                WHERE last.event_id=o.event_id AND last.destination=o.destination)
+            GROUP BY o.event_id,o.destination HAVING completed_at < ?2
+            ORDER BY completed_at,o.event_id,o.destination LIMIT ?3",
+        )?;
+        let rows = statement.query_map(params![cluster, cutoff, limit], |row| {
+            Ok(RetentionCandidate {
+                event_id: row.get(0)?,
+                destination: row.get(1)?,
+                completed_at: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub(super) fn due_deliveries(
@@ -567,6 +613,138 @@ pub(super) mod tests {
                 row.get(0)
             })
             .unwrap()
+    }
+
+    fn retention_fixture(store: &mut Store) {
+        use super::super::lifecycle::Reconciler;
+        let mut reconciler = Reconciler::with_capacity(10);
+        let events = reconciler
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        store
+            .persist_reconciler(
+                &reconciler,
+                &events,
+                &["done", "pending", "failed", "unsent", "retired"],
+                "cluster",
+                "2026-10-10T01:00:00",
+                10,
+            )
+            .unwrap();
+        for item in store.due_deliveries("cluster", 10, 10).unwrap() {
+            match item.destination.as_str() {
+                "done" => store
+                    .record_delivery(&item, DeliveryOutcome::Success, 20, None)
+                    .unwrap(),
+                "failed" => store
+                    .record_delivery(&item, DeliveryOutcome::TerminalFailure, 30, None)
+                    .unwrap(),
+                "retired" => {
+                    store
+                        .record_delivery(&item, DeliveryOutcome::TransientFailure, 40, Some(60))
+                        .unwrap();
+                }
+                "unsent" => {
+                    store.db.execute("UPDATE outbox SET status='failed' WHERE event_id=?1 AND destination=?2", params![item.event_id, item.destination]).unwrap();
+                }
+                _ => {}
+            }
+        }
+        let retired = store
+            .due_deliveries("cluster", 60, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "retired")
+            .unwrap();
+        store.retire_exhausted(&retired, 1).unwrap();
+    }
+
+    #[test]
+    fn retention_plan_is_bounded_scoped_and_protects_pending_and_unsent() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let plan = store.retention_plan("cluster", 100, 50, 1).unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].destination, "done");
+        assert_eq!(plan[0].completed_at, 20);
+        let plan = store.retention_plan("cluster", 100, 50, 10).unwrap();
+        assert_eq!(
+            plan.iter()
+                .map(|c| c.destination.as_str())
+                .collect::<Vec<_>>(),
+            vec!["done", "failed"]
+        );
+        assert!(store
+            .retention_plan("other", 100, 50, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.due_deliveries("cluster", 100, 10).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT count(*) FROM outbox", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            5
+        );
+    }
+
+    #[test]
+    fn retention_plan_preserves_restart_deduplication_and_strict_age_boundary() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        assert!(store
+            .retention_plan("cluster", 70, 50, 10)
+            .unwrap()
+            .is_empty());
+        let before = store.retention_plan("cluster", 100, 50, 10).unwrap();
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(
+            before,
+            store.retention_plan("cluster", 100, 50, 10).unwrap()
+        );
+        let (mut reconciler, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert_eq!(checkpoint.as_deref(), Some("2026-10-10T01:00:00"));
+        assert!(reconciler
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true
+            )
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn retention_invalid_policy_and_epoch_window_never_select_records() {
+        let directory = Directory::new();
+        let store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        for (cluster, now, age, limit) in [
+            ("", 100, 50, 1),
+            ("cluster", -1, 50, 1),
+            ("cluster", 100, 0, 1),
+            ("cluster", 100, -1, 1),
+            ("cluster", 100, 50, 0),
+        ] {
+            assert!(matches!(
+                store.retention_plan(cluster, now, age, limit),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        assert!(store
+            .retention_plan("cluster", 10, i64::MAX, 1)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

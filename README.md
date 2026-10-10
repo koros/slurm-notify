@@ -162,3 +162,8 @@ see the [implementation plan](docs/architecture/implementation-plan.md).
 Private polling-cycle tests now compose restoration, window planning, and durable
 polling with a finite attempt budget and cancellation between cycles. The caller
 still supplies cadence and limits; no background monitoring loop is active.
+
+Private retention tests now plan bounded cleanup candidates for old completed
+outbox destinations. Planning deletes nothing; event/job history and pending or
+uncertain deliveries remain protected. Ledger growth still needs a retention
+horizon and tombstone design before terminal snapshots can be safely removed.

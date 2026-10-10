@@ -607,3 +607,33 @@ tests. No dependencies, migrations, public contracts, or runtime defaults change
 Next: private retention planning for terminal snapshots and completed outbox
 records, preserving deduplication and pending-delivery protection. Public contract
 review, SMTP, licensing, cluster validation, and runtime activation remain pending.
+
+## Subsequent increment: private retention candidate planning
+
+A read-only storage query selects a bounded, deterministically ordered set of
+completed destination deliveries for one cluster. The caller provides current
+Unix time, a positive retention age, and row limit. The latest attempt must be
+success or terminal failure and strictly older than the cutoff; pending rows,
+missing attempt history, and budget-retired transient attempts are protected.
+A transient attempt timestamp does not establish retirement completion time.
+
+Candidates contain private event/destination IDs and recorded completion time.
+They are advisory snapshots: any future deletion must revalidate status, age,
+and attempt evidence in its write transaction. No records are deleted here.
+Events, job snapshots, and checkpoints remain intact because restoration requires
+job references and the event ledger prevents duplicate notifications and freezes
+initial destinations. Removing terminal snapshots needs a tombstone/retention
+horizon design; this increment does not bound total database growth or restored
+ledger size. No migration, dependency, operational default, or public contract
+changed.
+
+Three tests cover bounds, ordering, cluster isolation, strict age cutoff, pending
+and uncertain completion protection, unchanged outbox rows, invalid inputs,
+epoch clipping, and stable plans/deduplication after reopen. The full suite passes:
+107 Rust tests plus one ignored helper, ten custom process scenarios, eight SQLite
+tests, and six hook tests.
+
+Next: transactionally apply a bounded completed-delivery cleanup plan with stale
+candidate revalidation and rollback/restart coverage, retaining deduplication
+history. Terminal snapshot compaction, public contract review, SMTP, licensing,
+cluster validation, and runtime activation remain pending.
