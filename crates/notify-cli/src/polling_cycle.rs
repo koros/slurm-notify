@@ -172,8 +172,41 @@ impl Cycles {
         })
     }
 
-    // Serialized caller-driven orchestration. No provider call holds a DB transaction.
+    // Existing infallible fixtures delegate to the same orchestration implementation.
     pub(super) fn tick<Q, S, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        hooks: Hooks<Q, S, C, X>,
+    ) -> TickReport
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        S: FnMut(&super::storage::DueDelivery) -> super::delivery::ProviderOutcome,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let Hooks {
+            query,
+            mut send,
+            clock,
+            cancelled,
+        } = hooks;
+        self.tick_fallible(
+            settings,
+            maintenance,
+            store,
+            Hooks {
+                query,
+                send: |item: &super::storage::DueDelivery| Ok(send(item)),
+                clock,
+                cancelled,
+            },
+        )
+    }
+
+    // Serialized caller-driven orchestration. No provider call holds a DB transaction.
+    pub(super) fn tick_fallible<Q, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
         maintenance: &Maintenance,
@@ -182,11 +215,16 @@ impl Cycles {
     ) -> TickReport
     where
         Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
-        S: FnMut(&super::storage::DueDelivery) -> super::delivery::ProviderOutcome,
+        S: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
         C: FnMut() -> Option<i64>,
         X: FnMut() -> bool,
     {
-        use super::delivery::{deliver_due_with_clock, WorkerError};
+        use super::delivery::{deliver_due_fallible, WorkerError};
         let mut report = TickReport::default();
         if (hooks.cancelled)() {
             report.cancelled = true;
@@ -240,7 +278,7 @@ impl Cycles {
             report.delivery = Some(Err(StageError::Time));
             return report;
         };
-        let delivery = deliver_due_with_clock(
+        let delivery = deliver_due_fallible(
             store,
             settings.cluster,
             delivery_now,

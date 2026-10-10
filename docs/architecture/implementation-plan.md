@@ -944,3 +944,33 @@ Next: private fallible orchestration callbacks and owned process acceptance for
 blocked helper dispatch after a prior successful destination, with maintenance
 stop and restart recovery. Terminal ledger compaction, public contract review,
 SMTP, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: fallible orchestration and blocked helper recovery
+
+The private tick now accepts fallible provider callbacks and delegates to the
+fallible worker. Existing infallible callers wrap outcomes through the same tick
+implementation, retaining preflight, clock, cancellation, and error boundaries.
+Blocked dispatch produces an explicit delivery-stage category and stops cleanup
+and health reporting. Successful earlier destination commits remain durable;
+no completion clock or attempt is recorded for the blocked destination.
+
+An owned process acceptance scenario commits the first destination through the
+trusted HTTP child, then attempts to spawn a deliberately missing helper for the
+second destination. The parent classifier reports spawn/not-attempted, stopping
+the batch before the third destination. Completion-clock call counts, pending
+attempt numbers, and absent maintenance results are verified. Reopening the store
+and using the real child delivers the remaining two destinations as attempt one
+with the same internal event ID, without resending the first. Maintenance cleans
+only the older completed destination and the event ledger remains restorable.
+
+The missing helper is an isolated test fixture, not an installed-helper selection
+policy. Raw endpoint/auth data stays in framed stdin; diagnostics remain static.
+No public contract, dependency, migration, runtime default, or production
+executable behavior changed. The full suite passes: 127 Rust tests plus one
+ignored helper, fourteen custom process scenarios, eight SQLite tests, and six
+hook tests.
+
+Next: preserve sanitized partial delivery batch progress alongside failure details
+so orchestration can report earlier committed work when a later dispatch blocks.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and activation remain pending.

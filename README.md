@@ -204,4 +204,5 @@ external notification when a provider does not honor idempotency keys.
 Private supervised-provider classification now distinguishes acknowledged outcomes,
 uncertain post-spawn failures, and local dispatch failures that require intervention.
 The timeout recovery acceptance test uses this policy; blocked dispatch is now supported by a private fallible delivery worker.
-Orchestration callback integration remains pending.
+Private orchestration now supports fallible callbacks and stops maintenance after
+blocked dispatch; owned process tests verify recovery after helper spawn failure.
