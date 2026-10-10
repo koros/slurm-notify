@@ -76,7 +76,7 @@ pub(super) struct Store {
 
 // Advisory read-only plan; IDs must be revalidated transactionally before deletion.
 #[derive(Debug, PartialEq, Eq)]
-struct RetentionCandidate {
+pub(super) struct RetentionCandidate {
     event_id: String,
     destination: String,
     completed_at: i64,
@@ -266,7 +266,7 @@ impl Store {
 
     // Preserve events/jobs/checkpoints: they are the restart deduplication ledger.
     // Missing completion evidence is protected, including failed rows without attempt history.
-    fn retention_plan(
+    pub(super) fn retention_plan(
         &self,
         cluster: &str,
         now: i64,
@@ -304,7 +304,7 @@ impl Store {
             .map_err(StorageError::from)
     }
 
-    fn apply_retention(
+    pub(super) fn apply_retention(
         &mut self,
         cluster: &str,
         now: i64,

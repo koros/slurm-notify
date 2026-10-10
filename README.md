@@ -177,3 +177,8 @@ reports are not yet exposed through a `status` or `doctor` command.
 Private poll-health tests track consecutive failed cycles and stale durable query
 checkpoints alongside storage health. Failure streaks are session-local; reports
 restore checkpoint age after restart. No public status command is active yet.
+
+Private caller-driven orchestration tests now compose polling, due delivery,
+cleanup, and health reporting. Scheduler query failure can leave committed
+notifications deliverable; uncertain delivery commits stop later stages.
+Cancellation is checked between stages. No operational monitoring loop is active.

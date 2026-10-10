@@ -90,6 +90,39 @@ impl PollHealth {
     }
 }
 
+struct Maintenance {
+    delivery_limit: usize,
+    retry: super::delivery::RetryPolicy,
+    retain_seconds: i64,
+    cleanup_limit: usize,
+    stale_after: i64,
+    health_sample_limit: usize,
+}
+
+struct Hooks<Q, S, C, X> {
+    query: Q,
+    send: S,
+    clock: C,
+    cancelled: X,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StageError {
+    Poll,
+    Storage,
+    Time,
+    Policy,
+}
+
+#[derive(Debug, Default)]
+struct TickReport {
+    cancelled: bool,
+    poll: Option<Result<Outcome, StageError>>,
+    delivery: Option<Result<super::delivery::BatchReport, StageError>>,
+    cleanup: Option<Result<usize, StageError>>,
+    health: Option<Result<HealthReport, StageError>>,
+}
+
 struct Cycles {
     remaining: usize,
     health: PollHealth,
@@ -104,6 +137,130 @@ impl Cycles {
             remaining: limit,
             health: PollHealth::default(),
         })
+    }
+
+    // Serialized caller-driven orchestration. No provider call holds a DB transaction.
+    fn tick<Q, S, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        mut hooks: Hooks<Q, S, C, X>,
+    ) -> TickReport
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        S: FnMut(&super::storage::DueDelivery) -> super::delivery::ProviderOutcome,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        use super::delivery::{deliver_due_with_clock, WorkerError};
+        let mut report = TickReport::default();
+        if (hooks.cancelled)() {
+            report.cancelled = true;
+            return report;
+        }
+        let Some(now) = (hooks.clock)().filter(|time| *time >= 0) else {
+            report.poll = Some(Err(StageError::Time));
+            return report;
+        };
+        let poll = self.step(settings, store, false, now, &mut hooks.query);
+        let stop = matches!(
+            &poll,
+            Err(Error::Storage(_) | Error::Window(_) | Error::Poll(DurablePollError::Storage(_)))
+        );
+        report.poll = Some(poll.map_err(|error| match error {
+            Error::Storage(_) | Error::Poll(DurablePollError::Storage(_)) => StageError::Storage,
+            Error::Window(_) => StageError::Time,
+            _ => StageError::Poll,
+        }));
+        if stop {
+            return report;
+        }
+        if (hooks.cancelled)() {
+            report.cancelled = true;
+            return report;
+        }
+        let mut latest = now;
+        // Validate every later clock sample, including worker completion samples.
+        let mut clock = || {
+            let next = (hooks.clock)()?;
+            if next < latest {
+                return None;
+            }
+            latest = next;
+            Some(next)
+        };
+        let Some(delivery_now) = clock() else {
+            report.delivery = Some(Err(StageError::Time));
+            return report;
+        };
+        let delivery = deliver_due_with_clock(
+            store,
+            settings.cluster,
+            delivery_now,
+            maintenance.delivery_limit,
+            maintenance.retry,
+            &mut hooks.send,
+            &mut clock,
+        );
+        let stop = delivery.is_err();
+        report.delivery = Some(delivery.map_err(|error| match error {
+            WorkerError::Storage(_) => StageError::Storage,
+            WorkerError::InvalidTime => StageError::Time,
+            WorkerError::InvalidPolicy => StageError::Policy,
+        }));
+        if stop {
+            return report;
+        }
+        if (hooks.cancelled)() {
+            report.cancelled = true;
+            return report;
+        }
+        let Some(cleanup_now) = clock() else {
+            report.cleanup = Some(Err(StageError::Time));
+            return report;
+        };
+        let cleanup = store
+            .retention_plan(
+                settings.cluster,
+                cleanup_now,
+                maintenance.retain_seconds,
+                maintenance.cleanup_limit,
+            )
+            .and_then(|plan| {
+                store.apply_retention(
+                    settings.cluster,
+                    cleanup_now,
+                    maintenance.retain_seconds,
+                    maintenance.cleanup_limit,
+                    &plan,
+                )
+            });
+        report.cleanup = Some(cleanup.map_err(|_| StageError::Storage));
+        if (hooks.cancelled)() {
+            report.cancelled = true;
+            return report;
+        }
+        let Some(health_now) = clock() else {
+            report.health = Some(Err(StageError::Time));
+            return report;
+        };
+        report.health = Some(
+            self.report(
+                settings,
+                store,
+                health_now,
+                maintenance.stale_after,
+                maintenance.retain_seconds,
+                maintenance.health_sample_limit,
+            )
+            .map_err(|error| match error {
+                ReportError::Storage => StageError::Storage,
+                ReportError::ClockRegressed => StageError::Time,
+                ReportError::InvalidInput => StageError::Policy,
+            }),
+        );
+        report
     }
 
     fn report(
@@ -266,6 +423,181 @@ mod tests {
 
     fn open(directory: &Directory) -> Store {
         Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
+    }
+
+    fn maintenance() -> Maintenance {
+        Maintenance {
+            delivery_limit: 10,
+            retry: super::super::delivery::RetryPolicy {
+                max_attempts: 3,
+                initial_delay_seconds: 5,
+                max_delay_seconds: 20,
+                jitter_seconds: 0,
+                jitter_seed: 0,
+            },
+            retain_seconds: 50,
+            cleanup_limit: 10,
+            stale_after: 60,
+            health_sample_limit: 10,
+        }
+    }
+
+    #[test]
+    fn orchestration_delivers_despite_scheduler_failure_and_reopens_cleanly() {
+        use super::super::delivery::ProviderOutcome;
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(3).unwrap();
+        let first = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        String::new()
+                    } else {
+                        "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+                    })
+                },
+                send: |_: &super::super::storage::DueDelivery| ProviderOutcome::Retry,
+                clock: || Some(7200),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(first.delivery.unwrap().unwrap().retrying, 1);
+        assert_eq!(first.cleanup.unwrap().unwrap(), 0);
+        assert!(first.health.unwrap().is_ok());
+        drop(store);
+        let mut store = open(&directory);
+        let second = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Err(QueryError::Timeout),
+                send: |_: &super::super::storage::DueDelivery| ProviderOutcome::Delivered,
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(second.poll.unwrap().unwrap_err(), StageError::Poll);
+        assert_eq!(second.delivery.unwrap().unwrap().delivered, 1);
+        let health = second.health.unwrap().unwrap();
+        assert_eq!(health.poll.consecutive_failures, 1);
+        let third = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Ok(String::new()),
+                send: |_: &super::super::storage::DueDelivery| panic!("duplicate send"),
+                clock: || Some(7400),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(third.cleanup.unwrap().unwrap(), 1);
+        assert_eq!(third.health.unwrap().unwrap().poll.consecutive_failures, 0);
+        assert!(store
+            .due_deliveries("cluster", 7400, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+    }
+
+    #[test]
+    fn orchestration_cancellation_between_stages_preserves_committed_work() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        let early = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("cancelled query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("cancelled send"),
+                clock: || panic!("cancelled clock"),
+                cancelled: || true,
+            },
+        );
+        assert!(early.cancelled && early.poll.is_none());
+        assert_eq!(cycles.remaining, 2);
+        let mut checks = 0;
+        let between = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Ok(String::new()),
+                send: |_: &super::super::storage::DueDelivery| panic!("cancelled send"),
+                clock: || Some(7200),
+                cancelled: || {
+                    checks += 1;
+                    checks == 2
+                },
+            },
+        );
+        assert!(between.cancelled && between.poll.unwrap().is_ok());
+        assert!(
+            between.delivery.is_none() && between.cleanup.is_none() && between.health.is_none()
+        );
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("1970-01-01T02:00:00")
+        );
+    }
+
+    #[test]
+    fn orchestration_stops_after_uncertain_send_commit_and_regressed_clock() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_send BEFORE UPDATE ON outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+        let mut cycles = Cycles::new(2).unwrap();
+        let mut sent = 0;
+        let report = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        String::new()
+                    } else {
+                        "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+                    })
+                },
+                send: |_: &super::super::storage::DueDelivery| {
+                    sent += 1;
+                    super::super::delivery::ProviderOutcome::Delivered
+                },
+                clock: || Some(7200),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(sent, 1);
+        assert_eq!(report.delivery.unwrap().unwrap_err(), StageError::Storage);
+        assert!(report.cleanup.is_none() && report.health.is_none());
+        assert_eq!(
+            store.due_deliveries("cluster", 7200, 10).unwrap()[0].attempt_number,
+            1
+        );
+        db.execute_batch("DROP TRIGGER reject_send;").unwrap();
+        let mut times = [Some(7300), Some(7299)].into_iter();
+        let report = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| Ok(String::new()),
+                send: |_: &super::super::storage::DueDelivery| panic!("regressed send"),
+                clock: || times.next().unwrap(),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.delivery.unwrap().unwrap_err(), StageError::Time);
+        assert!(report.cleanup.is_none());
     }
 
     #[test]

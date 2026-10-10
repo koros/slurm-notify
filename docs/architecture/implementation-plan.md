@@ -732,3 +732,38 @@ Next: private caller-driven orchestration of bounded poll cycles, due delivery,
 cleanup, and health reporting, with failure isolation and cancellation boundaries.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and runtime activation remain pending.
+
+## Subsequent increment: private orchestration ticks
+
+A caller-driven test-only tick serializes bounded polling, due-delivery batches,
+completed-delivery cleanup, and composed health reporting against one owned store.
+It accepts explicit settings, limits, provider/query callbacks, a completion clock,
+and cancellation callback; there is no cadence default or background loop.
+Provider callbacks retain responsibility for their own bounded transport.
+
+Scheduler query/reconciliation errors do not prevent delivery of previously
+committed outbox records. Poll restoration/commit or window failures stop later
+stages. An exhausted poll budget permits maintenance without additional queries.
+Delivery errors stop cleanup and reporting because prior sends may be committed
+or externally accepted but unrecorded. Cleanup failure remains visible and still
+permits read-only reporting. Partial successful work remains committed; a tick
+is not one transaction. Its optional stage results distinguish unrun stages from
+successful empty work and use static error categories without raw diagnostics.
+
+Cancellation is checked before the tick and between stages, never fabricating
+provider outcomes or interrupting active queries, delivery batches, or cleanup
+transactions. Later clock samples must not regress, including per-send completion
+times. Cleanup and reporting sample fresh times after delivery. No production
+CLI, public contract, dependency, migration, runtime default, or release changed.
+
+Three tests cover retry/delivery after scheduler failure and database reopen,
+cleanup with retained deduplication, cancellation before/between stages, accepted
+send with failed commit, and clock regression before delivery. Existing component
+rollback and transport deadline tests remain in the full suite. Validation passes:
+119 Rust tests plus one ignored helper, ten custom process scenarios, eight SQLite
+tests, and six hook tests.
+
+Next: extend the owned-store/process-boundary acceptance harness to use composed
+orchestration, verifying actual supervised HTTP retries and cancellation between
+stages. Terminal ledger compaction, public contract review, SMTP, licensing,
+cluster validation, and runtime activation remain pending.
