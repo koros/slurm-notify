@@ -1029,3 +1029,32 @@ Next: private delivery cancellation checks between destinations, preserving part
 progress and pending rows without fabricating provider outcomes or attempts.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: delivery cancellation between destinations
+
+A private controlled worker accepts provider, completion-clock, and cancellation
+callbacks as one explicit input. It checks cancellation before any storage read
+and before each destination, including budget retirement. Cancellation returns
+sanitized partial progress with a distinct category and no uncertain send.
+Earlier commits remain durable, while unsent destinations retain their IDs, due
+times, and attempt numbers. Existing detailed/infallible wrappers delegate with
+cancellation disabled, preserving current orchestration and process acceptance.
+
+A provider already in flight is not interrupted: its completion clock and outcome
+commit run before the next cancellation check. This prevents cancellation from
+abandoning bookkeeping after external acceptance. Existing clock/storage failures
+still take precedence if that bookkeeping cannot finish. Finishing the last item
+returns a completed batch; no remaining destination needs a cancellation check.
+The caller remains responsible for bounded provider transport and cancellation
+signal lifetime. No defaults, public interface, schema, or dependency changed.
+
+Three tests cover cancellation before storage access, cancellation raised inside
+a provider callback, durable success and pending identity after reopen, cancelled
+empty batches, and retained provider-directed retry deadlines. The full suite
+passes: 134 Rust tests plus one ignored helper, fourteen custom process scenarios,
+eight SQLite tests, and six hook tests.
+
+Next: wire controlled delivery cancellation into private orchestration and process
+acceptance, verifying mid-batch cancellation after a real supervised HTTP response.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and activation remain pending.

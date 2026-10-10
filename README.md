@@ -214,3 +214,7 @@ outcomes. Failed items are excluded from committed counts.
 Partial batch tests now compare mixed retry, rejection, and budget-retirement
 counts with reopened database state after a later write failure. Uncommitted
 outcomes remain excluded, and failed retirement can recover without sending.
+
+The private controlled delivery worker supports cancellation before a batch and
+between destinations. An active provider call completes its durable bookkeeping
+before cancellation stops later sends. Orchestration wiring remains a next step.

@@ -108,6 +108,7 @@ pub(super) struct Hooks<Q, S, C, X> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StageError {
+    Cancelled,
     Poll,
     Storage,
     Time,
@@ -293,6 +294,7 @@ impl Cycles {
             Ok(batch) => Ok(batch),
             Err(failure) => {
                 let error = match failure.kind {
+                    FailureKind::Cancelled => StageError::Cancelled,
                     FailureKind::Storage => StageError::Storage,
                     FailureKind::Time => StageError::Time,
                     FailureKind::Policy => StageError::Policy,

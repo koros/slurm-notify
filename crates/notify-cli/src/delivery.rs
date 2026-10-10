@@ -73,6 +73,7 @@ pub(super) enum WorkerError {
     Storage(StorageError),
     InvalidTime,
     DispatchBlocked(super::supervised_provider::Diagnostic),
+    Cancelled,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -84,6 +85,7 @@ pub(super) struct BatchReport {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FailureKind {
+    Cancelled,
     Policy,
     Storage,
     Time,
@@ -172,14 +174,48 @@ pub(super) fn deliver_due_detailed(
     now: i64,
     limit: usize,
     policy: RetryPolicy,
-    mut send: impl FnMut(
-        &DueDelivery,
-    ) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
-    mut clock: impl FnMut() -> Option<i64>,
+    send: impl FnMut(&DueDelivery) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
+    clock: impl FnMut() -> Option<i64>,
 ) -> Result<BatchReport, BatchFailure> {
+    deliver_due_controlled(
+        store,
+        cluster,
+        now,
+        limit,
+        policy,
+        DeliveryHooks {
+            send,
+            clock,
+            cancelled: || false,
+        },
+    )
+}
+
+pub(super) struct DeliveryHooks<S, C, X> {
+    pub(super) send: S,
+    pub(super) clock: C,
+    pub(super) cancelled: X,
+}
+
+pub(super) fn deliver_due_controlled<S, C, X>(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
+    mut hooks: DeliveryHooks<S, C, X>,
+) -> Result<BatchReport, BatchFailure>
+where
+    S: FnMut(&DueDelivery) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
+    C: FnMut() -> Option<i64>,
+    X: FnMut() -> bool,
+{
     let mut report = BatchReport::default();
     let mut uncertain = false;
     let result = (|| -> Result<(), WorkerError> {
+        if (hooks.cancelled)() {
+            return Err(WorkerError::Cancelled);
+        }
         if !policy.valid_at(now) {
             return Err(WorkerError::InvalidPolicy);
         }
@@ -188,6 +224,9 @@ pub(super) fn deliver_due_detailed(
             .map_err(WorkerError::Storage)?;
         let mut previous_completion = now;
         for item in items {
+            if (hooks.cancelled)() {
+                return Err(WorkerError::Cancelled);
+            }
             if item.attempt_number > i64::from(policy.max_attempts) {
                 store
                     .retire_exhausted(&item, policy.max_attempts)
@@ -195,10 +234,10 @@ pub(super) fn deliver_due_detailed(
                 report.failed += 1;
                 continue;
             }
-            let provider = send(&item).map_err(WorkerError::DispatchBlocked)?;
+            let provider = (hooks.send)(&item).map_err(WorkerError::DispatchBlocked)?;
             uncertain = true;
             // Clock failure/regression after acceptance must remain visible and replayable.
-            let completed_at = clock()
+            let completed_at = (hooks.clock)()
                 .filter(|time| *time >= previous_completion)
                 .ok_or(WorkerError::InvalidTime)?;
             previous_completion = completed_at;
@@ -240,6 +279,7 @@ pub(super) fn deliver_due_detailed(
         Ok(()) => Ok(report),
         Err(cause) => {
             let (kind, diagnostic) = match &cause {
+                WorkerError::Cancelled => (FailureKind::Cancelled, None),
                 WorkerError::InvalidPolicy => (FailureKind::Policy, None),
                 WorkerError::InvalidTime => (FailureKind::Time, None),
                 WorkerError::Storage(_) => (FailureKind::Storage, None),
@@ -303,6 +343,147 @@ mod tests {
     }
     fn db(directory: &Directory) -> rusqlite::Connection {
         rusqlite::Connection::open(directory.path()).unwrap()
+    }
+
+    #[test]
+    fn cancellation_before_batch_never_reads_storage_or_invokes_provider() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a"]);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("DROP TABLE delivery_attempts;").unwrap();
+        let failure = deliver_due_controlled(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            DeliveryHooks {
+                send: |_: &DueDelivery| panic!("cancelled send"),
+                clock: || panic!("cancelled clock"),
+                cancelled: || true,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Cancelled);
+        assert_eq!(failure.committed, BatchReport::default());
+        assert!(!failure.acceptance_uncertain);
+    }
+
+    #[test]
+    fn cancellation_after_send_commits_outcome_and_preserves_unsent_attempts_on_reopen() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b"]);
+        let mut cancel = false;
+        let cancellation = std::cell::Cell::new(false);
+        let failure = deliver_due_controlled(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            DeliveryHooks {
+                send: |item: &DueDelivery| {
+                    assert_eq!(item.destination, "a");
+                    cancellation.set(true);
+                    Ok(ProviderOutcome::Delivered)
+                },
+                clock: || Some(20),
+                cancelled: || cancellation.get(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Cancelled);
+        assert_eq!(failure.committed.delivered, 1);
+        assert!(!failure.acceptance_uncertain);
+        drop(store);
+        let mut store = open(&directory);
+        let remaining = store.due_deliveries("cluster", 20, 10).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(
+            (
+                remaining[0].destination.as_str(),
+                remaining[0].attempt_number
+            ),
+            ("b", 1)
+        );
+        let recovered = deliver_due_controlled(
+            &mut store,
+            "cluster",
+            20,
+            10,
+            policy(),
+            DeliveryHooks {
+                send: |item: &DueDelivery| {
+                    assert_eq!(item.destination, "b");
+                    Ok(ProviderOutcome::Delivered)
+                },
+                clock: || Some(20),
+                cancelled: || cancel,
+            },
+        )
+        .unwrap();
+        assert_eq!(recovered.delivered, 1);
+        cancel = true;
+        let failure = deliver_due_controlled(
+            &mut store,
+            "cluster",
+            20,
+            10,
+            policy(),
+            DeliveryHooks {
+                send: |_: &DueDelivery| panic!("cancelled empty batch send"),
+                clock: || panic!("cancelled empty batch clock"),
+                cancelled: || cancel,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Cancelled);
+    }
+
+    #[test]
+    fn cancellation_between_destinations_preserves_committed_retry_deadline() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b"]);
+        let mut checks = 0;
+        let failure = deliver_due_controlled(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            DeliveryHooks {
+                send: |item: &DueDelivery| {
+                    assert_eq!(item.destination, "a");
+                    Ok(ProviderOutcome::RetryAfter(60))
+                },
+                clock: || Some(20),
+                cancelled: || {
+                    checks += 1;
+                    checks == 3
+                },
+            },
+        )
+        .unwrap_err();
+        assert_eq!(failure.committed.retrying, 1);
+        assert_eq!(failure.kind, FailureKind::Cancelled);
+        assert!(!failure.acceptance_uncertain);
+        drop(store);
+        let store = open(&directory);
+        let before = store.due_deliveries("cluster", 79, 10).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            (before[0].destination.as_str(), before[0].attempt_number),
+            ("b", 1)
+        );
+        let due = store.due_deliveries("cluster", 80, 10).unwrap();
+        assert_eq!(due.len(), 2);
+        assert_eq!(
+            due.iter()
+                .find(|item| item.destination == "a")
+                .unwrap()
+                .attempt_number,
+            2
+        );
     }
 
     #[test]
