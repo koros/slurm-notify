@@ -42,8 +42,8 @@ All additions are dev-dependencies and absent from the normal executable:
 
 Compatibility pins are not a security assessment. Dependency maintenance, licenses,
 current vulnerability checks, and the product support baseline remain release work.
-TLS uses the client's normal rustls/webpki roots; HTTPS certificate rejection and
-enterprise CA behavior have not been tested here. No certificate bypass is added.
+TLS uses the client's normal rustls/webpki roots; Local HTTPS acceptance and certificate rejection are verified below;
+enterprise CA behavior remains untested. No certificate bypass is added.
 
 ## Validation and limits
 
@@ -61,3 +61,25 @@ Injected batch time also needs replacement with actual attempt completion time.
 Payload schema, secure credential loading, jitter, routing, production concurrency,
 HTTP-date edge policy, and public CLI/configuration still require further work.
 The executable remains a placeholder and sends no notifications.
+
+## HTTPS verification follow-up
+
+Four loopback tests now verify acceptance with a matching IP and a fixture trust
+root, and rejection of unknown issuers, mismatched names, and expired certificates
+before HTTP data is received. Fixture trust is injected only inside the tests;
+the adapter has no certificate-verification bypass or custom-root API. Certificates
+and private keys are generated in memory and never committed. Accepted sockets
+explicitly switch to blocking mode for portable TLS handshakes and retain read/write
+timeouts. The server sends TLS close-notify and drains control records before exit.
+
+Test-only rcgen 0.12.1 generates certificates. Direct rustls 0.23.45 selects the
+same version already used by ureq for the loopback server and fixture trust store.
+Time 0.3.36 and powerfmt 0.2.0 constrain rcgen's dependency graph for Rust 1.74;
+powerfmt 0.2.1 requires Rust 1.79. Disable powerfmt's unnecessary default macros.
+These additions do not affect the normal executable or its dependencies.
+
+A fifth test injects a resolver that sleeps 100 ms into an agent with a 10 ms
+request timeout. It returns a retry outcome only after the resolver finishes,
+confirming the deadline limitation without external DNS or lingering threads.
+Certificate errors currently share the bounded transport-retry outcome; targeted
+TLS diagnostics and permanent-error classification remain future adapter work.

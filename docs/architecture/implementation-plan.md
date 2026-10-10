@@ -393,3 +393,26 @@ Next: resolve the strict transport deadline and actual completion-time boundary,
 then test HTTPS certificate validation and establish a proposed normalized payload
 for review. Runtime activation still requires credential handling, secure state
 creation, routing/config/CLI contracts, and operational policy decisions.
+
+## Current increment: HTTPS verification and deadline evidence
+
+Five new tests verify trusted HTTPS delivery, unknown issuer/name/expiry rejection,
+and the synchronous resolver timeout limitation. The full suite now has 69 passing
+Rust tests, eight SQLite tests, and six hook tests. Test-only certificate-generation
+and TLS dependencies are documented in ADR 0003; no keys or credentials are stored.
+Formatting, strict Clippy, locked build, and placeholder smoke checks pass.
+
+The strict deadline remains unimplemented. A detached timeout thread would retain
+blocked DNS work and consume resources across retries. The next private increment
+should supervise a transport child process, with bounded framed stdin for endpoint,
+secret, ID, and body; bounded sanitized result output; a total monotonic deadline;
+and kill/reap cleanup using the existing runner approach. Keep secrets out of argv,
+environment, stderr, and diagnostic output. Child exit or timeout must yield an
+uncertain retry outcome with the same event ID, never a success acknowledgment.
+Verify blocked resolution, blocked input/output, malformed responses, cleanup, and
+restart before runtime activation. Choose and document supported-platform process
+cleanup behavior rather than assuming Unix guarantees elsewhere.
+
+The worker also needs actual completion time for attempts and HTTP-date scheduling.
+Public payload/configuration review, secure credential/state handling, and runtime
+activation remain pending. The executable still cannot monitor or notify.

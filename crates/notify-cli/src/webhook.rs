@@ -146,6 +146,7 @@ pub(super) mod tests {
                     Err(error) => panic!("{error}"),
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
@@ -175,6 +176,173 @@ pub(super) mod tests {
             String::from_utf8(bytes).unwrap()
         });
         (endpoint, handle)
+    }
+
+    // Certificates and private keys exist only for this local server's lifetime.
+    fn tls_server(
+        names: Vec<String>,
+        expired: bool,
+    ) -> (
+        String,
+        rustls::pki_types::CertificateDer<'static>,
+        thread::JoinHandle<bool>,
+    ) {
+        use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+        use std::sync::Arc;
+        let mut params = rcgen::CertificateParams::new(names);
+        if expired {
+            params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+            params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        }
+        let certificate = rcgen::Certificate::from_params(params).unwrap();
+        let der = rustls::pki_types::CertificateDer::from(certificate.serialize_der().unwrap());
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            certificate.serialize_private_key_der(),
+        ));
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![der.clone()], key)
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("https://{}/hook", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(started.elapsed() < Duration::from_secs(3));
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let connection = rustls::ServerConnection::new(Arc::new(config)).unwrap();
+            let mut stream = rustls::StreamOwned::new(connection, socket);
+            let mut request = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                match stream.read(&mut buffer) {
+                    Ok(0) => return false,
+                    Err(_) => return false,
+                    Ok(n) => request.extend_from_slice(&buffer[..n]),
+                }
+                assert!(request.len() <= 8192);
+                if request.windows(4).any(|v| v == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            stream.conn.send_close_notify();
+            stream.flush().unwrap();
+            // Drain TLS control records until the client closes; avoid a TCP reset
+            // discarding the acknowledgment because unread bytes remain.
+            let mut drain = [0; 1024];
+            while matches!(stream.read(&mut drain), Ok(n) if n > 0) {}
+            true
+        });
+        (endpoint, der, handle)
+    }
+
+    fn trusted_agent(certificate: rustls::pki_types::CertificateDer<'static>) -> ureq::Agent {
+        use std::sync::Arc;
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(certificate).unwrap();
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        ureq::AgentBuilder::new()
+            .tls_config(Arc::new(config))
+            .timeout(Duration::from_secs(1))
+            .redirects(0)
+            .try_proxy_from_env(false)
+            .build()
+    }
+
+    #[test]
+    fn synchronous_resolver_exceeds_socket_timeout() {
+        let mut webhook = Webhook::new(
+            "https://example.invalid/",
+            None,
+            Duration::from_millis(10),
+            16,
+        )
+        .unwrap();
+        webhook.agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_millis(10))
+            .resolver(|_: &str| {
+                thread::sleep(Duration::from_millis(100));
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "fixture resolver",
+                ))
+            })
+            .try_proxy_from_env(false)
+            .build();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            webhook.send("event", b"", 10).unwrap(),
+            ProviderOutcome::Retry
+        );
+        assert!(started.elapsed() >= Duration::from_millis(100));
+    }
+
+    #[test]
+    fn https_accepts_trusted_certificate_with_matching_ip() {
+        let (endpoint, certificate, handle) = tls_server(vec!["127.0.0.1".into()], false);
+        let mut webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        // Trust injection exists only in this fixture, never in the adapter API.
+        webhook.agent = trusted_agent(certificate);
+        let outcome = webhook.send("event", b"", 10).unwrap();
+        assert!(handle.join().unwrap(), "server received no HTTP");
+        assert_eq!(outcome, ProviderOutcome::Delivered);
+    }
+
+    #[test]
+    fn https_default_roots_reject_unknown_issuer_before_http() {
+        let (endpoint, _certificate, handle) = tls_server(vec!["127.0.0.1".into()], false);
+        let webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        assert_eq!(
+            webhook.send("event", b"", 10).unwrap(),
+            ProviderOutcome::Retry
+        );
+        assert!(!handle.join().unwrap());
+    }
+
+    #[test]
+    fn https_rejects_wrong_hostname_even_with_trusted_issuer() {
+        let (endpoint, certificate, handle) = tls_server(vec!["example.invalid".into()], false);
+        let mut webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        webhook.agent = trusted_agent(certificate);
+        assert_eq!(
+            webhook.send("event", b"", 10).unwrap(),
+            ProviderOutcome::Retry
+        );
+        assert!(!handle.join().unwrap());
+    }
+
+    #[test]
+    fn https_rejects_expired_certificate_even_with_trusted_issuer() {
+        let (endpoint, certificate, handle) = tls_server(vec!["127.0.0.1".into()], true);
+        let mut webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        webhook.agent = trusted_agent(certificate);
+        assert_eq!(
+            webhook.send("event", b"", 10).unwrap(),
+            ProviderOutcome::Retry
+        );
+        assert!(!handle.join().unwrap());
     }
 
     #[test]

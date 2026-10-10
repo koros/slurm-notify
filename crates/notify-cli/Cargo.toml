@@ -17,3 +17,9 @@ url = "=2.5.2"
 httpdate = "=1.0.3"
 # Constrain TLS's transitive dependency to a pre-edition-2024 release for Cargo 1.74.
 zeroize = "=1.8.1"
+# Loopback TLS fixtures generated in memory; no checked-in private keys.
+rcgen = "=0.12.1"
+time = "=0.3.36"
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+# time's formatting dependency otherwise resolves to a Rust 1.79 release.
+powerfmt = { version = "=0.2.0", default-features = false }

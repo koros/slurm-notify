@@ -28,3 +28,4 @@ the design handoff; no release has been published.
 - Mock provider worker with explicit capped backoff, retry budgets, per-destination isolation, and delivery restart/rollback tests.
 - Durable provider-requested retry delays, with backoff floors, retry-budget enforcement, and restart/overflow tests.
 - Test-only webhook POST adapter with TLS, input validation, redirect refusal, HTTP outcome classification, Retry-After parsing, and local mock-server/restart tests.
+- In-memory loopback HTTPS certificate tests for trusted, unknown-issuer, hostname-mismatch, and expired certificates; explicit regression coverage for the synchronous DNS timeout limitation.
