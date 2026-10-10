@@ -1282,3 +1282,17 @@ Next: assess a compatible test-only SMTP/message dependency against ADR 0006,
 including enforced TLS, authentication ordering, parser resource bounds, and
 Rust 1.74 compatibility, before wiring a real private SMTP adapter. Public contracts,
 persistence compaction, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: SMTP dependency gate assessment
+
+ADR 0007 records exact tagged lettre source findings. Version 0.11.19 declares
+Rust 1.74 but has no synchronous reply byte cap; 0.11.23 declares Rust 1.85 and
+checks sizes only after line reads allocate. Neither transport is selected.
+TLS/authentication builder capabilities are documented without claiming runtime
+acceptance. Transitive builds and message-builder behavior remain unverified.
+No dependency, toolchain, public contract, or executable changes were made.
+
+Next: private implicit-TLS greeting/EHLO fixtures with the existing rustls test
+dependency and bounded reply reader, verifying trust, hostname, and expiry failures
+before authentication or envelope submission. STARTTLS, supervised deadlines,
+message construction, public contracts, licensing, and activation remain pending.

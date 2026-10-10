@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Source-based SMTP dependency assessment deferring lettre transport for compiler and reply-allocation constraints, with a private TLS boundary experiment planned.
+
 - Initial folder scaffold and project README.
 - Private, dependency-free Rust executable workspace with development toolchain pin.
 - Foundation plan, architecture decision, contributor and agent guidance.

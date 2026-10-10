@@ -108,6 +108,8 @@ partial progress reports for failure and cancellation.
 ## Dependency gate and implementation order
 
 The handoff suggests lettre; treat it as a candidate, not an approved dependency.
+The initial [dependency assessment](0007-smtp-dependency-assessment.md) defers its
+transport because the inspected versions do not meet every gate below.
 Before selecting a version, inspect official API/source for Rust 1.74 compatibility,
 TLS trust/hostname behavior, explicit STARTTLS enforcement, authentication control,
 message validation, internal retry behavior, timeouts, and reply parser limits.

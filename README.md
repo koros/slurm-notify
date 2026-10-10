@@ -247,3 +247,8 @@ text and performs no SMTP connection or TLS validation.
 Loopback SMTP envelope fixtures now compose parsing and phase policy for final
 acknowledgment success, rejection, and uncertainty. TLS evidence is synthetic;
 these unauthenticated fixtures do not implement secure SMTP submission.
+
+The [SMTP dependency assessment](docs/adr/0007-smtp-dependency-assessment.md)
+defers lettre’s transport: inspected versions conflict with the compiler pin or
+check reply lengths after line allocation. The next private experiment verifies
+implicit TLS using the existing test dependency and bounded reply reader.
