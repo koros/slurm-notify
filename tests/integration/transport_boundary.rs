@@ -45,7 +45,6 @@ fn request(
             b"Bearer fixture-placeholder",
             b"event-1",
             b"{}",
-            b"10",
             b"1000",
         ],
         4096,
@@ -70,6 +69,10 @@ fn acceptance() {
         (
             "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n",
             ProviderOutcome::Rejected,
+        ),
+        (
+            "HTTP/1.1 503 Unavailable\r\nRetry-After: Thu, 01 Jan 1970 00:01:00 GMT\r\nContent-Length: 0\r\n\r\n",
+            ProviderOutcome::RetryAfter(0),
         ),
     ] {
         let (endpoint, server) = webhook::tests::server(response, Duration::ZERO);
@@ -114,5 +117,5 @@ fn acceptance() {
     assert!(
         transport::supervise(&mut child, vec![255; 4], Duration::from_secs(2), 4096, 64).is_err()
     );
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, slow HTTP, TLS rejection, blocked resolver, malformed frame passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame passed");
 }

@@ -7,6 +7,7 @@ use url::{Host, Url};
 pub(super) enum Error {
     InvalidConfiguration,
     InvalidRequest,
+    ClockFailure,
 }
 
 // Deliberately no Debug: endpoint queries and authorization may contain secrets.
@@ -78,11 +79,19 @@ impl Webhook {
         payload: &[u8],
         now: i64,
     ) -> Result<ProviderOutcome, Error> {
-        if !header_value(event_id)
-            || event_id.len() > 1024
-            || payload.len() > self.max_payload
-            || now < 0
-        {
+        self.send_with_clock(event_id, payload, || Some(now))
+    }
+
+    pub(super) fn send_with_clock(
+        &self,
+        event_id: &str,
+        payload: &[u8],
+        mut clock: impl FnMut() -> Option<i64>,
+    ) -> Result<ProviderOutcome, Error> {
+        let started_at = clock()
+            .filter(|time| *time >= 0)
+            .ok_or(Error::InvalidRequest)?;
+        if !header_value(event_id) || event_id.len() > 1024 || payload.len() > self.max_payload {
             return Err(Error::InvalidRequest);
         }
         let mut request = self
@@ -97,11 +106,14 @@ impl Webhook {
             Ok(response) | Err(ureq::Error::Status(_, response)) => response,
             Err(ureq::Error::Transport(_)) => return Ok(ProviderOutcome::Retry),
         };
+        let completed_at = clock()
+            .filter(|time| *time >= started_at)
+            .ok_or(Error::ClockFailure)?;
         // Do not read, retain, or log response bodies or raw transport errors.
         Ok(classify(
             response.status(),
             response.header("Retry-After"),
-            now,
+            completed_at,
         ))
     }
 }
@@ -383,6 +395,35 @@ pub(super) mod tests {
         assert!(lower.contains("authorization: bearer fixture-placeholder\r\n"));
         assert!(lower.contains("content-type: application/json\r\n"));
         assert!(request.ends_with("\r\n\r\n{}"));
+    }
+
+    #[test]
+    fn http_date_uses_response_completion_time() {
+        let (endpoint, server) = server("HTTP/1.1 503 Unavailable\r\nRetry-After: Thu, 01 Jan 1970 00:01:00 GMT\r\nContent-Length: 0\r\n\r\n", Duration::from_millis(20));
+        let webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        let mut times = [Some(10), Some(40)].into_iter();
+        assert_eq!(
+            webhook
+                .send_with_clock("id", b"{}", || times.next().unwrap())
+                .unwrap(),
+            ProviderOutcome::RetryAfter(20)
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn response_clock_regression_is_visible_after_http_send() {
+        let (endpoint, server) = server(
+            "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+            Duration::ZERO,
+        );
+        let webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        let mut times = [Some(10), Some(9)].into_iter();
+        assert_eq!(
+            webhook.send_with_clock("id", b"{}", || times.next().unwrap()),
+            Err(Error::ClockFailure)
+        );
+        server.join().unwrap();
     }
 
     #[test]

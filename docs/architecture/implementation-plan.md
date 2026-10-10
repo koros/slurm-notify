@@ -449,3 +449,23 @@ Next: use actual per-attempt completion times for durable retry scheduling and
 HTTP-date Retry-After calculations, including slow sends and clock changes. Secure
 installed helper selection, runtime credential/state handling, public payload/config
 review, and platform cleanup validation remain pending before usable monitoring.
+
+## Current increment: completion-time retry scheduling
+
+The private clock-aware worker now samples each attempt after its provider returns,
+records completion time, and schedules the full retry delay from that timestamp.
+Clock failure/regression and retry-time overflow leave the uncommitted attempt
+pending while preserving earlier commits. The webhook evaluates HTTP dates against
+response completion time. The supervised child uses its actual Unix clock; private
+requests no longer carry a stale batch timestamp. Existing fixtures retain explicit
+fixed-clock wrappers, without exposing product defaults or a public contract.
+
+Five new unit tests bring the suite to 83 passing Rust tests, eight SQLite tests,
+and six hook tests. Eight process-boundary scenarios also pass, including a past
+HTTP-date response with the child's actual clock. Formatting, strict Clippy, locked
+build, and placeholder smoke checks pass. No dependencies or migration changed.
+
+Next: bounded retry jitter and explicit transient/permanent transport diagnostics,
+then draft normalized event payload/configuration proposals for review. Installed
+helper selection, secure state/credential handling, runtime activation, and approved
+platform support remain pending; the executable cannot monitor or notify yet.

@@ -83,3 +83,14 @@ request timeout. It returns a retry outcome only after the resolver finishes,
 confirming the deadline limitation without external DNS or lingering threads.
 Certificate errors currently share the bounded transport-retry outcome; targeted
 TLS diagnostics and permanent-error classification remain future adapter work.
+
+## Response-time HTTP-date evaluation
+
+The clock-aware adapter samples time before sending and after receiving response
+headers. HTTP-date Retry-After is converted to a delay from the response timestamp;
+a slow send no longer includes elapsed request time in that delay. Missing/backward
+response clocks fail visibly after the external request, preserving uncertain
+acceptance. The injected-clock tests verify date arithmetic and regression. Relative
+delay instructions continue to apply in full from parent attempt completion, so
+IPC/cleanup latency may conservatively postpone a date-derived retry further.
+The fixed-time send wrapper remains for deterministic existing fixtures.

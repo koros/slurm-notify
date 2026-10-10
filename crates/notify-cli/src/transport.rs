@@ -58,8 +58,8 @@ fn parse_result(bytes: &[u8]) -> Result<ProviderOutcome, Error> {
     }
 }
 
-// Decode exactly six fields, enforcing the total byte budget before allocation.
-// Fields: endpoint, authorization (empty means absent), ID, body, Unix time,
+// Decode exactly five fields, enforcing the total byte budget before allocation.
+// Fields: endpoint, authorization (empty means absent), ID, body,
 // socket timeout milliseconds. This remains a private prototype wire format.
 pub(super) fn serve(
     mut input: impl Read,
@@ -67,9 +67,9 @@ pub(super) fn serve(
     limit: usize,
     send: impl FnOnce(Vec<Vec<u8>>) -> Result<ProviderOutcome, Error>,
 ) -> Result<(), Error> {
-    let mut fields = Vec::with_capacity(6);
+    let mut fields = Vec::with_capacity(5);
     let mut used = 0usize;
-    for _ in 0..6 {
+    for _ in 0..5 {
         let mut prefix = [0; 4];
         input
             .read_exact(&mut prefix)
@@ -106,17 +106,16 @@ pub(super) fn send_fields(
     blocked_resolver_fixture: bool,
 ) -> Result<ProviderOutcome, Error> {
     use super::webhook::Webhook;
-    if fields.len() != 6 {
+    if fields.len() != 5 {
         return Err(Error::InvalidInput);
     }
     let text = |index: usize| std::str::from_utf8(&fields[index]).map_err(|_| Error::InvalidInput);
     let endpoint = text(0)?;
     let authorization = text(1)?;
     let id = text(2)?;
-    let now = text(4)?.parse::<i64>().map_err(|_| Error::InvalidInput)?;
-    let milliseconds = text(5)?.parse::<u64>().map_err(|_| Error::InvalidInput)?;
+    let milliseconds = text(4)?.parse::<u64>().map_err(|_| Error::InvalidInput)?;
     // Fixture ceilings bound requests even when the parent supplies bad values.
-    if milliseconds == 0 || milliseconds > 60_000 || now < 0 {
+    if milliseconds == 0 || milliseconds > 60_000 {
         return Err(Error::InvalidInput);
     }
     let mut webhook = Webhook::new(
@@ -130,7 +129,7 @@ pub(super) fn send_fields(
         webhook.block_resolver_fixture();
     }
     webhook
-        .send(id, &fields[3], now)
+        .send_with_clock(id, &fields[3], super::delivery::unix_time)
         .map_err(|_| Error::InvalidInput)
 }
 
@@ -262,7 +261,7 @@ mod tests {
 
     #[test]
     fn decoding_rejects_truncation_extra_bytes_and_length_bombs_before_send() {
-        let valid = frame(&[b"url", b"", b"id", b"{}", b"10", b"100"], 128).unwrap();
+        let valid = frame(&[b"url", b"", b"id", b"{}", b"100"], 128).unwrap();
         let mut invalid = vec![valid[..valid.len() - 1].to_vec(), vec![255; 4]];
         let mut extra = valid.clone();
         extra.push(0);
@@ -294,7 +293,6 @@ mod tests {
                 b"id".to_vec(),
                 vec![],
                 b"-1".to_vec(),
-                b"100".to_vec(),
             ],
         ] {
             assert_eq!(send_fields(fields, false), Err(Error::InvalidInput));

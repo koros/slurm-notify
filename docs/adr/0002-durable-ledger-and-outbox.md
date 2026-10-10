@@ -194,3 +194,20 @@ can replay with its original event ID. Earlier results remain committed. This
 uses the injected batch timestamp; real transport must provide accurate completion
 time. HTTP delay/date parsing and malformed-header fallback remain adapter work.
 Three additional tests cover restart, backoff floors, exhaustion, and invalid hints.
+
+## Completion-clock scheduling follow-up
+
+The private worker now accepts a completion-clock callback and samples it after
+each provider callback. It records that completion timestamp in attempted_at and
+adds the backoff/provider delay to it. Slow destinations therefore receive their
+full retry delay after completion instead of an already elapsed batch deadline.
+Due selection still uses the initial batch timestamp; jobs that become due during
+the batch wait until the next batch. Earlier fixture tests use a fixed-clock wrapper.
+
+Missing, negative, or backward completion readings stop the batch without committing
+that outcome. Regression means earlier than the batch timestamp or the preceding
+completion within that batch. Prior successful outcomes stay committed. An accepted
+but unrecorded delivery can replay with the same ID. Due-time arithmetic remains
+checked, including overflow after a large forward clock jump. Forward jumps advance
+stored timestamps; no synthetic correction or monotonic-to-wall conversion is added.
+Wall-clock changes across restart can still postpone or accelerate due selection.

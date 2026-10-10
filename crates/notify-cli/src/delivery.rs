@@ -40,6 +40,7 @@ pub(super) enum ProviderOutcome {
 enum WorkerError {
     InvalidPolicy,
     Storage(StorageError),
+    InvalidTime,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -58,7 +59,29 @@ fn deliver_due(
     now: i64,
     limit: usize,
     policy: RetryPolicy,
+    send: impl FnMut(&DueDelivery) -> ProviderOutcome,
+) -> Result<BatchReport, WorkerError> {
+    deliver_due_with_clock(store, cluster, now, limit, policy, send, || Some(now))
+}
+
+pub(super) fn unix_time() -> Option<i64> {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs(),
+    )
+    .ok()
+}
+
+fn deliver_due_with_clock(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
     mut send: impl FnMut(&DueDelivery) -> ProviderOutcome,
+    mut clock: impl FnMut() -> Option<i64>,
 ) -> Result<BatchReport, WorkerError> {
     if !policy.valid() || now < 0 || now.checked_add(policy.max_delay_seconds).is_none() {
         return Err(WorkerError::InvalidPolicy);
@@ -67,6 +90,7 @@ fn deliver_due(
         .due_deliveries(cluster, now, limit)
         .map_err(WorkerError::Storage)?;
     let mut report = BatchReport::default();
+    let mut previous_completion = now;
     for item in items {
         if item.attempt_number > i64::from(policy.max_attempts) {
             store
@@ -75,7 +99,13 @@ fn deliver_due(
             report.failed += 1;
             continue;
         }
-        let (outcome, retry_at) = match send(&item) {
+        let provider = send(&item);
+        // Clock failure/regression after acceptance must remain visible and replayable.
+        let completed_at = clock()
+            .filter(|time| *time >= previous_completion)
+            .ok_or(WorkerError::InvalidTime)?;
+        previous_completion = completed_at;
+        let (outcome, retry_at) = match provider {
             ProviderOutcome::Delivered => (DeliveryOutcome::Success, None),
             ProviderOutcome::Rejected => (DeliveryOutcome::TerminalFailure, None),
             retry @ (ProviderOutcome::Retry | ProviderOutcome::RetryAfter(_)) => {
@@ -86,7 +116,8 @@ fn deliver_due(
                 };
                 let retry_at = if item.attempt_number < i64::from(policy.max_attempts) {
                     Some(
-                        now.checked_add(policy.delay(item.attempt_number).max(hint))
+                        completed_at
+                            .checked_add(policy.delay(item.attempt_number).max(hint))
                             .ok_or(WorkerError::InvalidPolicy)?,
                     )
                 } else {
@@ -96,7 +127,7 @@ fn deliver_due(
             }
         };
         store
-            .record_delivery(&item, outcome, now, retry_at)
+            .record_delivery(&item, outcome, completed_at, retry_at)
             .map_err(WorkerError::Storage)?;
         match (outcome, retry_at) {
             (DeliveryOutcome::Success, _) => report.delivered += 1,
@@ -150,6 +181,100 @@ mod tests {
     }
     fn db(directory: &Directory) -> rusqlite::Connection {
         rusqlite::Connection::open(directory.path()).unwrap()
+    }
+
+    #[test]
+    fn slow_destinations_schedule_from_individual_completion_and_survive_reopen() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b"]);
+        let mut times = [Some(30), Some(50)].into_iter();
+        assert_eq!(
+            deliver_due_with_clock(
+                &mut store,
+                "cluster",
+                10,
+                10,
+                policy(),
+                |_| ProviderOutcome::Retry,
+                || times.next().unwrap()
+            )
+            .unwrap()
+            .retrying,
+            2
+        );
+        drop(store);
+        let store = open(&directory);
+        assert!(store.due_deliveries("cluster", 34, 10).unwrap().is_empty());
+        assert_eq!(store.due_deliveries("cluster", 35, 10).unwrap().len(), 1);
+        assert_eq!(store.due_deliveries("cluster", 55, 10).unwrap().len(), 2);
+        let recorded = db(&directory)
+            .prepare("SELECT attempted_at FROM delivery_attempts ORDER BY destination")
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(recorded, vec![30, 50]);
+    }
+
+    #[test]
+    fn invalid_completion_clock_keeps_accepted_attempt_pending() {
+        for time in [None, Some(-1), Some(9)] {
+            let directory = Directory::new();
+            let mut store = seeded(&directory, &["primary"]);
+            assert!(matches!(
+                deliver_due_with_clock(
+                    &mut store,
+                    "cluster",
+                    10,
+                    10,
+                    policy(),
+                    |_| ProviderOutcome::Delivered,
+                    || time
+                ),
+                Err(WorkerError::InvalidTime)
+            ));
+            assert_eq!(
+                store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn completion_overflow_and_midbatch_clock_regression_preserve_prior_commits() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b"]);
+        let mut times = [Some(30), Some(29)].into_iter();
+        assert!(matches!(
+            deliver_due_with_clock(
+                &mut store,
+                "cluster",
+                10,
+                10,
+                policy(),
+                |_| ProviderOutcome::Delivered,
+                || times.next().unwrap()
+            ),
+            Err(WorkerError::InvalidTime)
+        ));
+        assert_eq!(store.due_deliveries("cluster", 30, 10).unwrap().len(), 1);
+        assert!(matches!(
+            deliver_due_with_clock(
+                &mut store,
+                "cluster",
+                30,
+                10,
+                policy(),
+                |_| ProviderOutcome::Retry,
+                || Some(i64::MAX)
+            ),
+            Err(WorkerError::InvalidPolicy)
+        ));
+        assert_eq!(
+            store.due_deliveries("cluster", 30, 10).unwrap()[0].attempt_number,
+            1
+        );
     }
 
     #[test]

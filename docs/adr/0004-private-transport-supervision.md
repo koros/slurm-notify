@@ -83,3 +83,14 @@ the worker still uses its batch time. Secure installed executable selection,
 production IPC limits, status diagnostics, supported-platform policy, and runtime
 activation remain further work. The normal executable still reports unavailable
 monitoring and cannot send notifications.
+
+## Completion-clock child follow-up
+
+The private child request now has five fields: endpoint, optional authorization,
+event ID, body, and socket timeout milliseconds. The stale injected batch timestamp
+was removed; the child uses checked SystemTime Unix seconds before/after the HTTP
+request. This changes only the internal test format; there is no approved public IPC
+contract. An additional process scenario verifies that an old HTTP date yields zero
+relative delay using the child's actual clock. Parent scheduling uses its own
+completion clock after the supervised operation returns, covering IPC and cleanup.
+The worker/transport composition remains private and test-only.
