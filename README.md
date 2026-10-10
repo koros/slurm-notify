@@ -227,3 +227,7 @@ history and pending deliveries; recovery requires an explicit caller limit chang
 Exhausted polling now retains ledger/checkpoint preflight: invalid accounting times
 or inconsistent restored state stop delivery and cleanup. A corrected checkpoint
 allows maintenance to resume without another scheduler query.
+
+Shared orchestration acceptance fixtures now cover missing-checkpoint maintenance
+and cancellation before preflight, including retained ownership until store close.
+A missing checkpoint leaves poll age unknown and stale in private health reports.

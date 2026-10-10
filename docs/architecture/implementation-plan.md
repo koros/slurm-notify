@@ -1143,3 +1143,34 @@ Next: review private orchestration invariants and consolidate reusable acceptanc
 fixtures before adding another transport, including missing-checkpoint and
 preflight cancellation/ownership coverage. Terminal compaction, public contract
 review, SMTP, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: orchestration boundary review and fixture consolidation
+
+Five owned process scenarios now share explicit synthetic scheduler and maintenance
+settings plus the fixture query callback. Destination sets remain supplied by each
+scenario. These helpers are test policy inputs, not operational defaults or a
+production configuration layer.
+
+Added coverage verifies missing checkpoints allow exhausted-budget maintenance
+without another scheduler query, while health reports unknown/stale poll age and
+no checkpoint is invented. Cancellation takes precedence over invalid static
+settings and unusable storage: no clock, query, provider, preflight read, budget,
+or failure-streak update occurs. Owned process acceptance verifies cancellation
+keeps the advisory owner lock held until store close and permits reopening after
+close without checkpoint mutation.
+
+Review confirms the current boundaries: static/time/capacity/restoration preflight
+before side effects; serialized per-cluster ownership; providers outside database
+transactions; partial commits retained on later errors; cancellation completes
+in-flight bookkeeping; cleanup preserves event-ledger identity. Resource row limits
+still do not bound SQLite execution time, and the test harness does not establish
+real-cluster compatibility, release security, or public interface approval.
+
+The full suite passes: 140 Rust tests plus one ignored helper, sixteen custom
+process scenarios, eight SQLite tests, and six hook tests. No implementation
+policy, dependency, migration, public contract, or executable behavior changed.
+
+Next: draft the private SMTP transport boundary and failure/retry acceptance plan,
+covering TLS/authentication, bounded execution, and secret-safe diagnostics before
+selecting a compatible test-only implementation dependency. Terminal compaction,
+public contract review, licensing, cluster validation, and activation remain pending.

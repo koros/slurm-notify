@@ -577,6 +577,69 @@ mod tests {
     }
 
     #[test]
+    fn missing_checkpoint_allows_exhausted_maintenance_with_unknown_poll_age() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        cycles
+            .step(&settings(), &mut store, false, 7200, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+                })
+            })
+            .unwrap();
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute("DELETE FROM checkpoints", []).unwrap();
+        let report = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("exhausted missing-checkpoint query"),
+                send: |_: &super::super::storage::DueDelivery| {
+                    super::super::delivery::ProviderOutcome::Delivered
+                },
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Ok(()));
+        assert_eq!(report.poll.unwrap().unwrap(), Outcome::Exhausted);
+        assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+        let health = report.health.unwrap().unwrap();
+        assert_eq!(health.poll.checkpoint_age_seconds, None);
+        assert!(health.poll.stale);
+        assert_eq!(store.restore("cluster", 10).unwrap().1, None);
+    }
+
+    #[test]
+    fn cancellation_precedes_static_validation_and_storage_health_reads() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("DROP TABLE delivery_attempts;").unwrap();
+        let mut invalid = settings();
+        invalid.capacity = 0;
+        let mut cycles = Cycles::new(1).unwrap();
+        let report = cycles.tick(
+            &invalid,
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("cancelled query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("cancelled send"),
+                clock: || panic!("cancelled clock"),
+                cancelled: || true,
+            },
+        );
+        assert!(report.cancelled && report.preflight.is_none() && report.poll.is_none());
+        assert_eq!(cycles.remaining, 1);
+        assert_eq!(cycles.health.consecutive_failures, 0);
+    }
+
+    #[test]
     fn exhausted_polling_rejects_bad_checkpoints_and_recovers_without_queries() {
         let directory = Directory::new();
         let mut store = open(&directory);

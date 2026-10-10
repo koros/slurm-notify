@@ -56,3 +56,4 @@ the design handoff; no release has been published.
 - Controlled delivery cancellation wired into private orchestration, with explicit cancelled stage/partial progress and owned supervised HTTP acceptance for mid-batch cancellation and restart recovery.
 - Private orchestration capacity preflight with sanitized job/event pressure snapshots, preserved pending/deduplication history and budgets, and explicit-limit restart recovery tests.
 - Private preflight restoration and checkpoint validation even with exhausted polling, preventing maintenance on malformed/regressed accounting state or inconsistent ledger identity, with pending-state/recovery tests.
+- Consolidated private orchestration process fixtures and added missing-checkpoint maintenance, cancellation-before-preflight, and owned-store lock-lifetime acceptance coverage.

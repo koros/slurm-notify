@@ -145,8 +145,9 @@ fn acceptance() {
     orchestrated_timeout_retry_recovery();
     orchestrated_blocked_dispatch_restart();
     orchestrated_mid_batch_cancellation_restart();
+    cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -358,13 +359,10 @@ fn accepted_send_commit_failure_replays() {
     assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
 }
 
+// Synthetic private policy fixtures, not operational defaults.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn orchestrated_owned_http_restart() {
-    use polling_cycle::{Cycles, Hooks, Maintenance, Outcome, Settings, StageError};
-    let directory = storage::tests::Directory::new();
-    let root = state_directory(&directory);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
-    let settings = Settings {
+fn orchestration_settings<'a>(destinations: &'a [&'a str]) -> polling_cycle::Settings<'a> {
+    polling_cycle::Settings {
         active_program: std::path::Path::new("/fixture/squeue"),
         accounting_program: std::path::Path::new("/fixture/sacct"),
         cluster: "cluster",
@@ -373,27 +371,48 @@ fn orchestrated_owned_http_restart() {
         output_limit: 4096,
         emit_discovered: true,
         capacity: 10,
-        destinations: &["primary"],
+        destinations,
         window: accounting_window::Policy {
             lookback_seconds: 3600,
             overlap_seconds: 300,
         },
-    };
-    let maintenance = Maintenance {
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestration_maintenance() -> polling_cycle::Maintenance {
+    polling_cycle::Maintenance {
         delivery_limit: 10,
         retry: retry_policy(),
         retain_seconds: 50,
         cleanup_limit: 10,
         stale_after: 60,
         health_sample_limit: 10,
-    };
-    let fixture = |command: &mut Command, _, _| {
-        Ok(if command.get_program() == "/fixture/squeue" {
-            String::new()
-        } else {
-            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
-        })
-    };
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestration_query(
+    command: &mut Command,
+    _: Duration,
+    _: usize,
+) -> Result<String, scheduler::QueryError> {
+    Ok(if command.get_program() == "/fixture/squeue" {
+        String::new()
+    } else {
+        "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_owned_http_restart() {
+    use polling_cycle::{Cycles, Hooks, Outcome, StageError};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = orchestration_settings(&["primary"]);
+    let maintenance = orchestration_maintenance();
+    let fixture = orchestration_query;
     let mut cycles = Cycles::new(1).unwrap();
     let mut checks = 0;
     let cancelled = cycles.tick(
@@ -512,40 +531,13 @@ fn orchestrated_owned_http_restart() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
-    use polling_cycle::{Cycles, Hooks, Maintenance, Settings, StageError};
+    use polling_cycle::{Cycles, Hooks, StageError};
     let directory = storage::tests::Directory::new();
     let root = state_directory(&directory);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
-    let settings = Settings {
-        active_program: std::path::Path::new("/fixture/squeue"),
-        accounting_program: std::path::Path::new("/fixture/sacct"),
-        cluster: "cluster",
-        user: "alice",
-        timeout: Duration::from_secs(1),
-        output_limit: 4096,
-        emit_discovered: true,
-        capacity: 10,
-        destinations: &["primary", "secondary"],
-        window: accounting_window::Policy {
-            lookback_seconds: 3600,
-            overlap_seconds: 300,
-        },
-    };
-    let maintenance = Maintenance {
-        delivery_limit: 10,
-        retry: retry_policy(),
-        retain_seconds: 50,
-        cleanup_limit: 10,
-        stale_after: 60,
-        health_sample_limit: 10,
-    };
-    let fixture = |command: &mut Command, _, _| {
-        Ok(if command.get_program() == "/fixture/squeue" {
-            String::new()
-        } else {
-            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
-        })
-    };
+    let settings = orchestration_settings(&["primary", "secondary"]);
+    let maintenance = orchestration_maintenance();
+    let fixture = orchestration_query;
     let (primary, first_server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
@@ -667,40 +659,13 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn orchestrated_timeout_retry_recovery() {
-    use polling_cycle::{Cycles, Hooks, Maintenance, Settings};
+    use polling_cycle::{Cycles, Hooks};
     let directory = storage::tests::Directory::new();
     let root = state_directory(&directory);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
-    let settings = Settings {
-        active_program: std::path::Path::new("/fixture/squeue"),
-        accounting_program: std::path::Path::new("/fixture/sacct"),
-        cluster: "cluster",
-        user: "alice",
-        timeout: Duration::from_secs(1),
-        output_limit: 4096,
-        emit_discovered: true,
-        capacity: 10,
-        destinations: &["primary"],
-        window: accounting_window::Policy {
-            lookback_seconds: 3600,
-            overlap_seconds: 300,
-        },
-    };
-    let maintenance = Maintenance {
-        delivery_limit: 10,
-        retry: retry_policy(),
-        retain_seconds: 50,
-        cleanup_limit: 10,
-        stale_after: 60,
-        health_sample_limit: 10,
-    };
-    let fixture = |command: &mut Command, _, _| {
-        Ok(if command.get_program() == "/fixture/squeue" {
-            String::new()
-        } else {
-            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
-        })
-    };
+    let settings = orchestration_settings(&["primary"]);
+    let maintenance = orchestration_maintenance();
+    let fixture = orchestration_query;
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::from_millis(1500),
@@ -795,40 +760,13 @@ fn orchestrated_timeout_retry_recovery() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn orchestrated_blocked_dispatch_restart() {
-    use polling_cycle::{Cycles, Hooks, Maintenance, Settings, StageError};
+    use polling_cycle::{Cycles, Hooks, StageError};
     let directory = storage::tests::Directory::new();
     let root = state_directory(&directory);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
-    let settings = Settings {
-        active_program: std::path::Path::new("/fixture/squeue"),
-        accounting_program: std::path::Path::new("/fixture/sacct"),
-        cluster: "cluster",
-        user: "alice",
-        timeout: Duration::from_secs(1),
-        output_limit: 4096,
-        emit_discovered: true,
-        capacity: 10,
-        destinations: &["a", "b", "c"],
-        window: accounting_window::Policy {
-            lookback_seconds: 3600,
-            overlap_seconds: 300,
-        },
-    };
-    let maintenance = Maintenance {
-        delivery_limit: 10,
-        retry: retry_policy(),
-        retain_seconds: 50,
-        cleanup_limit: 10,
-        stale_after: 60,
-        health_sample_limit: 10,
-    };
-    let fixture = |command: &mut Command, _, _| {
-        Ok(if command.get_program() == "/fixture/squeue" {
-            String::new()
-        } else {
-            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
-        })
-    };
+    let settings = orchestration_settings(&["a", "b", "c"]);
+    let maintenance = orchestration_maintenance();
+    let fixture = orchestration_query;
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
@@ -951,40 +889,13 @@ fn orchestrated_blocked_dispatch_restart() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn orchestrated_mid_batch_cancellation_restart() {
-    use polling_cycle::{Cycles, Hooks, Maintenance, Settings, StageError};
+    use polling_cycle::{Cycles, Hooks, StageError};
     let directory = storage::tests::Directory::new();
     let root = state_directory(&directory);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
-    let settings = Settings {
-        active_program: std::path::Path::new("/fixture/squeue"),
-        accounting_program: std::path::Path::new("/fixture/sacct"),
-        cluster: "cluster",
-        user: "alice",
-        timeout: Duration::from_secs(1),
-        output_limit: 4096,
-        emit_discovered: true,
-        capacity: 10,
-        destinations: &["a", "b", "c"],
-        window: accounting_window::Policy {
-            lookback_seconds: 3600,
-            overlap_seconds: 300,
-        },
-    };
-    let maintenance = Maintenance {
-        delivery_limit: 10,
-        retry: retry_policy(),
-        retain_seconds: 50,
-        cleanup_limit: 10,
-        stale_after: 60,
-        health_sample_limit: 10,
-    };
-    let fixture = |command: &mut Command, _, _| {
-        Ok(if command.get_program() == "/fixture/squeue" {
-            String::new()
-        } else {
-            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
-        })
-    };
+    let settings = orchestration_settings(&["a", "b", "c"]);
+    let maintenance = orchestration_maintenance();
+    let fixture = orchestration_query;
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
@@ -1095,4 +1006,33 @@ fn orchestrated_mid_batch_cancellation_restart() {
         .unwrap()
         .is_empty());
     assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn cancelled_preflight_preserves_owned_store() {
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let report = polling_cycle::Cycles::new(1).unwrap().tick(
+        &orchestration_settings(&["primary"]),
+        &orchestration_maintenance(),
+        &mut store,
+        polling_cycle::Hooks {
+            query: |_: &mut Command, _, _| panic!("cancelled preflight query"),
+            send: |_: &storage::DueDelivery| panic!("cancelled preflight send"),
+            clock: || panic!("cancelled preflight clock"),
+            cancelled: || true,
+        },
+    );
+    assert!(report.cancelled && report.preflight.is_none() && report.poll.is_none());
+    assert!(matches!(
+        storage::Store::open_private(&root, Duration::from_millis(50)),
+        Err(storage::StorageError::StatePath(
+            state_path::Error::AlreadyOwned
+        ))
+    ));
+    assert_eq!(store.restore("cluster", 10).unwrap().1, None);
+    drop(store);
+    let mut reopened = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    assert_eq!(reopened.restore("cluster", 10).unwrap().1, None);
 }
