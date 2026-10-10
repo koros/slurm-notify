@@ -11,3 +11,9 @@ path = "src/main.rs"
 # Prototype-only: bundled SQLite makes schema tests independent of system SQLite.
 [dev-dependencies]
 rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }
+# Private blocking HTTP prototype; no async runtime or response decompression.
+ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+url = "=2.5.2"
+httpdate = "=1.0.3"
+# Constrain TLS's transitive dependency to a pre-edition-2024 release for Cargo 1.74.
+zeroize = "=1.8.1"

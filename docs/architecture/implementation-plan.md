@@ -374,3 +374,22 @@ local mock-server tests for timeouts, status classification, sanitized diagnosti
 and Retry-After delay/date parsing. Public payload/config approval and runtime
 activation remain separate pending work. The executable still reports unavailable
 monitoring.
+
+## Current increment: private webhook transport
+
+Implemented the private caller-byte POST adapter and local HTTP mock tests.
+Seven added tests cover input validation, request headers/body, response outcomes,
+retry instructions, redirect refusal, refused connections, socket timeout, and
+integrated durable retry/reopen/acknowledgment with a stable event ID. Validation:
+64 passing Rust tests, eight SQLite tests, and six hook tests, plus formatting,
+strict Clippy, locked build, and executable smoke checks.
+
+ADR 0003 records the compatible test-only dependency pins, client response-header
+bounds, TLS assumptions, and synchronous DNS timeout limitation. The normal
+executable still has no dependencies and cannot monitor or notify. No public
+contract or operational defaults were introduced.
+
+Next: resolve the strict transport deadline and actual completion-time boundary,
+then test HTTPS certificate validation and establish a proposed normalized payload
+for review. Runtime activation still requires credential handling, secure state
+creation, routing/config/CLI contracts, and operational policy decisions.

@@ -27,3 +27,4 @@ the design handoff; no release has been published.
 - Bounded committed-outbox reads and atomic delivery outcomes with stale-attempt protection.
 - Mock provider worker with explicit capped backoff, retry budgets, per-destination isolation, and delivery restart/rollback tests.
 - Durable provider-requested retry delays, with backoff floors, retry-budget enforcement, and restart/overflow tests.
+- Test-only webhook POST adapter with TLS, input validation, redirect refusal, HTTP outcome classification, Retry-After parsing, and local mock-server/restart tests.

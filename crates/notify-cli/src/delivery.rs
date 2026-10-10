@@ -27,8 +27,8 @@ impl RetryPolicy {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ProviderOutcome {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProviderOutcome {
     Delivered,
     Retry,
     // Validated relative delay from a provider; exponential backoff remains a floor.
@@ -389,6 +389,49 @@ mod tests {
             store.due_deliveries("cluster", 15, 10).unwrap()[0].attempt_number,
             2
         );
+    }
+
+    #[test]
+    fn webhook_rate_limit_is_committed_and_acknowledgment_stops_retries() {
+        use crate::webhook::{tests::server, Webhook};
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let (endpoint, handle) = server(
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n",
+            Duration::ZERO,
+        );
+        let webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        deliver_due(&mut store, "cluster", 10, 10, policy(), |item| {
+            webhook.send(&item.event_id, b"{}", 10).unwrap()
+        })
+        .unwrap();
+        let first_request = handle.join().unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        assert!(store.due_deliveries("cluster", 69, 10).unwrap().is_empty());
+        let (endpoint, handle) = server(
+            "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+            Duration::ZERO,
+        );
+        let webhook = Webhook::new(&endpoint, None, Duration::from_secs(1), 16).unwrap();
+        assert_eq!(
+            deliver_due(&mut store, "cluster", 70, 10, policy(), |item| {
+                webhook.send(&item.event_id, b"{}", 70).unwrap()
+            })
+            .unwrap()
+            .delivered,
+            1
+        );
+        let second_request = handle.join().unwrap();
+        let id_header = |request: String| {
+            request
+                .lines()
+                .find(|line| line.to_ascii_lowercase().starts_with("idempotency-key:"))
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(id_header(first_request), id_header(second_request));
+        assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
     }
 
     #[test]
