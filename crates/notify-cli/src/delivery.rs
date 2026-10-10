@@ -31,6 +31,8 @@ impl RetryPolicy {
 enum ProviderOutcome {
     Delivered,
     Retry,
+    // Validated relative delay from a provider; exponential backoff remains a floor.
+    RetryAfter(i64),
     Rejected,
 }
 
@@ -76,11 +78,22 @@ fn deliver_due(
         let (outcome, retry_at) = match send(&item) {
             ProviderOutcome::Delivered => (DeliveryOutcome::Success, None),
             ProviderOutcome::Rejected => (DeliveryOutcome::TerminalFailure, None),
-            ProviderOutcome::Retry if item.attempt_number < i64::from(policy.max_attempts) => (
-                DeliveryOutcome::TransientFailure,
-                Some(now + policy.delay(item.attempt_number)),
-            ),
-            ProviderOutcome::Retry => (DeliveryOutcome::TransientFailure, None),
+            retry @ (ProviderOutcome::Retry | ProviderOutcome::RetryAfter(_)) => {
+                let hint = match retry {
+                    ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => seconds,
+                    ProviderOutcome::RetryAfter(_) => return Err(WorkerError::InvalidPolicy),
+                    _ => 0,
+                };
+                let retry_at = if item.attempt_number < i64::from(policy.max_attempts) {
+                    Some(
+                        now.checked_add(policy.delay(item.attempt_number).max(hint))
+                            .ok_or(WorkerError::InvalidPolicy)?,
+                    )
+                } else {
+                    None
+                };
+                (DeliveryOutcome::TransientFailure, retry_at)
+            }
         };
         store
             .record_delivery(&item, outcome, now, retry_at)
@@ -375,6 +388,79 @@ mod tests {
         assert_eq!(
             store.due_deliveries("cluster", 15, 10).unwrap()[0].attempt_number,
             2
+        );
+    }
+
+    #[test]
+    fn provider_delay_survives_reopen_and_exceeds_backoff_cap() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        assert_eq!(
+            deliver_due(&mut store, "cluster", 10, 10, policy(), |_| {
+                ProviderOutcome::RetryAfter(60)
+            })
+            .unwrap()
+            .retrying,
+            1
+        );
+        drop(store);
+        let mut store = open(&directory);
+        assert!(store.due_deliveries("cluster", 69, 10).unwrap().is_empty());
+        let item = store.due_deliveries("cluster", 70, 10).unwrap().remove(0);
+        assert_eq!(item.attempt_number, 2);
+        deliver_due(&mut store, "cluster", 70, 10, policy(), |retry| {
+            assert_eq!(retry.event_id, item.event_id);
+            ProviderOutcome::Delivered
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn provider_delay_cannot_shorten_backoff_or_bypass_attempt_budget() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        deliver_due(&mut store, "cluster", 10, 10, policy(), |_| {
+            ProviderOutcome::RetryAfter(0)
+        })
+        .unwrap();
+        assert!(store.due_deliveries("cluster", 14, 10).unwrap().is_empty());
+        let final_attempt = RetryPolicy {
+            max_attempts: 2,
+            ..policy()
+        };
+        assert_eq!(
+            deliver_due(&mut store, "cluster", 15, 10, final_attempt, |_| {
+                ProviderOutcome::RetryAfter(60)
+            })
+            .unwrap()
+            .failed,
+            1
+        );
+        assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn invalid_provider_delay_leaves_attempt_uncommitted() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        for hint in [-1, i64::MAX] {
+            assert!(matches!(
+                deliver_due(&mut store, "cluster", 10, 10, policy(), |_| {
+                    ProviderOutcome::RetryAfter(hint)
+                }),
+                Err(WorkerError::InvalidPolicy)
+            ));
+            assert_eq!(
+                store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+                1
+            );
+        }
+        assert_eq!(
+            db(&directory)
+                .query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

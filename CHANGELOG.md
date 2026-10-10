@@ -26,3 +26,4 @@ the design handoff; no release has been published.
 - Prevented durable checkpoint regression and removed obsolete pending identities during actual-attempt promotion.
 - Bounded committed-outbox reads and atomic delivery outcomes with stale-attempt protection.
 - Mock provider worker with explicit capped backoff, retry budgets, per-destination isolation, and delivery restart/rollback tests.
+- Durable provider-requested retry delays, with backoff floors, retry-budget enforcement, and restart/overflow tests.

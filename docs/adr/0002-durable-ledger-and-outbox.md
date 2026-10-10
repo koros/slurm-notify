@@ -162,7 +162,7 @@ commits within that batch remain committed.
 
 The test-only retry policy requires explicit maximum attempts, positive initial
 delay, and a maximum backoff. Exponential delay is capped and integer-overflow
-checked before sending. There are no product defaults, jitter, Retry-After,
+checked before sending. There are no product defaults, jitter, HTTP Retry-After header parsing,
 transport timeouts, payload formatting, or real provider configuration yet.
 Observed/attempt times are injected Unix seconds. A production worker must use
 actual attempt completion time and handle provider rate-limit instructions.
@@ -178,3 +178,19 @@ bounds/retry exhaustion, reduced budgets, failed outcome transactions, stale
 attempts, and invalid/overflowing policy. There are now 54 passing Rust tests.
 The worker remains test-only; no network requests, email, or actual notifications
 are performed. Secure runtime activation and real provider integration remain pending.
+
+## Provider-requested retry delay
+
+The injected provider may return a non-negative relative delay in seconds. The
+worker schedules the greater of that delay and its exponential backoff. The
+backoff cap limits exponential growth; it does not shorten a provider instruction.
+The resulting due time is committed with the attempt and survives reopen. The
+attempt budget still applies, so a final transient failure becomes failed even
+when the provider requests a longer delay.
+
+Negative delays or due-time overflow stop the batch visibly before committing
+that result. The external send may already have occurred; the pending attempt
+can replay with its original event ID. Earlier results remain committed. This
+uses the injected batch timestamp; real transport must provide accurate completion
+time. HTTP delay/date parsing and malformed-header fallback remain adapter work.
+Three additional tests cover restart, backoff floors, exhaustion, and invalid hints.

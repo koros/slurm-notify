@@ -356,3 +356,21 @@ timeouts, bounded responses, redacted diagnostics, and Retry-After handling with
 local mock HTTP tests. Public event payload/config semantics require explicit
 review before exposure. Runtime activation, current dependency assessment, secure
 state creation, and real-cluster validation remain pending.
+
+## Current increment: durable provider-requested retry delays
+
+Extended the private injected-provider worker to accept relative delay hints,
+persist their due times, preserve the exponential backoff floor, and enforce the
+existing attempt budget. Negative hints and arithmetic overflow fail visibly
+without partially recording an attempt. Three new tests bring validation to
+57 passing Rust tests, eight SQLite tests, and six hook tests. Formatting, strict
+Clippy, build, and executable smoke checks pass.
+
+A test-only HTTP client experiment was deferred: ureq 2.12.1 resolved zeroize
+1.9.1, whose edition-2024 manifest cannot be parsed by pinned Cargo 1.74. The
+experiment was removed from the manifest and lockfile. No dependency or toolchain
+change is included. Next: assess a compatible HTTP/TLS dependency set, then add
+local mock-server tests for timeouts, status classification, sanitized diagnostics,
+and Retry-After delay/date parsing. Public payload/config approval and runtime
+activation remain separate pending work. The executable still reports unavailable
+monitoring.
