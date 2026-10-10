@@ -7,3 +7,7 @@ publish = false
 [[bin]]
 name = "slurm-notify"
 path = "src/main.rs"
+
+# Prototype-only: bundled SQLite makes schema tests independent of system SQLite.
+[dev-dependencies]
+rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }

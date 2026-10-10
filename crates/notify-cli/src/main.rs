@@ -4,6 +4,8 @@
 mod lifecycle;
 #[cfg(test)]
 mod scheduler;
+#[cfg(test)]
+mod storage;
 
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
