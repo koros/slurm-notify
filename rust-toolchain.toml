@@ -1,0 +1,5 @@
+# Development pin only; the supported MSRV remains undecided.
+[toolchain]
+channel = "1.74.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
