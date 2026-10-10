@@ -168,7 +168,7 @@ pub(super) enum PollError {
 
 // Deliberately accepts only fixed-width UTC calendar timestamps, not Slurm's
 // relative date language. Lexical ordering is safe after calendar validation.
-fn valid_timestamp(value: &str) -> bool {
+pub(super) fn valid_timestamp(value: &str) -> bool {
     let b = value.as_bytes();
     if b.len() != 19
         || b[4] != b'-'

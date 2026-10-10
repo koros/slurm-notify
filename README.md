@@ -153,3 +153,8 @@ No license has been selected or granted; see [license decision placeholder](LICE
 Rust 1.74.0 is pinned for foundation development only, not as a product support
 baseline. Contract checks, security workflows, release automation, maintainer
 ownership, and branch protection remain future work.
+
+The private accounting-window experiment now uses explicit UTC overlap and
+lookback limits, with delayed-record restart tests and flags for clipped overlap
+or downtime beyond the bound. It does not guarantee complete historical recovery;
+see the [implementation plan](docs/architecture/implementation-plan.md).

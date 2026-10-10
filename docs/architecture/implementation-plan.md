@@ -553,3 +553,29 @@ Next: private accounting overlap/window planning and bounded restart catch-up,
 including delayed accounting records. Public payload/configuration review, frozen
 payloads/opaque IDs, safe installed-helper selection, SMTP, licensing, and actual
 runtime activation remain pending before working monitoring can be claimed.
+
+## Subsequent increment: private accounting window planning
+
+A test-only planner derives UTC query boundaries from a durable checkpoint and
+caller-supplied positive lookback/overlap values. Overlap must be smaller than
+lookback. Initial queries use the bounded lookback; later queries begin at the
+checkpoint minus overlap, clipped to the current lookback floor and Unix epoch.
+Future checkpoints, malformed dates, unsupported times, and invalid policies fail
+before querying. Repeating a checkpoint permits another overlapping query.
+
+Separate flags identify downtime beyond the lookback and clipped overlap. They
+are private diagnostic data, not proof of missing jobs. Accounting visibility
+later than the overlap and records outside the bounded window may be missed;
+Slurm selection semantics and site accounting latency remain unvalidated.
+
+Four tests cover initial/restart windows, clipping, invalid inputs, clock
+regression, UTC leap-day arithmetic, and delayed accounting after database reopen.
+The composed polling test verifies failed queries preserve the checkpoint and
+repeated delayed records produce one durable event/outbox entry. The full suite
+passes: 99 Rust tests plus one ignored helper, ten custom process scenarios,
+eight SQLite tests, and six hook tests. No dependency, runtime default, public
+contract, or executable behavior changed.
+
+Next: private bounded polling-cycle composition using this planner, including
+visible catch-up gaps and cancellation between cycles. Public contract review,
+SMTP, licensing, and operational activation remain pending.
