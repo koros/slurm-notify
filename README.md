@@ -200,3 +200,8 @@ Owned process acceptance now covers a supervised HTTP acknowledgment timeout:
 the pending retry survives maintenance and restart, then succeeds with the same
 internal ID. Timeout acceptance remains uncertain, so retries can duplicate an
 external notification when a provider does not honor idempotency keys.
+
+Private supervised-provider classification now distinguishes acknowledged outcomes,
+uncertain post-spawn failures, and local dispatch failures that require intervention.
+The timeout recovery acceptance test uses this policy; blocked dispatch integration
+with the durable delivery worker remains pending.

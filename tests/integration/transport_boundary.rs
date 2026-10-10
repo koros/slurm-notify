@@ -21,6 +21,9 @@ mod accounting_window;
 #[path = "../../crates/notify-cli/src/polling_cycle.rs"]
 mod polling_cycle;
 
+#[path = "../../crates/notify-cli/src/supervised_provider.rs"]
+mod supervised_provider;
+
 use delivery::ProviderOutcome;
 use rusqlite::OptionalExtension;
 use std::process::Command;
@@ -712,17 +715,17 @@ fn orchestrated_timeout_retry_recovery() {
             query: fixture,
             send: |item: &storage::DueDelivery| {
                 timed_out_id = item.event_id.clone();
-                assert_eq!(
-                    request_for(
-                        &endpoint,
-                        &item.event_id,
-                        "--child",
-                        Duration::from_millis(500)
-                    ),
-                    Err(transport::Error::Timeout)
+                let result = request_for(
+                    &endpoint,
+                    &item.event_id,
+                    "--child",
+                    Duration::from_millis(500),
                 );
-                // Parent policy treats uncertain timeout as retry; no invented success.
-                ProviderOutcome::Retry
+                assert_eq!(result, Err(transport::Error::Timeout));
+                let report = supervised_provider::classify(result);
+                assert_eq!(report.diagnostic, supervised_provider::Diagnostic::Timeout);
+                assert_eq!(report.acceptance, supervised_provider::Acceptance::Unknown);
+                report.outcome.unwrap()
             },
             clock: || times.next(),
             cancelled: || false,

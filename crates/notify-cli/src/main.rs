@@ -24,6 +24,9 @@ mod accounting_window;
 #[cfg(test)]
 mod polling_cycle;
 
+#[cfg(test)]
+mod supervised_provider;
+
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
     std::process::exit(1);

@@ -884,3 +884,33 @@ child protocol/configuration failures, and uncertainty diagnostics explicit
 instead of relying on acceptance callback mappings. Terminal ledger compaction,
 public contract review, SMTP, licensing, cluster validation, and activation remain
 pending.
+
+## Subsequent increment: private supervised-provider result classification
+
+A private parent classifier preserves acknowledged delivered/rejected/retry
+outcomes and valid Retry-After delays. Acceptance is accepted/rejected only for
+corresponding acknowledgments; generic retry acknowledgments retain unknown
+acceptance. Timeout, I/O, output overflow, child exit, malformed acknowledgment,
+and cleanup failures produce retry with unknown acceptance and static diagnostic
+categories. Negative retry hints are treated as malformed results and retried.
+These errors cannot establish whether an external provider accepted the request.
+
+Invalid supervisor input, spawn failure, and unsupported platforms block dispatch
+with no provider outcome and not-attempted acceptance. Callers must report these
+local failures without inventing an external attempt or failing the outbox record.
+The current delivery callback requires a provider outcome, so blocked dispatch
+still needs explicit worker integration. The classifier consumes supervisor
+results, not child-side frame decoding failures. The timeout process acceptance
+now uses classification instead of a hand-written retry mapping.
+
+Three unit tests cover acknowledged outcomes, retry hints, local dispatch blocking,
+and every post-spawn error category. The full suite passes: 124 Rust tests plus
+one ignored helper, thirteen custom process scenarios, eight SQLite tests, and
+six hook tests. No dependencies, migration, public contract, runtime default,
+or normal executable behavior changed.
+
+Next: private fallible provider callback integration so blocked local dispatch
+stops a batch without recording a fabricated delivery attempt, preserving earlier
+commits and retryable pending rows across restart. Terminal ledger compaction,
+public contract review, SMTP, licensing, cluster validation, and activation remain
+pending.
