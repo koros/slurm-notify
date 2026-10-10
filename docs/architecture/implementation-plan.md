@@ -1255,3 +1255,30 @@ Next: private loopback SMTP dialogue fixtures composing reply parsing and phase
 classification, including slow/truncated final acknowledgments, before client
 and TLS dependency assessment. Public contracts, persistence compaction, licensing,
 cluster validation, and activation remain pending.
+
+## Subsequent increment: loopback SMTP envelope dialogue fixtures
+
+Two tests compose the bounded reply reader with the private phase classifier over
+an ephemeral loopback connection. A bounded fixture server verifies exact envelope,
+recipient, DATA, and synthetic body writes, including multiline recipient replies.
+Parsed final 250/451/550 responses produce relay acceptance, retry, or permanent
+rejection respectively. Truncated, inconsistent multiline, and delayed final
+acknowledgments preserve unknown acceptance and retry policy.
+
+The classifier is prepared using synthetic TLS evidence before the envelope-only
+connection. No real greeting/EHLO/STARTTLS handshake, AUTH, certificate validation,
+message builder, or installed SMTP client is claimed. Plaintext is confined to
+these unauthenticated parser fixtures. Both client/server have socket timeouts;
+server acceptance has a bounded wait and command reads have exact finite sizes.
+The delayed fixture verifies socket-read timeout behavior, not an absolute parent
+deadline or drip-fed-reply deadline. Future supervised execution remains required.
+All addresses and body bytes are synthetic; assertion failures do not echo them.
+
+The full suite passes: 149 Rust tests plus one ignored helper, sixteen custom
+process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+migration, public contract, defaults, or normal executable behavior changed.
+
+Next: assess a compatible test-only SMTP/message dependency against ADR 0006,
+including enforced TLS, authentication ordering, parser resource bounds, and
+Rust 1.74 compatibility, before wiring a real private SMTP adapter. Public contracts,
+persistence compaction, licensing, cluster validation, and activation remain pending.

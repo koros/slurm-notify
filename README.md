@@ -243,3 +243,7 @@ network I/O and is not yet connected to a client or delivery worker.
 The private SMTP reply experiment now bounds line bytes, total reply bytes, and
 line count, with multiline and malformed/truncated fixtures. It discards server
 text and performs no SMTP connection or TLS validation.
+
+Loopback SMTP envelope fixtures now compose parsing and phase policy for final
+acknowledgment success, rejection, and uncertainty. TLS evidence is synthetic;
+these unauthenticated fixtures do not implement secure SMTP submission.

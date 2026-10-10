@@ -60,3 +60,4 @@ the design handoff; no release has been published.
 - Proposed private SMTP boundary and acceptance ADR covering explicit TLS/authentication, single-recipient transactions, phase-aware failures, bounded child execution, privacy, dependency gates, and restart uncertainty.
 - Private synthetic SMTP phase policy requiring verified TLS and secure EHLO before submission, final DATA acknowledgment for relay acceptance, distinct auth/TLS blocks and reply classes, and sticky terminal outcomes.
 - Private bounded ASCII SMTP reply reader with consistent multiline codes, strict CRLF, unread following replies, static errors, explicit byte/line limits, and malformed/truncated/I/O boundary tests.
+- Loopback SMTP envelope-dialogue fixtures composing bounded reply parsing and phase policy, with multiline recipient replies and successful/temporary/permanent/truncated/malformed/delayed final acknowledgment coverage.

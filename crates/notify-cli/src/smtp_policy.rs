@@ -227,6 +227,171 @@ mod tests {
         session
     }
 
+    // Envelope-only plaintext parser fixture: TLS evidence is synthetic and no
+    // credentials are sent. This is not an SMTP client or verified TLS session.
+    fn loopback_dialogue(
+        final_reply: &'static [u8],
+        delay: std::time::Duration,
+    ) -> (Report, Option<super::super::smtp_reply::Error>) {
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            time::{Duration, Instant},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(1))
+                    }
+                    _ => panic!("fixture accept failed"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            for (expected, response) in [
+                (
+                    &b"MAIL FROM:<sender@example.invalid>\r\n"[..],
+                    &b"250 sender ok\r\n"[..],
+                ),
+                (
+                    &b"RCPT TO:<recipient@example.invalid>\r\n"[..],
+                    &b"250-recipient fixture\r\n250 ok\r\n"[..],
+                ),
+                (&b"DATA\r\n"[..], &b"354 continue\r\n"[..]),
+                (&b"fixture body\r\n.\r\n"[..], final_reply),
+            ] {
+                // Exact bounded fixture reads; assert without echoing message bytes.
+                let mut request = vec![0; expected.len()];
+                stream.read_exact(&mut request).unwrap();
+                assert!(request == expected, "fixture command mismatch");
+                if expected.starts_with(b"fixture body") {
+                    std::thread::sleep(delay);
+                }
+                let _ = stream.write_all(response); // Timeout may close the client first.
+            }
+        });
+        let mut session = Session::new(false);
+        for evidence in [
+            Evidence::Reply(220),
+            Evidence::Reply(250),
+            Evidence::Reply(220),
+            Evidence::TlsVerified,
+            Evidence::Reply(250),
+        ] {
+            assert_eq!(session.observe(evidence).action, Action::Continue);
+        }
+        let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(1)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut last = None;
+        let mut report = None;
+        for command in [
+            &b"MAIL FROM:<sender@example.invalid>\r\n"[..],
+            &b"RCPT TO:<recipient@example.invalid>\r\n"[..],
+            &b"DATA\r\n"[..],
+            &b"fixture body\r\n.\r\n"[..],
+        ] {
+            stream.write_all(command).unwrap();
+            let parsed = super::super::smtp_reply::read_reply(
+                &mut stream,
+                super::super::smtp_reply::Limits {
+                    line_bytes: 64,
+                    total_bytes: 128,
+                    lines: 4,
+                },
+            );
+            let current = match parsed {
+                Ok(reply) => session.observe(Evidence::Reply(reply.code)),
+                Err(error) => {
+                    let evidence = match error {
+                        super::super::smtp_reply::Error::Malformed
+                        | super::super::smtp_reply::Error::Limit => Evidence::Reply(999),
+                        _ => Evidence::ConnectionLost,
+                    };
+                    last = Some(error);
+                    session.observe(evidence)
+                }
+            };
+            if current.action != Action::Continue {
+                report = Some(current);
+                break;
+            }
+        }
+        drop(stream);
+        server.join().unwrap();
+        (report.unwrap(), last)
+    }
+
+    #[test]
+    fn loopback_envelope_dialogues_compose_parser_and_final_reply_policy() {
+        for (reply, expected, acceptance) in [
+            (
+                &b"250 queued\r\n"[..],
+                ProviderOutcome::Delivered,
+                Acceptance::RelayAccepted,
+            ),
+            (
+                &b"451 temporary\r\n"[..],
+                ProviderOutcome::Retry,
+                Acceptance::NotAccepted,
+            ),
+            (
+                &b"550 rejected\r\n"[..],
+                ProviderOutcome::Rejected,
+                Acceptance::NotAccepted,
+            ),
+        ] {
+            let (report, error) = loopback_dialogue(reply, std::time::Duration::ZERO);
+            assert_eq!(error, None);
+            assert_eq!(report.action, Action::Outcome(expected));
+            assert_eq!(report.acceptance, acceptance);
+        }
+    }
+
+    #[test]
+    fn truncated_and_delayed_loopback_acknowledgments_preserve_unknown_acceptance() {
+        for (reply, delay, expected) in [
+            (
+                &b"250 truncated"[..],
+                std::time::Duration::ZERO,
+                super::super::smtp_reply::Error::Truncated,
+            ),
+            (
+                &b"250 queued\r\n"[..],
+                std::time::Duration::from_millis(400),
+                super::super::smtp_reply::Error::Io,
+            ),
+            (
+                &b"250-bad\r\n550 changed\r\n"[..],
+                std::time::Duration::ZERO,
+                super::super::smtp_reply::Error::Malformed,
+            ),
+        ] {
+            let (report, error) = loopback_dialogue(reply, delay);
+            assert_eq!(error, Some(expected));
+            assert_eq!(report.action, Action::Outcome(ProviderOutcome::Retry));
+            assert_eq!(report.acceptance, Acceptance::Unknown);
+        }
+    }
+
     #[test]
     fn verified_tls_and_secure_ehlo_precede_submission_and_final_ack_is_required() {
         for authenticate in [false, true] {
