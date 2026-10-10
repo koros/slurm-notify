@@ -80,6 +80,8 @@ struct RetentionCandidate {
     event_id: String,
     destination: String,
     completed_at: i64,
+    attempt_number: i64,
+    status: String,
 }
 
 impl Store {
@@ -149,7 +151,7 @@ impl Store {
             return Ok(Vec::new());
         };
         let mut statement = self.db.prepare(
-            "SELECT o.event_id,o.destination,MAX(a.attempted_at) AS completed_at
+            "SELECT o.event_id,o.destination,MAX(a.attempted_at) AS completed_at,a.attempt_number,o.status
             FROM outbox o JOIN events e ON e.event_id=o.event_id
             JOIN delivery_attempts a ON a.event_id=o.event_id AND a.destination=o.destination
             WHERE e.cluster=?1 AND o.status IN ('delivered','failed')
@@ -164,10 +166,78 @@ impl Store {
                 event_id: row.get(0)?,
                 destination: row.get(1)?,
                 completed_at: row.get(2)?,
+                attempt_number: row.get(3)?,
+                status: row.get(4)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
+    }
+
+    fn apply_retention(
+        &mut self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        limit: usize,
+        candidates: &[RetentionCandidate],
+    ) -> Result<usize, StorageError> {
+        if cluster.is_empty()
+            || now < 0
+            || retain_seconds <= 0
+            || limit == 0
+            || candidates.len() > limit
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        let cutoff = now.checked_sub(retain_seconds).unwrap_or(-1);
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut seen = std::collections::HashSet::new();
+        for candidate in candidates {
+            if !seen.insert((&candidate.event_id, &candidate.destination)) {
+                return Err(StorageError::InvalidInput);
+            }
+            let current: Option<(i64, i64, String)> = tx
+                .query_row(
+                    "SELECT a.attempted_at,a.attempt_number,o.status
+                FROM outbox o JOIN events e ON e.event_id=o.event_id
+                JOIN delivery_attempts a ON a.event_id=o.event_id AND a.destination=o.destination
+                WHERE e.cluster=?1 AND o.event_id=?2 AND o.destination=?3
+                AND o.status IN ('delivered','failed')
+                AND a.outcome IN ('success','terminal_failure')
+                AND a.attempt_number=(SELECT MAX(last.attempt_number) FROM delivery_attempts last
+                    WHERE last.event_id=o.event_id AND last.destination=o.destination)",
+                    params![cluster, candidate.event_id, candidate.destination],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            if current
+                != Some((
+                    candidate.completed_at,
+                    candidate.attempt_number,
+                    candidate.status.clone(),
+                ))
+                || candidate.completed_at < 0
+                || candidate.completed_at >= cutoff
+            {
+                return Err(StorageError::Conflict);
+            }
+            tx.execute(
+                "DELETE FROM delivery_attempts WHERE event_id=?1 AND destination=?2",
+                params![candidate.event_id, candidate.destination],
+            )?;
+            if tx.execute(
+                "DELETE FROM outbox WHERE event_id=?1 AND destination=?2",
+                params![candidate.event_id, candidate.destination],
+            )? != 1
+            {
+                return Err(StorageError::Conflict);
+            }
+        }
+        tx.commit()?;
+        Ok(candidates.len())
     }
 
     pub(super) fn due_deliveries(
@@ -663,6 +733,180 @@ pub(super) mod tests {
             .find(|item| item.destination == "retired")
             .unwrap();
         store.retire_exhausted(&retired, 1).unwrap();
+    }
+
+    #[test]
+    fn retention_cleanup_survives_reopen_without_replaying_events() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let plan = store.retention_plan("cluster", 100, 50, 1).unwrap();
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 0, &plan),
+            Err(StorageError::InvalidInput)
+        ));
+        assert!(matches!(
+            store.apply_retention("other", 100, 50, 1, &plan),
+            Err(StorageError::Conflict)
+        ));
+        assert!(matches!(
+            store.apply_retention("cluster", 70, 50, 1, &plan),
+            Err(StorageError::Conflict)
+        ));
+        assert_eq!(
+            store.apply_retention("cluster", 100, 50, 1, &plan).unwrap(),
+            1
+        );
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 1, &plan),
+            Err(StorageError::Conflict)
+        ));
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(
+            store.retention_plan("cluster", 100, 50, 10).unwrap().len(),
+            1
+        );
+        assert_eq!(store.due_deliveries("cluster", 100, 10).unwrap().len(), 1);
+        let (mut reconciler, checkpoint) = store.restore("cluster", 10).unwrap();
+        let events = reconciler
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        assert!(events.is_empty());
+        store
+            .persist_reconciler(
+                &reconciler,
+                &events,
+                &["done", "new"],
+                "cluster",
+                checkpoint.as_deref().unwrap(),
+                100,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT count(*) FROM outbox WHERE destination IN ('done','new')",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
+                .optional()
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_later_candidate_rolls_back_earlier_deletions() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let plan = store.retention_plan("cluster", 100, 50, 10).unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE outbox SET status='pending' WHERE destination='failed'",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 10, &plan),
+            Err(StorageError::Conflict)
+        ));
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT count(*) FROM outbox", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            5
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT count(*) FROM delivery_attempts WHERE destination='done'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        store
+            .db
+            .execute(
+                "UPDATE outbox SET status='failed' WHERE destination='failed'",
+                [],
+            )
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE delivery_attempts SET attempted_at=31 WHERE destination='failed'",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 10, &plan),
+            Err(StorageError::Conflict)
+        ));
+        store
+            .db
+            .execute(
+                "UPDATE delivery_attempts SET attempted_at=30 WHERE destination='failed'",
+                [],
+            )
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE delivery_attempts SET attempt_number=2 WHERE destination='failed'",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 10, &plan),
+            Err(StorageError::Conflict)
+        ));
+    }
+
+    #[test]
+    fn delete_failure_restores_attempts_and_all_outbox_rows() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        retention_fixture(&mut store);
+        let plan = store.retention_plan("cluster", 100, 50, 10).unwrap();
+        store.db.execute_batch("CREATE TRIGGER reject_cleanup BEFORE DELETE ON outbox WHEN OLD.destination='failed' BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+        assert!(matches!(
+            store.apply_retention("cluster", 100, 50, 10, &plan),
+            Err(StorageError::Database(_))
+        ));
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(store.retention_plan("cluster", 100, 50, 10).unwrap(), plan);
+        store
+            .db
+            .execute_batch("DROP TRIGGER reject_cleanup;")
+            .unwrap();
+        assert_eq!(
+            store
+                .apply_retention("cluster", 100, 50, 10, &plan)
+                .unwrap(),
+            2
+        );
     }
 
     #[test]

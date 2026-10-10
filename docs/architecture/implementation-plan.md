@@ -637,3 +637,33 @@ Next: transactionally apply a bounded completed-delivery cleanup plan with stale
 candidate revalidation and rollback/restart coverage, retaining deduplication
 history. Terminal snapshot compaction, public contract review, SMTP, licensing,
 cluster validation, and runtime activation remain pending.
+
+## Subsequent increment: private transactional delivery cleanup
+
+The test-only storage boundary now applies a caller-bounded candidate batch in
+one immediate SQLite transaction. Candidates carry status and latest attempt
+number as well as completion time. Every destination is rechecked for cluster,
+completed status, latest terminal outcome, exact attempt/time/status agreement,
+and strict retention age before its attempts and outbox row are removed. Missing
+or changed candidates reject the whole batch. Invalid policies, oversized batches,
+and duplicate IDs reject application. A previously applied plan is stale and
+must be replanned rather than silently accepted.
+
+Foreign-key deletion order is attempts then outbox; event/job history and
+checkpoints remain intact. Existing event-ledger checks prevent cleaned
+notifications or new destinations from being recreated during reconciliation.
+This is private test behavior only: no runtime cleanup schedule, database-file
+compaction, terminal snapshot removal, migration, dependency, or public contract
+is introduced. Total ledger growth and restoration capacity remain unresolved.
+
+Three additional tests cover bounded application, cluster/age rejection, stale
+status/time/attempt changes, rollback after earlier candidates were deleted,
+injected deletion failure, retry after reopen, preserved pending deliveries,
+foreign-key consistency, and no notification/destination replay after cleanup.
+The full suite passes: 110 Rust tests plus one ignored helper, ten custom process
+scenarios, eight SQLite tests, and six hook tests.
+
+Next: private storage health diagnostics for queue depth, protected retention
+records, and restoration capacity pressure, using bounded aggregate queries and
+sanitized reports. Terminal ledger compaction, public contract review, SMTP,
+licensing, cluster validation, and runtime activation remain pending.
