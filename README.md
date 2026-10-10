@@ -223,3 +223,7 @@ signal through, with owned supervised HTTP restart acceptance coverage.
 Private orchestration now checks stored job/event capacity before polling or
 sending. Over-capacity state produces a sanitized pressure report and preserves
 history and pending deliveries; recovery requires an explicit caller limit change.
+
+Exhausted polling now retains ledger/checkpoint preflight: invalid accounting times
+or inconsistent restored state stop delivery and cleanup. A corrected checkpoint
+allows maintenance to resume without another scheduler query.

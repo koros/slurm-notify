@@ -268,6 +268,19 @@ impl Cycles {
             report.capacity_pressure = Some(storage_health);
             return report;
         }
+        // Exhausted polling still requires a coherent ledger and valid checkpoint
+        // before delivery or maintenance; do not rely on step() to restore it.
+        let (_, checkpoint) = match store.restore(settings.cluster, settings.capacity) {
+            Ok(restored) => restored,
+            Err(_) => {
+                report.preflight = Some(Err(StageError::Storage));
+                return report;
+            }
+        };
+        if accounting_window::plan(now, checkpoint.as_deref(), settings.window).is_err() {
+            report.preflight = Some(Err(StageError::Time));
+            return report;
+        }
         report.preflight = Some(Ok(()));
         let poll = self.step(settings, store, false, now, &mut hooks.query);
         let stop = matches!(
@@ -561,6 +574,127 @@ mod tests {
             stale_after: 60,
             health_sample_limit: 10,
         }
+    }
+
+    #[test]
+    fn exhausted_polling_rejects_bad_checkpoints_and_recovers_without_queries() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        cycles
+            .step(&settings(), &mut store, false, 7200, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+                })
+            })
+            .unwrap();
+        assert_eq!(cycles.remaining, 0);
+        drop(store);
+        let mut store = open(&directory);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        for bad in [
+            "1970-01-01T02:10:00",
+            "malformed-fixture",
+            "2026-02-30T01:00:00",
+            "1969-12-31T23:59:59",
+        ] {
+            db.execute("UPDATE checkpoints SET history_through=?1", [bad])
+                .unwrap();
+            let report = cycles.tick(
+                &settings(),
+                &maintenance(),
+                &mut store,
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("exhausted checkpoint query"),
+                    send: |_: &super::super::storage::DueDelivery| {
+                        panic!("invalid checkpoint send")
+                    },
+                    clock: || Some(7300),
+                    cancelled: || false,
+                },
+            );
+            assert_eq!(report.preflight.unwrap(), Err(StageError::Time));
+            assert!(
+                report.poll.is_none()
+                    && report.delivery.is_none()
+                    && report.cleanup.is_none()
+                    && report.health.is_none()
+            );
+            assert_eq!(cycles.remaining, 0);
+            assert_eq!(cycles.health.consecutive_failures, 0);
+            assert_eq!(
+                store.restore("cluster", 10).unwrap().1.as_deref(),
+                Some(bad)
+            );
+            assert_eq!(
+                store.due_deliveries("cluster", 7300, 10).unwrap()[0].attempt_number,
+                1
+            );
+        }
+        db.execute(
+            "UPDATE checkpoints SET history_through='1970-01-01T02:00:00'",
+            [],
+        )
+        .unwrap();
+        let report = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("exhausted recovery query"),
+                send: |item: &super::super::storage::DueDelivery| {
+                    assert_eq!(item.attempt_number, 1);
+                    super::super::delivery::ProviderOutcome::Delivered
+                },
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Ok(()));
+        assert_eq!(report.poll.unwrap().unwrap(), Outcome::Exhausted);
+        assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+        assert!(report.health.unwrap().is_ok());
+    }
+
+    #[test]
+    fn exhausted_polling_rejects_inconsistent_ledger_before_sending() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        cycles
+            .step(&settings(), &mut store, false, 7200, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+                })
+            })
+            .unwrap();
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute("UPDATE events SET event_type='FAILED'", [])
+            .unwrap();
+        let report = cycles.tick(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("inconsistent ledger query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("inconsistent ledger send"),
+                clock: || Some(7300),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight.unwrap(), Err(StageError::Storage));
+        assert!(report.poll.is_none() && report.delivery.is_none() && report.cleanup.is_none());
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(cycles.remaining, 0);
     }
 
     #[test]

@@ -1114,3 +1114,32 @@ Next: private preflight checkpoint validation before maintenance when polling is
 exhausted, preventing delivery under a regressed/invalid accounting clock while
 preserving pending rows. Terminal compaction, public contract review, SMTP,
 licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: checkpoint preflight with exhausted polling
+
+After bounded capacity checks, orchestration now restores the ledger and plans
+against its durable checkpoint before any stage runs. Restoration failure rejects
+preflight with static storage diagnostics; malformed, unsupported, or future
+checkpoints reject with static time diagnostics. This applies even when the
+controller has exhausted its poll budget, closing the maintenance path that
+previously skipped restoration and discovered bad checkpoints only during later
+health reporting. Pending rows, history, checkpoints, budgets, and failure streaks
+remain unchanged on rejection. Missing checkpoints retain initial-window behavior.
+
+Two tests cover exhausted polling after database reopen with future, malformed,
+invalid-calendar, and pre-epoch checkpoint fixtures, unchanged pending attempt
+numbers, valid-checkpoint recovery without queries, and inconsistent event ID/state
+restoration failure without provider calls. Fault repair is explicit test database
+injection, not an operational automatic repair interface. Successful maintenance
+still uses the original committed query checkpoint and bounded delivery rules.
+Read transactions require the serialized owner; no hard database query deadline
+or automatic corruption recovery is implied.
+
+The full suite passes: 138 Rust tests plus one ignored helper, fifteen custom
+process scenarios, eight SQLite tests, and six hook tests. No dependency, schema,
+public contract, default, or normal executable behavior changed.
+
+Next: review private orchestration invariants and consolidate reusable acceptance
+fixtures before adding another transport, including missing-checkpoint and
+preflight cancellation/ownership coverage. Terminal compaction, public contract
+review, SMTP, licensing, cluster validation, and activation remain pending.
