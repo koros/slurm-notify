@@ -173,3 +173,7 @@ Private storage health tests report sampled queue counts, cleanup eligibility,
 uncertain completion records, and restoration capacity pressure. Truncation is
 explicit; reports contain no job, user, destination, or event identifiers. These
 reports are not yet exposed through a `status` or `doctor` command.
+
+Private poll-health tests track consecutive failed cycles and stale durable query
+checkpoints alongside storage health. Failure streaks are session-local; reports
+restore checkpoint age after restart. No public status command is active yet.

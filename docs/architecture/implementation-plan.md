@@ -699,3 +699,36 @@ Next: private poll-health tracking for consecutive scheduler failures and stale
 successful checkpoints, composing storage counts without raw command output.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and runtime activation remain pending.
+
+## Subsequent increment: private poll-health tracking
+
+The private cycle controller tracks a saturating count of consecutive failed
+cycles and static categories for active/accounting query, reconciliation, invalid
+request, window, and storage failures. Only a successful durable commit clears
+the streak. Cancellation and exhausted budgets neither clear nor increment it.
+Categories contain no raw query output, paths, job identity, or provider data.
+Counts include all attempted cycle failures, not only scheduler failures.
+
+The composed report refreshes the durable checkpoint through bounded restoration,
+even before the first cycle after restart, and adds the storage health sample.
+Checkpoint age is elapsed time since the committed accounting-window end, not
+provider delivery age or actual poll completion latency. A caller-supplied
+positive threshold marks age greater than or equal to the threshold as stale;
+missing checkpoints are stale with unknown age. Invalid policy and clock
+regression are explicit static errors. Failure streaks are in memory and reset
+on a new controller; no persistent health migration is implied. Callers must use
+one controller per cluster. Restoration and storage reports use separate read
+transactions and require the existing serialized owner for consistent composition.
+No public status/doctor command, monitoring loop, default threshold, dependency,
+or production executable behavior changed.
+
+Three tests cover failure-source classification, exact staleness boundaries,
+recovery, cancellation/exhaustion, durable restart checkpoint age, failed commits,
+clock regression, invalid policy, counter saturation, sanitized reports, and
+storage-report failure. The shared suite passes: 116 Rust tests plus one ignored
+helper, ten custom process scenarios, eight SQLite tests, and six hook tests.
+
+Next: private caller-driven orchestration of bounded poll cycles, due delivery,
+cleanup, and health reporting, with failure isolation and cancellation boundaries.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and runtime activation remain pending.

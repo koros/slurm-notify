@@ -34,8 +34,65 @@ enum Outcome {
     Committed { window: Window, events: usize },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Failure {
+    Storage,
+    Window,
+    ActiveQuery,
+    AccountingQuery,
+    Reconciliation,
+    InvalidRequest,
+}
+
+#[derive(Default)]
+struct PollHealth {
+    consecutive_failures: u64,
+    last_failure: Option<Failure>,
+    checkpoint: Option<i64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PollReport {
+    consecutive_failures: u64,
+    last_failure: Option<Failure>,
+    checkpoint_age_seconds: Option<i64>,
+    stale: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ReportError {
+    InvalidInput,
+    ClockRegressed,
+    Storage,
+}
+
+#[derive(Debug)]
+struct HealthReport {
+    poll: PollReport,
+    storage: super::storage::StorageHealth,
+}
+
+impl PollHealth {
+    fn report(&self, now: i64, stale_after: i64) -> Result<PollReport, ReportError> {
+        if now < 0 || stale_after <= 0 {
+            return Err(ReportError::InvalidInput);
+        }
+        let age = self.checkpoint.map(|checkpoint| now - checkpoint);
+        if age.is_some_and(|age| age < 0) {
+            return Err(ReportError::ClockRegressed);
+        }
+        Ok(PollReport {
+            consecutive_failures: self.consecutive_failures,
+            last_failure: self.last_failure,
+            checkpoint_age_seconds: age,
+            stale: age.map(|age| age >= stale_after).unwrap_or(true),
+        })
+    }
+}
+
 struct Cycles {
     remaining: usize,
+    health: PollHealth,
 }
 
 impl Cycles {
@@ -43,13 +100,95 @@ impl Cycles {
         if limit == 0 {
             return Err(Error::InvalidLimit);
         }
-        Ok(Self { remaining: limit })
+        Ok(Self {
+            remaining: limit,
+            health: PollHealth::default(),
+        })
+    }
+
+    fn report(
+        &self,
+        settings: &Settings<'_>,
+        store: &mut Store,
+        now: i64,
+        stale_after: i64,
+        retain_seconds: i64,
+        sample_limit: usize,
+    ) -> Result<HealthReport, ReportError> {
+        // Refresh the durable checkpoint even before the first restarted cycle.
+        self.health.report(now, stale_after)?;
+        let (_, checkpoint) = store
+            .restore(settings.cluster, settings.capacity)
+            .map_err(|_| ReportError::Storage)?;
+        let checkpoint = checkpoint
+            .as_deref()
+            .map(accounting_window::parse_timestamp)
+            .transpose()
+            .map_err(|_| ReportError::Storage)?;
+        let poll = PollHealth {
+            checkpoint,
+            consecutive_failures: self.health.consecutive_failures,
+            last_failure: self.health.last_failure,
+        }
+        .report(now, stale_after)?;
+        let storage = store
+            .health(
+                settings.cluster,
+                now,
+                retain_seconds,
+                settings.capacity,
+                sample_limit,
+            )
+            .map_err(|_| ReportError::Storage)?;
+        Ok(HealthReport { poll, storage })
+    }
+
+    fn step(
+        &mut self,
+        settings: &Settings<'_>,
+        store: &mut Store,
+        cancelled: bool,
+        now: i64,
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    ) -> Result<Outcome, Error> {
+        let result = self.step_inner(settings, store, cancelled, now, query);
+        match &result {
+            Ok(Outcome::Committed { .. }) => {
+                self.health.checkpoint = Some(now);
+                self.health.consecutive_failures = 0;
+                self.health.last_failure = None;
+            }
+            Err(error) => {
+                use super::scheduler::PollError;
+                let failure = match error {
+                    Error::Storage(_) | Error::Poll(DurablePollError::Storage(_)) => {
+                        Failure::Storage
+                    }
+                    Error::Window(_) => Failure::Window,
+                    Error::Poll(DurablePollError::Poll(PollError::Active(_))) => {
+                        Failure::ActiveQuery
+                    }
+                    Error::Poll(DurablePollError::Poll(PollError::Accounting(_))) => {
+                        Failure::AccountingQuery
+                    }
+                    Error::Poll(DurablePollError::Poll(PollError::Parse(_))) => {
+                        Failure::Reconciliation
+                    }
+                    _ => Failure::InvalidRequest,
+                };
+                self.health.consecutive_failures =
+                    self.health.consecutive_failures.saturating_add(1);
+                self.health.last_failure = Some(failure);
+            }
+            _ => {}
+        }
+        result
     }
 
     // Every attempted cycle consumes the finite budget, including failures.
     // Caller supplies cadence and checks cancellation before starting each cycle.
     // An in-flight query retains the existing scheduler deadline, not cancellation.
-    fn step(
+    fn step_inner(
         &mut self,
         settings: &Settings<'_>,
         store: &mut Store,
@@ -69,6 +208,11 @@ impl Cycles {
             .restore(settings.cluster, settings.capacity)
             .map_err(Error::Storage)?;
         let window = accounting_window::plan(now, checkpoint.as_deref(), settings.window)
+            .map_err(Error::Window)?;
+        self.health.checkpoint = checkpoint
+            .as_deref()
+            .map(accounting_window::parse_timestamp)
+            .transpose()
             .map_err(Error::Window)?;
         let request = PollRequest {
             active_program: settings.active_program,
@@ -122,6 +266,151 @@ mod tests {
 
     fn open(directory: &Directory) -> Store {
         Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
+    }
+
+    #[test]
+    fn poll_health_tracks_failures_staleness_and_recovery_without_private_details() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(5).unwrap();
+        assert!(
+            cycles
+                .report(&settings(), &mut store, 7200, 60, 50, 10)
+                .unwrap()
+                .poll
+                .stale
+        );
+        cycles
+            .step(&settings(), &mut store, false, 7200, |_, _, _| {
+                Ok(String::new())
+            })
+            .unwrap();
+        assert!(!cycles.health.report(7259, 60).unwrap().stale);
+        assert!(cycles.health.report(7260, 60).unwrap().stale);
+        assert!(cycles
+            .step(&settings(), &mut store, false, 7260, |_, _, _| Err(
+                QueryError::Timeout
+            ))
+            .is_err());
+        assert!(cycles
+            .step(&settings(), &mut store, false, 7320, |command, _, _| {
+                if command.get_program() == "squeue" {
+                    Ok(String::new())
+                } else {
+                    Err(QueryError::MissingCommand)
+                }
+            })
+            .is_err());
+        let health = cycles
+            .report(&settings(), &mut store, 7320, 60, 50, 10)
+            .unwrap();
+        assert_eq!(health.poll.consecutive_failures, 2);
+        assert_eq!(health.poll.last_failure, Some(Failure::AccountingQuery));
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(120));
+        let text = format!("{health:?}");
+        assert!(!text.contains("alice") && !text.contains("cluster") && !text.contains("sacct"));
+        assert_eq!(
+            health.storage,
+            store.health("cluster", 7320, 50, 10, 10).unwrap()
+        );
+        cycles
+            .step(&settings(), &mut store, true, 7320, |_, _, _| {
+                panic!("cancelled query")
+            })
+            .unwrap();
+        assert_eq!(cycles.health.report(7320, 60).unwrap(), health.poll);
+        cycles
+            .step(&settings(), &mut store, false, 7380, |_, _, _| {
+                Ok(String::new())
+            })
+            .unwrap();
+        let recovered = cycles.health.report(7380, 60).unwrap();
+        assert_eq!(recovered.consecutive_failures, 0);
+        assert_eq!(recovered.last_failure, None);
+        assert!(!recovered.stale);
+    }
+
+    #[test]
+    fn restarted_failure_uses_durable_checkpoint_and_commit_failure_is_not_success() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        Cycles::new(1)
+            .unwrap()
+            .step(&settings(), &mut store, false, 7200, |_, _, _| {
+                Ok(String::new())
+            })
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        let mut restarted = Cycles::new(2).unwrap();
+        let initial = restarted
+            .report(&settings(), &mut store, 7300, 60, 50, 10)
+            .unwrap();
+        assert_eq!(initial.poll.checkpoint_age_seconds, Some(100));
+        assert_eq!(initial.poll.consecutive_failures, 0);
+        assert!(restarted
+            .step(&settings(), &mut store, false, 7300, |_, _, _| Err(
+                QueryError::Timeout
+            ))
+            .is_err());
+        assert_eq!(
+            restarted
+                .health
+                .report(7300, 60)
+                .unwrap()
+                .checkpoint_age_seconds,
+            Some(100)
+        );
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_health_commit BEFORE UPDATE ON checkpoints BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+        assert!(restarted
+            .step(&settings(), &mut store, false, 7360, |_, _, _| Ok(
+                String::new()
+            ))
+            .is_err());
+        let report = restarted.health.report(7360, 60).unwrap();
+        assert_eq!(report.consecutive_failures, 2);
+        assert_eq!(report.last_failure, Some(Failure::Storage));
+        assert_eq!(report.checkpoint_age_seconds, Some(160));
+        restarted
+            .step(&settings(), &mut store, false, 7400, |_, _, _| {
+                panic!("exhausted query")
+            })
+            .unwrap();
+        assert_eq!(restarted.health.report(7360, 60).unwrap(), report);
+    }
+
+    #[test]
+    fn health_rejects_clock_regression_and_invalid_policy_and_saturates_failures() {
+        let mut health = PollHealth {
+            checkpoint: Some(7200),
+            consecutive_failures: 0,
+            last_failure: None,
+        };
+        assert_eq!(health.report(7199, 60), Err(ReportError::ClockRegressed));
+        assert_eq!(health.report(-1, 60), Err(ReportError::InvalidInput));
+        assert_eq!(health.report(7200, 0), Err(ReportError::InvalidInput));
+        health.checkpoint = None;
+        assert_eq!(
+            health.report(7200, 60).unwrap().checkpoint_age_seconds,
+            None
+        );
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        cycles.health.consecutive_failures = u64::MAX;
+        assert!(cycles
+            .step(&settings(), &mut store, false, 7200, |_, _, _| Err(
+                QueryError::Timeout
+            ))
+            .is_err());
+        assert_eq!(cycles.health.consecutive_failures, u64::MAX);
+        assert_eq!(
+            cycles
+                .report(&settings(), &mut store, 7200, 60, 50, 0)
+                .unwrap_err(),
+            ReportError::Storage
+        );
     }
 
     #[test]

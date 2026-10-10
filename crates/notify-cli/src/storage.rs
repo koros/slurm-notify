@@ -86,7 +86,7 @@ struct RetentionCandidate {
 
 // Counts describe a bounded sample; truncation explicitly prevents exact totals.
 #[derive(Debug, PartialEq, Eq)]
-struct StorageHealth {
+pub(super) struct StorageHealth {
     jobs_sampled: usize,
     events_sampled: usize,
     jobs_over_capacity: bool,
@@ -102,7 +102,7 @@ struct StorageHealth {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum HealthError {
+pub(super) enum HealthError {
     InvalidInput,
     Database,
 }
@@ -159,7 +159,7 @@ impl Store {
 
     // Constant-size report; read transaction keeps all samples consistent.
     // LIMIT bounds inspected rows, not SQLite wall time or underlying scan work.
-    fn health(
+    pub(super) fn health(
         &mut self,
         cluster: &str,
         now: i64,

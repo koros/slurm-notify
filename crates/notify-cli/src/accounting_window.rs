@@ -43,7 +43,7 @@ fn timestamp(seconds: i64) -> Result<String, Error> {
     ))
 }
 
-fn parse_timestamp(value: &str) -> Result<i64, Error> {
+pub(super) fn parse_timestamp(value: &str) -> Result<i64, Error> {
     if !super::scheduler::valid_timestamp(value) {
         return Err(Error::InvalidTime);
     }
