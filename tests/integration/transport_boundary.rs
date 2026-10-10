@@ -868,6 +868,15 @@ fn orchestrated_blocked_dispatch_restart() {
         },
     );
     assert_eq!((calls, clocks), (2, 3));
+    let failure = blocked.delivery_failure.as_ref().unwrap();
+    assert_eq!(failure.committed.delivered, 1);
+    assert_eq!(
+        failure.diagnostic,
+        Some(supervised_provider::Diagnostic::Spawn)
+    );
+    assert!(!failure.acceptance_uncertain);
+    let text = format!("{failure:?}");
+    assert!(!text.contains("nonexistent") && !text.contains("internal-v1:"));
     assert_eq!(
         blocked.delivery.unwrap().unwrap_err(),
         StageError::DispatchBlocked

@@ -118,6 +118,7 @@ pub(super) enum StageError {
 #[derive(Debug, Default)]
 pub(super) struct TickReport {
     pub(super) cancelled: bool,
+    pub(super) delivery_failure: Option<super::delivery::BatchFailure>,
     pub(super) preflight: Option<Result<(), StageError>>,
     pub(super) poll: Option<Result<Outcome, StageError>>,
     pub(super) delivery: Option<Result<super::delivery::BatchReport, StageError>>,
@@ -224,7 +225,7 @@ impl Cycles {
         C: FnMut() -> Option<i64>,
         X: FnMut() -> bool,
     {
-        use super::delivery::{deliver_due_fallible, WorkerError};
+        use super::delivery::{deliver_due_detailed, FailureKind};
         let mut report = TickReport::default();
         if (hooks.cancelled)() {
             report.cancelled = true;
@@ -278,7 +279,7 @@ impl Cycles {
             report.delivery = Some(Err(StageError::Time));
             return report;
         };
-        let delivery = deliver_due_fallible(
+        let delivery = deliver_due_detailed(
             store,
             settings.cluster,
             delivery_now,
@@ -288,12 +289,19 @@ impl Cycles {
             &mut clock,
         );
         let stop = delivery.is_err();
-        report.delivery = Some(delivery.map_err(|error| match error {
-            WorkerError::Storage(_) => StageError::Storage,
-            WorkerError::InvalidTime => StageError::Time,
-            WorkerError::InvalidPolicy => StageError::Policy,
-            WorkerError::DispatchBlocked(_) => StageError::DispatchBlocked,
-        }));
+        report.delivery = Some(match delivery {
+            Ok(batch) => Ok(batch),
+            Err(failure) => {
+                let error = match failure.kind {
+                    FailureKind::Storage => StageError::Storage,
+                    FailureKind::Time => StageError::Time,
+                    FailureKind::Policy => StageError::Policy,
+                    FailureKind::DispatchBlocked => StageError::DispatchBlocked,
+                };
+                report.delivery_failure = Some(failure);
+                Err(error)
+            }
+        });
         if stop {
             return report;
         }

@@ -82,6 +82,33 @@ pub(super) struct BatchReport {
     pub(super) failed: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FailureKind {
+    Policy,
+    Storage,
+    Time,
+    DispatchBlocked,
+}
+
+pub(super) struct BatchFailure {
+    pub(super) committed: BatchReport,
+    pub(super) kind: FailureKind,
+    pub(super) diagnostic: Option<super::supervised_provider::Diagnostic>,
+    pub(super) acceptance_uncertain: bool,
+    cause: WorkerError,
+}
+
+impl std::fmt::Debug for BatchFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchFailure")
+            .field("committed", &self.committed)
+            .field("kind", &self.kind)
+            .field("diagnostic", &self.diagnostic)
+            .field("acceptance_uncertain", &self.acceptance_uncertain)
+            .finish()
+    }
+}
+
 // Provider sends occur outside SQLite transactions. Stop on storage failure so
 // an accepted but unrecorded send is visible, and can be retried with the same ID.
 // The future real provider must enforce its own transport timeout.
@@ -132,65 +159,103 @@ pub(super) fn deliver_due_fallible(
     now: i64,
     limit: usize,
     policy: RetryPolicy,
+    send: impl FnMut(&DueDelivery) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
+    clock: impl FnMut() -> Option<i64>,
+) -> Result<BatchReport, WorkerError> {
+    deliver_due_detailed(store, cluster, now, limit, policy, send, clock)
+        .map_err(|failure| failure.cause)
+}
+
+pub(super) fn deliver_due_detailed(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
     mut send: impl FnMut(
         &DueDelivery,
     ) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
     mut clock: impl FnMut() -> Option<i64>,
-) -> Result<BatchReport, WorkerError> {
-    if !policy.valid_at(now) {
-        return Err(WorkerError::InvalidPolicy);
-    }
-    let items = store
-        .due_deliveries(cluster, now, limit)
-        .map_err(WorkerError::Storage)?;
+) -> Result<BatchReport, BatchFailure> {
     let mut report = BatchReport::default();
-    let mut previous_completion = now;
-    for item in items {
-        if item.attempt_number > i64::from(policy.max_attempts) {
-            store
-                .retire_exhausted(&item, policy.max_attempts)
-                .map_err(WorkerError::Storage)?;
-            report.failed += 1;
-            continue;
+    let mut uncertain = false;
+    let result = (|| -> Result<(), WorkerError> {
+        if !policy.valid_at(now) {
+            return Err(WorkerError::InvalidPolicy);
         }
-        let provider = send(&item).map_err(WorkerError::DispatchBlocked)?;
-        // Clock failure/regression after acceptance must remain visible and replayable.
-        let completed_at = clock()
-            .filter(|time| *time >= previous_completion)
-            .ok_or(WorkerError::InvalidTime)?;
-        previous_completion = completed_at;
-        let (outcome, retry_at) = match provider {
-            ProviderOutcome::Delivered => (DeliveryOutcome::Success, None),
-            ProviderOutcome::Rejected => (DeliveryOutcome::TerminalFailure, None),
-            retry @ (ProviderOutcome::Retry | ProviderOutcome::RetryAfter(_)) => {
-                let hint = match retry {
-                    ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => seconds,
-                    ProviderOutcome::RetryAfter(_) => return Err(WorkerError::InvalidPolicy),
-                    _ => 0,
-                };
-                let retry_at = if item.attempt_number < i64::from(policy.max_attempts) {
-                    Some(
-                        completed_at
-                            .checked_add(policy.delay(item.attempt_number).max(hint))
-                            .and_then(|time| time.checked_add(policy.jitter(&item)))
-                            .ok_or(WorkerError::InvalidPolicy)?,
-                    )
-                } else {
-                    None
-                };
-                (DeliveryOutcome::TransientFailure, retry_at)
-            }
-        };
-        store
-            .record_delivery(&item, outcome, completed_at, retry_at)
+        let items = store
+            .due_deliveries(cluster, now, limit)
             .map_err(WorkerError::Storage)?;
-        match (outcome, retry_at) {
-            (DeliveryOutcome::Success, _) => report.delivered += 1,
-            (DeliveryOutcome::TransientFailure, Some(_)) => report.retrying += 1,
-            _ => report.failed += 1,
+        let mut previous_completion = now;
+        for item in items {
+            if item.attempt_number > i64::from(policy.max_attempts) {
+                store
+                    .retire_exhausted(&item, policy.max_attempts)
+                    .map_err(WorkerError::Storage)?;
+                report.failed += 1;
+                continue;
+            }
+            let provider = send(&item).map_err(WorkerError::DispatchBlocked)?;
+            uncertain = true;
+            // Clock failure/regression after acceptance must remain visible and replayable.
+            let completed_at = clock()
+                .filter(|time| *time >= previous_completion)
+                .ok_or(WorkerError::InvalidTime)?;
+            previous_completion = completed_at;
+            let (outcome, retry_at) = match provider {
+                ProviderOutcome::Delivered => (DeliveryOutcome::Success, None),
+                ProviderOutcome::Rejected => (DeliveryOutcome::TerminalFailure, None),
+                retry @ (ProviderOutcome::Retry | ProviderOutcome::RetryAfter(_)) => {
+                    let hint = match retry {
+                        ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => seconds,
+                        ProviderOutcome::RetryAfter(_) => return Err(WorkerError::InvalidPolicy),
+                        _ => 0,
+                    };
+                    let retry_at = if item.attempt_number < i64::from(policy.max_attempts) {
+                        Some(
+                            completed_at
+                                .checked_add(policy.delay(item.attempt_number).max(hint))
+                                .and_then(|time| time.checked_add(policy.jitter(&item)))
+                                .ok_or(WorkerError::InvalidPolicy)?,
+                        )
+                    } else {
+                        None
+                    };
+                    (DeliveryOutcome::TransientFailure, retry_at)
+                }
+            };
+            store
+                .record_delivery(&item, outcome, completed_at, retry_at)
+                .map_err(WorkerError::Storage)?;
+            uncertain = false;
+            match (outcome, retry_at) {
+                (DeliveryOutcome::Success, _) => report.delivered += 1,
+                (DeliveryOutcome::TransientFailure, Some(_)) => report.retrying += 1,
+                _ => report.failed += 1,
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(report),
+        Err(cause) => {
+            let (kind, diagnostic) = match &cause {
+                WorkerError::InvalidPolicy => (FailureKind::Policy, None),
+                WorkerError::InvalidTime => (FailureKind::Time, None),
+                WorkerError::Storage(_) => (FailureKind::Storage, None),
+                WorkerError::DispatchBlocked(diagnostic) => {
+                    (FailureKind::DispatchBlocked, Some(*diagnostic))
+                }
+            };
+            Err(BatchFailure {
+                committed: report,
+                kind,
+                diagnostic,
+                acceptance_uncertain: uncertain,
+                cause,
+            })
         }
     }
-    Ok(report)
 }
 
 #[cfg(test)]
@@ -238,6 +303,55 @@ mod tests {
     }
     fn db(directory: &Directory) -> rusqlite::Connection {
         rusqlite::Connection::open(directory.path()).unwrap()
+    }
+
+    #[test]
+    fn detailed_failure_counts_only_commits_and_marks_unrecorded_send_uncertain() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b"]);
+        let mut completions = [Some(20), None].into_iter();
+        let failure = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            |_| Ok(ProviderOutcome::Delivered),
+            || completions.next().unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Time);
+        assert_eq!(failure.committed.delivered, 1);
+        assert_eq!(failure.committed.retrying + failure.committed.failed, 0);
+        assert!(failure.acceptance_uncertain);
+        assert_eq!(failure.diagnostic, None);
+        drop(store);
+        let store = open(&directory);
+        assert_eq!(
+            store.due_deliveries("cluster", 30, 10).unwrap()[0].destination,
+            "b"
+        );
+    }
+
+    #[test]
+    fn detailed_pre_send_failure_reports_zero_commits_without_uncertainty() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a"]);
+        let mut invalid = policy();
+        invalid.max_attempts = 0;
+        let failure = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            invalid,
+            |_| panic!("invalid send"),
+            || panic!("invalid clock"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Policy);
+        assert_eq!(failure.committed, BatchReport::default());
+        assert!(!failure.acceptance_uncertain);
     }
 
     #[test]

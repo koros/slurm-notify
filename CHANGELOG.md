@@ -50,3 +50,4 @@ the design handoff; no release has been published.
 - Private supervised-provider classification with explicit acceptance uncertainty, static parent diagnostics, blocked local dispatch failures, preserved retry hints, and timeout recovery harness integration.
 - Private fallible provider worker callbacks that stop blocked dispatch without fabricated attempts, preserve earlier commits and pending identities across restart, and retain classified timeout/provider-delay retries.
 - Private fallible orchestration with blocked-dispatch maintenance stop and owned process acceptance proving partial delivery commits survive helper spawn failure and restart recovery without resends.
+- Private partial delivery failure reports with committed outcome counts, static failure/dispatch categories, and unrecorded-send uncertainty, retained by orchestration and verified in blocked-helper acceptance.

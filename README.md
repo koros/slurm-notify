@@ -206,3 +206,7 @@ uncertain post-spawn failures, and local dispatch failures that require interven
 The timeout recovery acceptance test uses this policy; blocked dispatch is now supported by a private fallible delivery worker.
 Private orchestration now supports fallible callbacks and stops maintenance after
 blocked dispatch; owned process tests verify recovery after helper spawn failure.
+
+Private orchestration retains committed batch counts when a later delivery fails,
+with sanitized failure categories and an explicit flag for unrecorded provider
+outcomes. Failed items are excluded from committed counts.

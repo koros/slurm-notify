@@ -974,3 +974,32 @@ Next: preserve sanitized partial delivery batch progress alongside failure detai
 so orchestration can report earlier committed work when a later dispatch blocks.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: sanitized partial delivery failure reports
+
+The private detailed worker returns committed batch counts alongside a static
+failure category, optional blocked-dispatch diagnostic, and unrecorded-outcome
+uncertainty flag. Counts advance only after each storage commit, including budget
+retirement. A callback block or pre-send failure has no uncertain send; failure
+after a provider callback and before its outcome commit flags uncertainty. This
+flag describes incomplete durable bookkeeping, conservatively covering retry or
+rejection outcomes too; it does not establish external acceptance.
+
+Orchestration retains this report when delivery fails and still stops later
+maintenance. Existing worker wrappers preserve their previous error behavior.
+The failure's Debug output omits its internal storage error cause and shows only
+counts, static categories, and flags. No event/destination IDs, command paths,
+payloads, or raw database diagnostics are added to reports. Prior successful
+commits remain durable and the failed item is excluded from committed totals.
+
+Two tests verify partial success followed by completion-clock failure and zero
+progress on invalid policy. The owned blocked-helper process scenario additionally
+asserts one committed delivery, spawn diagnostic, no uncertain send, and sanitized
+output. The full suite passes: 129 Rust tests plus one ignored helper, fourteen
+custom process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+migration, public contract, runtime default, or executable behavior changed.
+
+Next: private progress-report coverage for transient retries, terminal failures,
+and budget retirement before a later storage failure, ensuring reported counts
+match durable state across reopen. Terminal ledger compaction, public contract
+review, SMTP, licensing, cluster validation, and activation remain pending.
