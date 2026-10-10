@@ -48,3 +48,4 @@ the design handoff; no release has been published.
 - Private orchestration preflight for scheduler settings, unique nonempty destinations, numeric limits, window/retry policies, clock range, and retry overflow, with side-effect rejection and valid-boundary tests.
 - Owned orchestration acceptance for supervised HTTP acknowledgment timeout, persisted completion-based retry, pending-send cleanup protection, restart recovery with stable ID, and post-recovery deduplication.
 - Private supervised-provider classification with explicit acceptance uncertainty, static parent diagnostics, blocked local dispatch failures, preserved retry hints, and timeout recovery harness integration.
+- Private fallible provider worker callbacks that stop blocked dispatch without fabricated attempts, preserve earlier commits and pending identities across restart, and retain classified timeout/provider-delay retries.

@@ -32,6 +32,12 @@ pub(super) struct Report {
     pub(super) acceptance: Acceptance,
 }
 
+impl Report {
+    pub(super) fn into_dispatch(self) -> Result<ProviderOutcome, Diagnostic> {
+        self.outcome.ok_or(self.diagnostic)
+    }
+}
+
 pub(super) fn classify(result: Result<ProviderOutcome, transport::Error>) -> Report {
     use transport::Error;
     let (outcome, diagnostic, acceptance) = match result {

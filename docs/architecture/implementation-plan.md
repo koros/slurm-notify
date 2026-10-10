@@ -914,3 +914,33 @@ stops a batch without recording a fabricated delivery attempt, preserving earlie
 commits and retryable pending rows across restart. Terminal ledger compaction,
 public contract review, SMTP, licensing, cluster validation, and activation remain
 pending.
+
+## Subsequent increment: private fallible delivery callbacks
+
+The private worker now accepts provider callbacks returning either an outcome or
+static blocked-dispatch diagnostic. A classifier report converts to this result
+without inventing an outcome when dispatch was not attempted. Blocked callbacks
+stop the batch before sampling completion time or writing an attempt. Previously
+committed destinations stay committed; the blocked and later destinations retain
+their due times, IDs, and attempt numbers. Recovery after correcting the local
+problem retries those pending rows without resending completed destinations.
+
+The existing infallible entry point delegates to the same worker implementation,
+preserving current orchestration and acceptance behavior. Classified post-spawn
+timeout still records a transient attempt with normal bounded retry semantics.
+Only callbacks that establish no external dispatch should return blocked; uncertain
+post-send failures must retain the retry classification. Callback errors are static
+and do not include raw secrets or command errors. The worker still stops on
+storage or completion-clock failure after external acceptance.
+
+Three tests cover blocked first dispatch without clock/attempt writes, a later
+block preserving earlier commits and pending identity across reopen, successful
+recovery, classified timeout backoff, and provider-delay preservation. The full
+shared suite passes: 127 Rust tests plus one ignored helper, thirteen custom
+process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+schema, public contract, default, or normal executable behavior changed.
+
+Next: private fallible orchestration callbacks and owned process acceptance for
+blocked helper dispatch after a prior successful destination, with maintenance
+stop and restart recovery. Terminal ledger compaction, public contract review,
+SMTP, licensing, cluster validation, and activation remain pending.

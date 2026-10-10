@@ -112,6 +112,7 @@ pub(super) enum StageError {
     Storage,
     Time,
     Policy,
+    DispatchBlocked,
 }
 
 #[derive(Debug, Default)]
@@ -253,6 +254,7 @@ impl Cycles {
             WorkerError::Storage(_) => StageError::Storage,
             WorkerError::InvalidTime => StageError::Time,
             WorkerError::InvalidPolicy => StageError::Policy,
+            WorkerError::DispatchBlocked(_) => StageError::DispatchBlocked,
         }));
         if stop {
             return report;

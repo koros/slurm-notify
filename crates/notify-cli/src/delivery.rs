@@ -72,6 +72,7 @@ pub(super) enum WorkerError {
     InvalidPolicy,
     Storage(StorageError),
     InvalidTime,
+    DispatchBlocked(super::supervised_provider::Diagnostic),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -112,6 +113,28 @@ pub(super) fn deliver_due_with_clock(
     limit: usize,
     policy: RetryPolicy,
     mut send: impl FnMut(&DueDelivery) -> ProviderOutcome,
+    clock: impl FnMut() -> Option<i64>,
+) -> Result<BatchReport, WorkerError> {
+    deliver_due_fallible(
+        store,
+        cluster,
+        now,
+        limit,
+        policy,
+        |item| Ok(send(item)),
+        clock,
+    )
+}
+
+pub(super) fn deliver_due_fallible(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
+    mut send: impl FnMut(
+        &DueDelivery,
+    ) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
     mut clock: impl FnMut() -> Option<i64>,
 ) -> Result<BatchReport, WorkerError> {
     if !policy.valid_at(now) {
@@ -130,7 +153,7 @@ pub(super) fn deliver_due_with_clock(
             report.failed += 1;
             continue;
         }
-        let provider = send(&item);
+        let provider = send(&item).map_err(WorkerError::DispatchBlocked)?;
         // Clock failure/regression after acceptance must remain visible and replayable.
         let completed_at = clock()
             .filter(|time| *time >= previous_completion)
@@ -215,6 +238,149 @@ mod tests {
     }
     fn db(directory: &Directory) -> rusqlite::Connection {
         rusqlite::Connection::open(directory.path()).unwrap()
+    }
+
+    #[test]
+    fn blocked_first_dispatch_does_not_sample_completion_clock_or_record_attempt() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let result = deliver_due_fallible(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            |_| {
+                super::super::supervised_provider::classify(Err(
+                    super::super::transport::Error::Spawn,
+                ))
+                .into_dispatch()
+            },
+            || panic!("blocked completion clock"),
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerError::DispatchBlocked(
+                super::super::supervised_provider::Diagnostic::Spawn
+            ))
+        ));
+        drop(store);
+        let store = open(&directory);
+        let pending = store.due_deliveries("cluster", 10, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempt_number, 1);
+    }
+
+    #[test]
+    fn later_blocked_dispatch_preserves_earlier_commit_and_pending_identity_after_restart() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b", "c"]);
+        let pending = store.due_deliveries("cluster", 10, 10).unwrap();
+        let mut calls = 0;
+        let mut clocks = 0;
+        let result = deliver_due_fallible(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            |item| {
+                calls += 1;
+                if item.destination == "a" {
+                    Ok(ProviderOutcome::Delivered)
+                } else {
+                    super::super::supervised_provider::classify(Err(
+                        super::super::transport::Error::InvalidInput,
+                    ))
+                    .into_dispatch()
+                }
+            },
+            || {
+                clocks += 1;
+                Some(20)
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerError::DispatchBlocked(
+                super::super::supervised_provider::Diagnostic::InvalidInput
+            ))
+        ));
+        assert_eq!((calls, clocks), (2, 1));
+        drop(store);
+        let mut store = open(&directory);
+        let remaining = store.due_deliveries("cluster", 30, 10).unwrap();
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|item| item.destination.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+        for item in &remaining {
+            assert_eq!(item.attempt_number, 1);
+            assert_eq!(item.event_id, pending[0].event_id);
+        }
+        let report = deliver_due_fallible(
+            &mut store,
+            "cluster",
+            30,
+            10,
+            policy(),
+            |_| {
+                super::super::supervised_provider::classify(Ok(ProviderOutcome::Delivered))
+                    .into_dispatch()
+            },
+            || Some(30),
+        )
+        .unwrap();
+        assert_eq!(report.delivered, 2);
+        assert!(store.due_deliveries("cluster", 30, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn classified_timeout_records_a_retry_and_retains_provider_delay() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let report = deliver_due_fallible(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy(),
+            |_| {
+                super::super::supervised_provider::classify(Err(
+                    super::super::transport::Error::Timeout,
+                ))
+                .into_dispatch()
+            },
+            || Some(20),
+        )
+        .unwrap();
+        assert_eq!(report.retrying, 1);
+        assert!(store.due_deliveries("cluster", 24, 10).unwrap().is_empty());
+        assert_eq!(
+            store.due_deliveries("cluster", 25, 10).unwrap()[0].attempt_number,
+            2
+        );
+        deliver_due_fallible(
+            &mut store,
+            "cluster",
+            25,
+            10,
+            policy(),
+            |_| {
+                super::super::supervised_provider::classify(Ok(ProviderOutcome::RetryAfter(60)))
+                    .into_dispatch()
+            },
+            || Some(30),
+        )
+        .unwrap();
+        assert!(store.due_deliveries("cluster", 89, 10).unwrap().is_empty());
+        assert_eq!(
+            store.due_deliveries("cluster", 90, 10).unwrap()[0].attempt_number,
+            3
+        );
     }
 
     #[test]

@@ -203,5 +203,5 @@ external notification when a provider does not honor idempotency keys.
 
 Private supervised-provider classification now distinguishes acknowledged outcomes,
 uncertain post-spawn failures, and local dispatch failures that require intervention.
-The timeout recovery acceptance test uses this policy; blocked dispatch integration
-with the durable delivery worker remains pending.
+The timeout recovery acceptance test uses this policy; blocked dispatch is now supported by a private fallible delivery worker.
+Orchestration callback integration remains pending.
