@@ -1,5 +1,5 @@
-//! Private implicit-TLS greeting experiment, with no submission or AUTH path.
-use super::smtp_reply::{read_reply, Limits};
+//! Private implicit-TLS and required-STARTTLS experiments; no AUTH or submission.
+use super::smtp_reply::{read_reply, read_reply_with_text, Limits};
 use std::{io::Write, net::TcpStream, sync::Arc};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -7,6 +7,7 @@ enum Error {
     Tls,
     Io,
     Reply,
+    Upgrade,
 }
 
 // Socket deadlines must already be set. Parent supervision is still required
@@ -37,6 +38,69 @@ fn greeting(
     {
         return Err(Error::Reply);
     }
+    stream
+        .write_all(b"EHLO fixture.invalid\r\n")
+        .and_then(|()| stream.flush())
+        .map_err(|_| Error::Io)?;
+    if read_reply(&mut stream, limits())
+        .map_err(|_| Error::Reply)?
+        .code
+        != 250
+    {
+        return Err(Error::Reply);
+    }
+    stream.conn.send_close_notify();
+    stream.flush().map_err(|_| Error::Io)?;
+    Ok(())
+}
+
+fn required_starttls(
+    mut socket: TcpStream,
+    config: Arc<rustls::ClientConfig>,
+    name: rustls::pki_types::ServerName<'static>,
+) -> Result<(), Error> {
+    let limits = || Limits {
+        line_bytes: 128,
+        total_bytes: 256,
+        lines: 4,
+    };
+    if read_reply(&mut socket, limits())
+        .map_err(|_| Error::Reply)?
+        .code
+        != 220
+    {
+        return Err(Error::Reply);
+    }
+    socket
+        .write_all(b"EHLO fixture.invalid\r\n")
+        .map_err(|_| Error::Io)?;
+    let mut advertised = false;
+    let reply = read_reply_with_text(&mut socket, limits(), |number, text| {
+        // EHLO's first line identifies the server; subsequent lines are extensions.
+        if number > 1 && text.eq_ignore_ascii_case(b"STARTTLS") {
+            advertised = true;
+        }
+    })
+    .map_err(|_| Error::Reply)?;
+    if reply.code != 250 || !advertised {
+        return Err(Error::Upgrade);
+    }
+    socket.write_all(b"STARTTLS\r\n").map_err(|_| Error::Io)?;
+    if read_reply(&mut socket, limits())
+        .map_err(|_| Error::Reply)?
+        .code
+        != 220
+    {
+        return Err(Error::Upgrade);
+    }
+    let mut connection = rustls::ClientConnection::new(config, name).map_err(|_| Error::Tls)?;
+    while connection.is_handshaking() {
+        connection
+            .complete_io(&mut socket)
+            .map_err(|_| Error::Tls)?;
+    }
+    let mut stream = rustls::StreamOwned::new(connection, socket);
+    // No capabilities survive the plaintext EHLO. Obtain a fresh verified reply.
     stream
         .write_all(b"EHLO fixture.invalid\r\n")
         .and_then(|()| stream.flush())
@@ -216,5 +280,179 @@ mod tests {
         );
         assert_eq!(result, Err(Error::Reply));
         assert!(observation.ehlo_only);
+    }
+    fn starttls_fixture(
+        capabilities: &'static [u8],
+        upgrade: &'static [u8],
+        certificate_name: &str,
+        expired: bool,
+        trust: bool,
+        secure_reply: &'static [u8],
+    ) -> (Result<(), Error>, usize, usize) {
+        let mut params = rcgen::CertificateParams::new(vec![certificate_name.into()]);
+        if expired {
+            params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+            params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        }
+        let cert = rcgen::Certificate::from_params(params).unwrap();
+        let der = CertificateDer::from(cert.serialize_der().unwrap());
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
+        let server = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![der.clone()], key)
+            .unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        if trust {
+            roots.add(der).unwrap();
+        }
+        let client = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        fn command(stream: &mut impl Read) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let mut byte = [0];
+            while bytes.len() < 64 && matches!(stream.read(&mut byte), Ok(1)) {
+                bytes.push(byte[0]);
+                if bytes.ends_with(b"\r\n") {
+                    break;
+                }
+            }
+            bytes
+        }
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline);
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => panic!("fixture accept failed"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            socket.write_all(b"220 ready\r\n").unwrap();
+            assert!(command(&mut socket) == b"EHLO fixture.invalid\r\n");
+            socket.write_all(capabilities).unwrap();
+            let next = command(&mut socket);
+            if next.is_empty() {
+                return (1, 0);
+            }
+            assert!(next == b"STARTTLS\r\n");
+            socket.write_all(upgrade).unwrap();
+            if upgrade != b"220 upgrade\r\n" {
+                assert!(command(&mut socket).is_empty());
+                return (2, 0);
+            }
+            let connection = rustls::ServerConnection::new(Arc::new(server)).unwrap();
+            let mut stream = rustls::StreamOwned::new(connection, socket);
+            let secure = command(&mut stream);
+            if secure.is_empty() {
+                return (2, 0);
+            }
+            assert!(secure == b"EHLO fixture.invalid\r\n");
+            stream
+                .write_all(secure_reply)
+                .and_then(|()| stream.flush())
+                .unwrap();
+            assert!(command(&mut stream).is_empty());
+            (2, 1)
+        });
+        let socket = TcpStream::connect_timeout(&address, Duration::from_secs(1)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        socket
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let result = required_starttls(
+            socket,
+            Arc::new(client),
+            "relay.invalid".try_into().unwrap(),
+        );
+        let (plain, secure) = handle.join().unwrap();
+        (result, plain, secure)
+    }
+
+    #[test]
+    fn required_upgrade_rejects_absent_misleading_and_refused_starttls() {
+        for capabilities in [
+            &b"250-relay\r\n250 AUTH PLAIN\r\n"[..],
+            &b"250 STARTTLS\r\n"[..],
+            &b"250-relay\r\n250 XSTARTTLS\r\n"[..],
+            &b"250-relay\r\n250 STARTTLS extra\r\n"[..],
+        ] {
+            assert_eq!(
+                starttls_fixture(
+                    capabilities,
+                    b"220 upgrade\r\n",
+                    "relay.invalid",
+                    false,
+                    true,
+                    b"250 ready\r\n"
+                ),
+                (Err(Error::Upgrade), 1, 0)
+            );
+        }
+        for refusal in [&b"454 unavailable\r\n"[..], &b"550 refused\r\n"[..]] {
+            assert_eq!(
+                starttls_fixture(
+                    b"250-relay\r\n250 STARTTLS\r\n",
+                    refusal,
+                    "relay.invalid",
+                    false,
+                    true,
+                    b"250 ready\r\n"
+                ),
+                (Err(Error::Upgrade), 2, 0)
+            );
+        }
+    }
+
+    #[test]
+    fn upgrade_verifies_certificate_before_fresh_ehlo() {
+        for (name, expired, trust, expected) in [
+            ("relay.invalid", false, true, Ok(())),
+            ("relay.invalid", false, false, Err(Error::Tls)),
+            ("other.invalid", false, true, Err(Error::Tls)),
+            ("relay.invalid", true, true, Err(Error::Tls)),
+        ] {
+            let (result, plain, secure) = starttls_fixture(
+                b"250-relay\r\n250 starttls\r\n",
+                b"220 upgrade\r\n",
+                name,
+                expired,
+                trust,
+                b"250-secure\r\n250 AUTH PLAIN\r\n",
+            );
+            assert_eq!(secure, usize::from(expected.is_ok()));
+            assert_eq!(result, expected);
+            assert_eq!(plain, 2);
+        }
+    }
+
+    #[test]
+    fn failed_secure_ehlo_does_not_fall_back_to_plaintext_capabilities() {
+        assert_eq!(
+            starttls_fixture(
+                b"250-relay\r\n250-AUTH PLAIN\r\n250 STARTTLS\r\n",
+                b"220 upgrade\r\n",
+                "relay.invalid",
+                false,
+                true,
+                b"550 unavailable\r\n"
+            ),
+            (Err(Error::Reply), 2, 1)
+        );
     }
 }

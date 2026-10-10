@@ -1325,3 +1325,34 @@ upgrade stops before credentials/envelope, successful verified upgrade obtains a
 fresh EHLO, and certificate failures stop after upgrade. AUTH, message construction,
 supervised absolute deadlines, restart integration, public review, licensing,
 cluster validation, and activation remain pending.
+
+## Subsequent increment: private required-STARTTLS negotiation
+
+The private exchange reads bounded greeting/EHLO replies, requires an exact
+case-insensitive STARTTLS extension on a capability line after the server's first
+EHLO line, and accepts only upgrade reply 220. A fresh EHLO is sent only after
+certificate-verified TLS completes. Plaintext capabilities are not retained.
+There is no downgrade, AUTH, or envelope path. Reply parsing now offers a private
+callback borrowing validated line text for immediate capability inspection;
+returned replies and static errors still retain no server text. Callback evidence
+is provisional until the entire reply parses successfully.
+
+Three new tests cover absent/misleading advertisements, temporary/permanent upgrade
+refusal, successful lowercase advertisement and verified fresh EHLO, unknown issuer,
+wrong hostname, expired certificate, and failed secure EHLO. Fixtures observe exact
+bounded synthetic commands and assert no further command after each outcome.
+No external relay, dependency, public interface, or executable changes were made.
+The full suite passes: 155 Rust tests plus one ignored helper, sixteen custom
+process scenarios, eight SQLite tests, and six hook tests.
+
+Socket timeouts remain inactivity bounds, not an absolute parent deadline. TLS
+errors still combine verification and handshake I/O; upgrade refusal is a static
+experiment result rather than an approved worker retry classification. Credentials
+and message submission are absent, so these tests establish negotiation ordering,
+not acceptance of an authenticated mail transaction.
+
+Next: supervise a separate private SMTP negotiation child and prove absolute
+parent deadlines for stalled/drip-fed greeting and upgrade replies. Then distinguish
+certificate policy blocks from transient handshake failures before AUTH/message
+integration. Message construction, durable email persistence, public review,
+licensing, cluster validation, and activation remain pending.

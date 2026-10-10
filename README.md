@@ -257,3 +257,7 @@ Private implicit-TLS fixtures now verify trusted greeting/multiline EHLO and
 certificate rejection before SMTP commands, with invalid greeting/EHLO checks.
 They use in-memory certificates and bounded socket waits; AUTH, submission,
 STARTTLS, and an absolute supervised SMTP deadline remain unimplemented.
+
+Required-STARTTLS fixtures now reject missing/misleading advertisements and refused
+upgrades, verify certificates before a fresh EHLO, and stop on failed secure EHLO.
+Only greeting and negotiation commands exist; SMTP AUTH and submission remain pending.

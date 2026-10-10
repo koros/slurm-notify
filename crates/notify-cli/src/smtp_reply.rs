@@ -25,7 +25,16 @@ pub(super) struct Reply {
 
 // Read exactly one reply without consuming a later reply's bytes. Caller's
 // transport/parent deadline must bound blocking Read calls; byte limits do not.
-pub(super) fn read_reply(mut input: impl Read, limits: Limits) -> Result<Reply, Error> {
+pub(super) fn read_reply(input: impl Read, limits: Limits) -> Result<Reply, Error> {
+    read_reply_with_text(input, limits, |_, _| {})
+}
+
+// Validated text is borrowed only for this callback, never retained in Reply.
+pub(super) fn read_reply_with_text(
+    mut input: impl Read,
+    limits: Limits,
+    mut inspect: impl FnMut(usize, &[u8]),
+) -> Result<Reply, Error> {
     if limits.line_bytes < 5 || limits.total_bytes < 5 || limits.lines == 0 {
         return Err(Error::InvalidLimit);
     }
@@ -81,6 +90,7 @@ pub(super) fn read_reply(mut input: impl Read, limits: Limits) -> Result<Reply, 
         {
             return Err(Error::Malformed);
         }
+        inspect(number, body.get(4..).unwrap_or_default());
         if !continuation {
             return Ok(Reply {
                 code,
