@@ -22,7 +22,7 @@ pub(super) enum Error {
 
 // Length prefixes permit arbitrary payload bytes without delimiters or escaping.
 // No Debug representation of the frame, endpoint, or authorization is provided.
-fn frame(fields: &[&[u8]], limit: usize) -> Result<Vec<u8>, Error> {
+pub(super) fn frame(fields: &[&[u8]], limit: usize) -> Result<Vec<u8>, Error> {
     let length = fields
         .iter()
         .try_fold(0usize, |total, field| {
@@ -56,6 +56,82 @@ fn parse_result(bytes: &[u8]) -> Result<ProviderOutcome, Error> {
             Ok(ProviderOutcome::RetryAfter(seconds))
         }
     }
+}
+
+// Decode exactly six fields, enforcing the total byte budget before allocation.
+// Fields: endpoint, authorization (empty means absent), ID, body, Unix time,
+// socket timeout milliseconds. This remains a private prototype wire format.
+pub(super) fn serve(
+    mut input: impl Read,
+    mut output: impl Write,
+    limit: usize,
+    send: impl FnOnce(Vec<Vec<u8>>) -> Result<ProviderOutcome, Error>,
+) -> Result<(), Error> {
+    let mut fields = Vec::with_capacity(6);
+    let mut used = 0usize;
+    for _ in 0..6 {
+        let mut prefix = [0; 4];
+        input
+            .read_exact(&mut prefix)
+            .map_err(|_| Error::InvalidInput)?;
+        let length = u32::from_be_bytes(prefix) as usize;
+        used = used
+            .checked_add(4)
+            .and_then(|v| v.checked_add(length))
+            .filter(|v| *v <= limit)
+            .ok_or(Error::InvalidInput)?;
+        let mut field = vec![0; length];
+        input
+            .read_exact(&mut field)
+            .map_err(|_| Error::InvalidInput)?;
+        fields.push(field);
+    }
+    let mut extra = [0; 1];
+    if input.read(&mut extra).map_err(|_| Error::Io)? != 0 {
+        return Err(Error::InvalidInput);
+    }
+    let result = match send(fields)? {
+        ProviderOutcome::Delivered => "OK\n".to_owned(),
+        ProviderOutcome::Retry => "RETRY\n".to_owned(),
+        ProviderOutcome::Rejected => "REJECT\n".to_owned(),
+        ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => format!("RETRY_AFTER {seconds}\n"),
+        ProviderOutcome::RetryAfter(_) => return Err(Error::InvalidResult),
+    };
+    output.write_all(result.as_bytes()).map_err(|_| Error::Io)?;
+    output.flush().map_err(|_| Error::Io)
+}
+
+pub(super) fn send_fields(
+    fields: Vec<Vec<u8>>,
+    blocked_resolver_fixture: bool,
+) -> Result<ProviderOutcome, Error> {
+    use super::webhook::Webhook;
+    if fields.len() != 6 {
+        return Err(Error::InvalidInput);
+    }
+    let text = |index: usize| std::str::from_utf8(&fields[index]).map_err(|_| Error::InvalidInput);
+    let endpoint = text(0)?;
+    let authorization = text(1)?;
+    let id = text(2)?;
+    let now = text(4)?.parse::<i64>().map_err(|_| Error::InvalidInput)?;
+    let milliseconds = text(5)?.parse::<u64>().map_err(|_| Error::InvalidInput)?;
+    // Fixture ceilings bound requests even when the parent supplies bad values.
+    if milliseconds == 0 || milliseconds > 60_000 || now < 0 {
+        return Err(Error::InvalidInput);
+    }
+    let mut webhook = Webhook::new(
+        endpoint,
+        (!authorization.is_empty()).then(|| authorization.to_owned()),
+        Duration::from_millis(milliseconds),
+        1024 * 1024,
+    )
+    .map_err(|_| Error::InvalidInput)?;
+    if blocked_resolver_fixture {
+        webhook.block_resolver_fixture();
+    }
+    webhook
+        .send(id, &fields[3], now)
+        .map_err(|_| Error::InvalidInput)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -181,6 +257,47 @@ mod tests {
             b"\xff",
         ] {
             assert_eq!(parse_result(bad), Err(Error::InvalidResult));
+        }
+    }
+
+    #[test]
+    fn decoding_rejects_truncation_extra_bytes_and_length_bombs_before_send() {
+        let valid = frame(&[b"url", b"", b"id", b"{}", b"10", b"100"], 128).unwrap();
+        let mut invalid = vec![valid[..valid.len() - 1].to_vec(), vec![255; 4]];
+        let mut extra = valid.clone();
+        extra.push(0);
+        invalid.push(extra);
+        for bytes in invalid {
+            assert_eq!(
+                serve(&bytes[..], Vec::new(), 128, |_| panic!(
+                    "invalid request sent"
+                )),
+                Err(Error::InvalidInput)
+            );
+        }
+        let mut output = Vec::new();
+        serve(&valid[..], &mut output, 128, |fields| {
+            assert_eq!(fields[3], b"{}");
+            Ok(ProviderOutcome::RetryAfter(60))
+        })
+        .unwrap();
+        assert_eq!(output, b"RETRY_AFTER 60\n");
+    }
+
+    #[test]
+    fn invalid_child_fields_cannot_send() {
+        for fields in [
+            vec![],
+            vec![
+                b"https://example.invalid/".to_vec(),
+                vec![],
+                b"id".to_vec(),
+                vec![],
+                b"-1".to_vec(),
+                b"100".to_vec(),
+            ],
+        ] {
+            assert_eq!(send_fields(fields, false), Err(Error::InvalidInput));
         }
     }
 

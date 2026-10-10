@@ -48,3 +48,38 @@ semantics. The fixture integration verifies this behavior, but the actual blocki
 webhook adapter is not yet moved into a child. Its DNS limitation remains until
 that integration is complete. Strict input decoding, secure executable selection,
 actual HTTP/DNS child tests, and completion-time scheduling are the next increment.
+
+## HTTP child integration follow-up
+
+A custom Cargo test target (`transport_boundary`, harness=false) now doubles as
+its own private child entry point. Its parent resolves its own executable path;
+only a fixed child/fixture mode appears in argv. Cargo runs the parent acceptance
+suite, and the parent supervises this known executable to send HTTP. This is a test
+artifact, not an installed helper, hidden product command, or new public contract.
+It includes the existing private modules to exercise their actual implementations;
+unused items are allowed in that custom harness because it runs selected scenarios
+rather than the ordinary unit-test harness.
+
+The child reads exactly six length-prefixed fields: endpoint, optional authorization,
+event ID, raw body, injected Unix timestamp, and socket timeout milliseconds. It
+checks cumulative length before each allocation, rejects truncation and trailing
+bytes, validates textual fields through the adapter, and writes only a sanitized
+outcome. Fixture caps are one MiB total input and at most 60 seconds socket timeout;
+these are internal test limits, not approved configuration defaults. Response output
+is capped by the parent. Invalid input exits unsuccessfully without logging its
+contents. EOF after the sixth field is required; the parent deadline also covers
+waiting for that EOF.
+
+Two new unit tests verify strict decoding and invalid child fields before sending.
+Seven custom acceptance scenarios verify real loopback HTTP acknowledgment, rate
+limit, rejection, slow HTTP termination, unknown TLS issuer rejection, blocked
+resolver termination, and malformed-frame rejection. Request body and stable ID
+headers are observed at the server. The blocked resolver is explicitly injected in
+the child fixture and never invokes external DNS. No lingering resolver thread is
+left in the parent; the child is killed and reaped by the existing supervisor.
+
+Completion-time scheduling remains unresolved: timestamps are still injected and
+the worker still uses its batch time. Secure installed executable selection,
+production IPC limits, status diagnostics, supported-platform policy, and runtime
+activation remain further work. The normal executable still reports unavailable
+monitoring and cannot send notifications.

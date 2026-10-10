@@ -433,3 +433,19 @@ results across the process boundary, and use attempt completion timestamps for
 retry scheduling. Avoid presenting the supervisor fixture as working notifications
 or a completed production deadline guarantee. Runtime activation and public
 payload/configuration decisions remain pending.
+
+## Current increment: supervised webhook child integration
+
+Connected HTTP delivery to a private custom Cargo test child. The normal executable
+is unchanged. Added bounded six-field decoding, invalid/truncated/trailing-input
+rejection before sending, and sanitized outcome output. Two unit tests bring the
+Rust suite to 78 passing tests; eight SQLite and six hook tests also pass. Seven
+separate process-boundary acceptance scenarios cover acknowledgment, rate limiting,
+rejection, slow HTTP timeout, TLS rejection, blocked resolution termination, and
+malformed frames. Formatting, strict Clippy, locked build, and smoke checks pass.
+No dependencies or public contracts changed. ADR 0004 records the test-only limits.
+
+Next: use actual per-attempt completion times for durable retry scheduling and
+HTTP-date Retry-After calculations, including slow sends and clock changes. Secure
+installed helper selection, runtime credential/state handling, public payload/config
+review, and platform cleanup validation remain pending before usable monitoring.

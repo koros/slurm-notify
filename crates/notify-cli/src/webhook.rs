@@ -58,6 +58,20 @@ impl Webhook {
         })
     }
 
+    // Private acceptance fixture used only by the custom test child.
+    pub(super) fn block_resolver_fixture(&mut self) {
+        self.agent = ureq::AgentBuilder::new()
+            .resolver(|_: &str| {
+                std::thread::sleep(Duration::from_secs(30));
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "fixture resolver",
+                ))
+            })
+            .try_proxy_from_env(false)
+            .build();
+    }
+
     pub(super) fn send(
         &self,
         event_id: &str,
@@ -179,7 +193,7 @@ pub(super) mod tests {
     }
 
     // Certificates and private keys exist only for this local server's lifetime.
-    fn tls_server(
+    pub(crate) fn tls_server(
         names: Vec<String>,
         expired: bool,
     ) -> (

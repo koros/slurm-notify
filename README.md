@@ -81,13 +81,14 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Seventy-six Rust
+The executable prints its development status and exits with code 1. Seventy-eight Rust
 tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
 SQLite commit/reopen recovery, and a mock-provider outbox worker with durable provider-requested retry delays.
 A private webhook adapter is exercised against loopback mock servers; its
 [transport decision](docs/adr/0003-private-webhook-transport.md) records dependencies
 and timeout limitations. A private Linux/macOS transport supervisor is tested
-with child-process fixtures; it is not yet connected to the HTTP adapter. One subprocess helper is intentionally ignored
+with child-process fixtures and a custom harness that sends HTTP from the child.
+Seven process-boundary acceptance scenarios run separately. One subprocess helper is intentionally ignored
 in the main suite and invoked by runner tests. Eight Python/SQLite schema tests and
 six Git-hook tests run separately. The integrated pipeline persists deduplication
 history and checkpoints, but remains test-only and is not exposed by the executable.
