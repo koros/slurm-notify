@@ -16,6 +16,11 @@ mod webhook;
 #[path = "../../crates/notify-cli/src/state_path.rs"]
 mod state_path;
 
+#[path = "../../crates/notify-cli/src/accounting_window.rs"]
+mod accounting_window;
+#[path = "../../crates/notify-cli/src/polling_cycle.rs"]
+mod polling_cycle;
+
 use delivery::ProviderOutcome;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -131,8 +136,9 @@ fn acceptance() {
         transport::supervise(&mut child, vec![255; 4], Duration::from_secs(2), 4096, 64).is_err()
     );
     owned_pipeline_restart();
+    orchestrated_owned_http_restart();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -342,4 +348,156 @@ fn accepted_send_commit_failure_replays() {
         id_header(&server.join().unwrap())
     );
     assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_owned_http_restart() {
+    use polling_cycle::{Cycles, Hooks, Maintenance, Outcome, Settings, StageError};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = Settings {
+        active_program: std::path::Path::new("/fixture/squeue"),
+        accounting_program: std::path::Path::new("/fixture/sacct"),
+        cluster: "cluster",
+        user: "alice",
+        timeout: Duration::from_secs(1),
+        output_limit: 4096,
+        emit_discovered: true,
+        capacity: 10,
+        destinations: &["primary"],
+        window: accounting_window::Policy {
+            lookback_seconds: 3600,
+            overlap_seconds: 300,
+        },
+    };
+    let maintenance = Maintenance {
+        delivery_limit: 10,
+        retry: retry_policy(),
+        retain_seconds: 50,
+        cleanup_limit: 10,
+        stale_after: 60,
+        health_sample_limit: 10,
+    };
+    let fixture = |command: &mut Command, _, _| {
+        Ok(if command.get_program() == "/fixture/squeue" {
+            String::new()
+        } else {
+            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+        })
+    };
+    let mut cycles = Cycles::new(1).unwrap();
+    let mut checks = 0;
+    let cancelled = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |_: &storage::DueDelivery| panic!("cancelled supervised send"),
+            clock: || Some(7200),
+            cancelled: || {
+                checks += 1;
+                checks == 2
+            },
+        },
+    );
+    assert!(cancelled.cancelled);
+    assert!(matches!(
+        cancelled.poll.unwrap().unwrap(),
+        Outcome::Committed { events: 1, .. }
+    ));
+    assert!(cancelled.delivery.is_none());
+    let id = store.due_deliveries("cluster", 7200, 10).unwrap()[0]
+        .event_id
+        .clone();
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut cycles = Cycles::new(1).unwrap();
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let mut times = [7200, 7200, 7210, 7210, 7210].into_iter();
+    let retry = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            clock: || times.next(),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(retry.delivery.unwrap().unwrap().retrying, 1);
+    assert!(retry.health.unwrap().is_ok());
+    let first_request = server.join().unwrap();
+    assert!(first_request.contains(&id));
+    assert!(store
+        .due_deliveries("cluster", 7269, 10)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        storage::Store::open_private(&root, Duration::from_millis(50)),
+        Err(storage::StorageError::StatePath(
+            state_path::Error::AlreadyOwned
+        ))
+    ));
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut cycles = Cycles::new(2).unwrap();
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let delivered = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: |_: &mut Command, _, _| Err(scheduler::QueryError::Timeout),
+            send: |item: &storage::DueDelivery| {
+                assert_eq!(item.event_id, id);
+                assert_eq!(item.attempt_number, 2);
+                request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            clock: || Some(7270),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(delivered.poll.unwrap().unwrap_err(), StageError::Poll);
+    assert_eq!(delivered.delivery.unwrap().unwrap().delivered, 1);
+    assert_eq!(
+        delivered.health.unwrap().unwrap().poll.consecutive_failures,
+        1
+    );
+    let second_request = server.join().unwrap();
+    assert!(second_request.contains(&id));
+    assert!(first_request.ends_with("{}") && second_request.ends_with("{}"));
+    let cleaned = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |_: &storage::DueDelivery| panic!("duplicate supervised send"),
+            clock: || Some(7400),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(cleaned.cleanup.unwrap().unwrap(), 1);
+    assert_eq!(
+        cleaned.health.unwrap().unwrap().poll.consecutive_failures,
+        0
+    );
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    assert!(store
+        .due_deliveries("cluster", 7400, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
 }

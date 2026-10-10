@@ -182,3 +182,8 @@ Private caller-driven orchestration tests now compose polling, due delivery,
 cleanup, and health reporting. Scheduler query failure can leave committed
 notifications deliverable; uncertain delivery commits stop later stages.
 Cancellation is checked between stages. No operational monitoring loop is active.
+
+The process acceptance harness now exercises composed orchestration with owned
+storage and supervised loopback HTTP delivery, including cancellation, persisted
+rate-limit retries across restart, scheduler failure isolation, and cleanup.
+Payloads and scheduler records remain synthetic private fixtures.

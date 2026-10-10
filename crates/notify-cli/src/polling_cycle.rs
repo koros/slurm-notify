@@ -6,21 +6,21 @@ use super::{
 };
 use std::{path::Path, process::Command, time::Duration};
 
-struct Settings<'a> {
-    active_program: &'a Path,
-    accounting_program: &'a Path,
-    cluster: &'a str,
-    user: &'a str,
-    timeout: Duration,
-    output_limit: usize,
-    emit_discovered: bool,
-    capacity: usize,
-    destinations: &'a [&'a str],
-    window: Policy,
+pub(super) struct Settings<'a> {
+    pub(super) active_program: &'a Path,
+    pub(super) accounting_program: &'a Path,
+    pub(super) cluster: &'a str,
+    pub(super) user: &'a str,
+    pub(super) timeout: Duration,
+    pub(super) output_limit: usize,
+    pub(super) emit_discovered: bool,
+    pub(super) capacity: usize,
+    pub(super) destinations: &'a [&'a str],
+    pub(super) window: Policy,
 }
 
 #[derive(Debug)]
-enum Error {
+pub(super) enum Error {
     InvalidLimit,
     Storage(StorageError),
     Window(accounting_window::Error),
@@ -28,14 +28,14 @@ enum Error {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Outcome {
+pub(super) enum Outcome {
     Cancelled,
     Exhausted,
     Committed { window: Window, events: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Failure {
+pub(super) enum Failure {
     Storage,
     Window,
     ActiveQuery,
@@ -52,24 +52,24 @@ struct PollHealth {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct PollReport {
-    consecutive_failures: u64,
-    last_failure: Option<Failure>,
-    checkpoint_age_seconds: Option<i64>,
-    stale: bool,
+pub(super) struct PollReport {
+    pub(super) consecutive_failures: u64,
+    pub(super) last_failure: Option<Failure>,
+    pub(super) checkpoint_age_seconds: Option<i64>,
+    pub(super) stale: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ReportError {
+pub(super) enum ReportError {
     InvalidInput,
     ClockRegressed,
     Storage,
 }
 
 #[derive(Debug)]
-struct HealthReport {
-    poll: PollReport,
-    storage: super::storage::StorageHealth,
+pub(super) struct HealthReport {
+    pub(super) poll: PollReport,
+    pub(super) storage: super::storage::StorageHealth,
 }
 
 impl PollHealth {
@@ -90,24 +90,24 @@ impl PollHealth {
     }
 }
 
-struct Maintenance {
-    delivery_limit: usize,
-    retry: super::delivery::RetryPolicy,
-    retain_seconds: i64,
-    cleanup_limit: usize,
-    stale_after: i64,
-    health_sample_limit: usize,
+pub(super) struct Maintenance {
+    pub(super) delivery_limit: usize,
+    pub(super) retry: super::delivery::RetryPolicy,
+    pub(super) retain_seconds: i64,
+    pub(super) cleanup_limit: usize,
+    pub(super) stale_after: i64,
+    pub(super) health_sample_limit: usize,
 }
 
-struct Hooks<Q, S, C, X> {
-    query: Q,
-    send: S,
-    clock: C,
-    cancelled: X,
+pub(super) struct Hooks<Q, S, C, X> {
+    pub(super) query: Q,
+    pub(super) send: S,
+    pub(super) clock: C,
+    pub(super) cancelled: X,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StageError {
+pub(super) enum StageError {
     Poll,
     Storage,
     Time,
@@ -115,21 +115,21 @@ enum StageError {
 }
 
 #[derive(Debug, Default)]
-struct TickReport {
-    cancelled: bool,
-    poll: Option<Result<Outcome, StageError>>,
-    delivery: Option<Result<super::delivery::BatchReport, StageError>>,
-    cleanup: Option<Result<usize, StageError>>,
-    health: Option<Result<HealthReport, StageError>>,
+pub(super) struct TickReport {
+    pub(super) cancelled: bool,
+    pub(super) poll: Option<Result<Outcome, StageError>>,
+    pub(super) delivery: Option<Result<super::delivery::BatchReport, StageError>>,
+    pub(super) cleanup: Option<Result<usize, StageError>>,
+    pub(super) health: Option<Result<HealthReport, StageError>>,
 }
 
-struct Cycles {
+pub(super) struct Cycles {
     remaining: usize,
     health: PollHealth,
 }
 
 impl Cycles {
-    fn new(limit: usize) -> Result<Self, Error> {
+    pub(super) fn new(limit: usize) -> Result<Self, Error> {
         if limit == 0 {
             return Err(Error::InvalidLimit);
         }
@@ -140,7 +140,7 @@ impl Cycles {
     }
 
     // Serialized caller-driven orchestration. No provider call holds a DB transaction.
-    fn tick<Q, S, C, X>(
+    pub(super) fn tick<Q, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
         maintenance: &Maintenance,

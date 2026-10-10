@@ -767,3 +767,31 @@ Next: extend the owned-store/process-boundary acceptance harness to use composed
 orchestration, verifying actual supervised HTTP retries and cancellation between
 stages. Terminal ledger compaction, public contract review, SMTP, licensing,
 cluster validation, and runtime activation remain pending.
+
+## Subsequent increment: owned orchestration process acceptance
+
+The custom process harness now imports the existing private planner and cycle
+controller and exercises a composed orchestration sequence through the trusted
+HTTP child. Cancellation after the poll commit leaves one pending notification
+without sending. After reopening the owned store, a real loopback 429 response
+persists a retry deadline from the virtual completion time plus Retry-After.
+Another reopen retries with the same internal ID and attempt two, despite a
+scheduler query failure, and receives HTTP 202. A later tick removes the completed
+destination, retains event deduplication, and clears the recovered poll-health
+failure streak. A final reopen confirms no pending replay. Competing ownership
+is rejected while the store remains held after child execution.
+
+The harness uses framed stdin, isolated ephemeral loopback endpoints, virtual
+clock values, synthetic scheduler records, and the private `{}` payload fixture.
+It validates orchestration and process boundaries, not real Slurm compatibility,
+public payload semantics, endpoint revision freezing, or live completion clocks.
+Only sibling test-module visibility changed; no production behavior, dependency,
+migration, contract, or runtime defaults changed.
+
+The full shared suite passes: 119 Rust tests plus one ignored helper, eleven
+custom process acceptance scenarios, eight SQLite tests, and six hook tests.
+
+Next: private orchestration acceptance for cleanup failure isolation and
+cancellation after a completed delivery batch, ensuring committed deliveries
+survive while maintenance remains retryable. Terminal ledger compaction, public
+contract review, SMTP, licensing, cluster validation, and activation remain pending.
