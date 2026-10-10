@@ -306,6 +306,179 @@ mod tests {
     }
 
     #[test]
+    fn mixed_progress_matches_durable_outcomes_after_later_commit_failure() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "b", "c", "d"]);
+        // Prepare an exhausted retry without inventing a third send.
+        for (at, due) in [(10, 11), (11, 12)] {
+            let item = store
+                .due_deliveries("cluster", at, 10)
+                .unwrap()
+                .into_iter()
+                .find(|item| item.destination == "a")
+                .unwrap();
+            store
+                .record_delivery(&item, DeliveryOutcome::TransientFailure, at, Some(due))
+                .unwrap();
+        }
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("UPDATE outbox SET next_attempt_at=12 WHERE destination!='a'; CREATE TRIGGER reject_last_commit BEFORE UPDATE ON outbox WHEN OLD.destination='d' BEGIN SELECT RAISE(ABORT, 'fixture-private-cause'); END;").unwrap();
+        let mut retry = policy();
+        retry.max_attempts = 2;
+        let mut called = Vec::new();
+        let failure = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            20,
+            10,
+            retry,
+            |item| {
+                called.push(item.destination.clone());
+                Ok(match item.destination.as_str() {
+                    "b" => ProviderOutcome::Retry,
+                    "c" => ProviderOutcome::Rejected,
+                    "d" => ProviderOutcome::Delivered,
+                    _ => panic!("retired destination sent"),
+                })
+            },
+            || Some(20),
+        )
+        .unwrap_err();
+        assert_eq!(called, vec!["b", "c", "d"]);
+        assert_eq!(failure.kind, FailureKind::Storage);
+        assert_eq!(
+            failure.committed,
+            BatchReport {
+                delivered: 0,
+                retrying: 1,
+                failed: 2
+            }
+        );
+        assert!(failure.acceptance_uncertain);
+        assert!(!format!("{failure:?}").contains("fixture-private-cause"));
+        drop(store);
+        let mut store = open(&directory);
+        let mut statement = db
+            .prepare("SELECT destination,status FROM outbox ORDER BY destination")
+            .unwrap();
+        let status = statement
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            status,
+            vec![
+                ("a".into(), "failed".into()),
+                ("b".into(), "pending".into()),
+                ("c".into(), "failed".into()),
+                ("d".into(), "pending".into())
+            ]
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        let ready = store.due_deliveries("cluster", 24, 10).unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(
+            (ready[0].destination.as_str(), ready[0].attempt_number),
+            ("d", 1)
+        );
+        let ready = store.due_deliveries("cluster", 25, 10).unwrap();
+        assert_eq!(
+            ready
+                .iter()
+                .map(|item| (item.destination.as_str(), item.attempt_number))
+                .collect::<Vec<_>>(),
+            vec![("d", 1), ("b", 2)]
+        );
+        db.execute_batch("DROP TRIGGER reject_last_commit;")
+            .unwrap();
+        let recovered = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            25,
+            10,
+            retry,
+            |_| Ok(ProviderOutcome::Delivered),
+            || Some(25),
+        )
+        .unwrap();
+        assert_eq!(
+            recovered,
+            BatchReport {
+                delivered: 2,
+                retrying: 0,
+                failed: 0
+            }
+        );
+        assert!(store.due_deliveries("cluster", 25, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retirement_write_failure_does_not_count_uncommitted_retirement_as_failed() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["a", "z"]);
+        let exhausted = store
+            .due_deliveries("cluster", 10, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "z")
+            .unwrap();
+        store
+            .record_delivery(&exhausted, DeliveryOutcome::TransientFailure, 10, Some(11))
+            .unwrap();
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("UPDATE outbox SET next_attempt_at=11 WHERE destination='a'; CREATE TRIGGER reject_retirement BEFORE UPDATE ON outbox WHEN OLD.destination='z' BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+        let mut retry = policy();
+        retry.max_attempts = 1;
+        let failure = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            20,
+            10,
+            retry,
+            |item| {
+                assert_eq!(item.destination, "a");
+                Ok(ProviderOutcome::Delivered)
+            },
+            || Some(20),
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.committed,
+            BatchReport {
+                delivered: 1,
+                retrying: 0,
+                failed: 0
+            }
+        );
+        assert_eq!(failure.kind, FailureKind::Storage);
+        assert!(!failure.acceptance_uncertain);
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(
+            store.due_deliveries("cluster", 20, 10).unwrap()[0].attempt_number,
+            2
+        );
+        db.execute_batch("DROP TRIGGER reject_retirement;").unwrap();
+        let recovered = deliver_due_detailed(
+            &mut store,
+            "cluster",
+            20,
+            10,
+            retry,
+            |_| panic!("exhausted retry sent"),
+            || panic!("retirement completion clock"),
+        )
+        .unwrap();
+        assert_eq!(recovered.failed, 1);
+    }
+
+    #[test]
     fn detailed_failure_counts_only_commits_and_marks_unrecorded_send_uncertain() {
         let directory = Directory::new();
         let mut store = seeded(&directory, &["a", "b"]);

@@ -210,3 +210,7 @@ blocked dispatch; owned process tests verify recovery after helper spawn failure
 Private orchestration retains committed batch counts when a later delivery fails,
 with sanitized failure categories and an explicit flag for unrecorded provider
 outcomes. Failed items are excluded from committed counts.
+
+Partial batch tests now compare mixed retry, rejection, and budget-retirement
+counts with reopened database state after a later write failure. Uncommitted
+outcomes remain excluded, and failed retirement can recover without sending.

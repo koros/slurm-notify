@@ -1003,3 +1003,29 @@ Next: private progress-report coverage for transient retries, terminal failures,
 and budget retirement before a later storage failure, ensuring reported counts
 match durable state across reopen. Terminal ledger compaction, public contract
 review, SMTP, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: mixed durable progress verification
+
+Two tests verify detailed batch progress against actual reopened SQLite state.
+The mixed case retires an exhausted destination without sending, commits a
+transient retry and terminal rejection, then injects a failure after a later
+provider acceptance. Reported failed/retrying counts match the committed rows;
+the unrecorded accepted item remains pending at its original attempt number.
+Persisted retry time and attempt numbering survive reopen, and removing the
+fault allows only the remaining destinations to complete. Debug output does not
+expose the injected raw database error text.
+
+The second case commits one successful send before a retirement write fails.
+Its report excludes the uncommitted retirement and marks no uncertain send for
+that retirement. After reopen and fault removal, the exhausted destination is
+retired without invoking a provider or completion clock. These tests exercise
+failure/recovery semantics, not a new retention or delivery policy. No code
+behavior, dependencies, schema, public contracts, or runtime defaults changed.
+
+The full suite passes: 131 Rust tests plus one ignored helper, fourteen custom
+process acceptance scenarios, eight SQLite tests, and six hook tests.
+
+Next: private delivery cancellation checks between destinations, preserving partial
+progress and pending rows without fabricating provider outcomes or attempts.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and activation remain pending.
