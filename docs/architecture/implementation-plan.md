@@ -1194,3 +1194,34 @@ deduplication. No runtime defaults, schema, or public interfaces changed.
 Next: private SMTP transaction-phase classification with synthetic response fixtures,
 including authentication/TLS blocks and final acknowledgment uncertainty, before
 selecting a client dependency. Existing implementation validation remains unchanged.
+
+## Subsequent increment: synthetic private SMTP phase classification
+
+A test-only session policy tracks greeting, initial EHLO, required STARTTLS,
+verified TLS, secure EHLO, optional explicit authentication, envelope submission,
+recipient acceptance, DATA initiation, final acknowledgment, and completion.
+Only valid expected positive replies advance the transaction; no intermediate
+reply reports delivery. Final DATA 250 reports relay acceptance and later QUIT or
+connection failure cannot undo it. Terminal failures remain sticky, preserving
+uncertainty and blocks on repeated observations.
+
+Temporary replies retry; permanent submission rejection is terminal; authentication
+and required TLS failures block before message submission. Missing/malformed final
+acknowledgment retains unknown acceptance. Failure before DATA body submission is
+classified as not submitted when the caller's phase evidence establishes it. The
+classifier assumes its future client supplies truthful phase/TLS evidence; it is
+not a wire parser, certificate validator, AUTH implementation, or network adapter.
+It contains no raw replies, addresses, credentials, or bodies and selects no client
+dependency. No implicit TLS implementation or public email contract is introduced.
+
+Three tests cover authenticated/unauthenticated relay flows, TLS/secure-EHLO ordering,
+final acknowledgment, QUIT failure after acceptance, temporary/permanent/unknown
+final results, repeated terminal evidence, and authentication/TLS blocks. The full
+suite passes: 143 Rust tests plus one ignored helper, sixteen custom process
+scenarios, eight SQLite tests, and six hook tests. No dependencies, schema,
+operational defaults, or executable behavior changed.
+
+Next: private bounded SMTP reply parsing with multiline, malformed/truncated, and
+reply-size limit fixtures before selecting a client dependency. Public contract
+review, persistence compaction, licensing, cluster validation, and activation remain
+pending.

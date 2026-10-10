@@ -235,3 +235,7 @@ A missing checkpoint leaves poll age unknown and stale in private health reports
 The [private SMTP boundary proposal](docs/adr/0006-private-smtp-boundary.md)
 records transport, TLS/authentication, privacy, and acceptance requirements before
 dependency selection. SMTP implementation and public email contracts remain pending.
+
+A private synthetic SMTP phase classifier now tests TLS/authentication ordering,
+final DATA acknowledgment, reply outcomes, and uncertainty. It performs no SMTP
+network I/O and is not yet connected to a client or delivery worker.

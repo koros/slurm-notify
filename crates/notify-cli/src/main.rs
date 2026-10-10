@@ -27,6 +27,9 @@ mod polling_cycle;
 #[cfg(test)]
 mod supervised_provider;
 
+#[cfg(test)]
+mod smtp_policy;
+
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
     std::process::exit(1);
