@@ -15,3 +15,9 @@ documentation, and a version decision. CODEOWNERS and protected-branch rules nee
 real maintainer identities and a configured GitHub repository; they are not
 configured by this local scaffold. Rust API tooling is deferred until a supported
 library API is deliberately exposed.
+
+Current review drafts live in [docs/proposals](../docs/proposals):
+[webhook payload](../docs/proposals/webhook-payload-v1.md) and
+[local webhook configuration](../docs/proposals/local-webhook-config-v1.md).
+Their examples are illustrative, not schemas, compatibility baselines, or supported
+configuration. Keep draft revisions separate from approved contracts.

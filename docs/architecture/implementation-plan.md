@@ -491,3 +491,23 @@ Next: draft normalized webhook payload and configuration proposals for review,
 covering identity encoding, privacy, delivery semantics, and explicit defaults.
 Installed-helper selection, credential/state security, diagnostics persistence,
 platform support, licensing, and runtime activation remain pending.
+
+## Current increment: webhook payload and configuration review drafts
+
+Drafted concrete field/type semantics and synthetic examples under docs/proposals,
+covering lifecycle mappings, opaque persisted IDs, unknown timestamps, frozen bytes,
+minimal metadata, routing, secret references, resource controls, explicit values,
+and compatibility. Proposed initial JSON configuration in place of the handoff's
+illustrative YAML, explicitly reserving that format choice for review. SMTP remains
+part of the handoff's MVP requirements rather than being removed by this scope.
+
+Both example files parse as JSON; no machine-readable schemas, parser dependencies,
+approved contracts, migrations, or executable behavior were introduced. The drafts
+identify missing durable metadata, accounting overlap, route revision handling,
+secure state creation, and installed-helper selection instead of implying readiness.
+Local hooks still execute the full existing suite on commit/push.
+
+Next: review the field/default/format/privacy decisions before exposing interfaces.
+Independent private engineering can continue with secure state-path creation and
+single-owner locking. Public serializers/config loaders, compatibility baselines,
+SMTP, support/license decisions, and runtime activation remain pending.

@@ -132,6 +132,13 @@ CLI, configuration, events, intentional Rust APIs, and persistence guarantees
 must be governed explicitly. Contract baselines must be reviewed rather than
 automatically rewritten to make checks pass.
 
+## Draft interface proposals
+
+The [webhook payload proposal](docs/proposals/webhook-payload-v1.md) and
+[local webhook configuration proposal](docs/proposals/local-webhook-config-v1.md)
+contain synthetic examples and concrete review decisions. They are unapproved
+proposals; the executable does not read that configuration or emit that payload.
+
 ## Open decisions
 
 The handoff records unresolved decisions, including licensing, minimum Rust and

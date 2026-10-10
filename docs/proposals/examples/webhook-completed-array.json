@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt_6ea80b9f47bd40d89c0b2a190d53028f",
+  "source": "slurm",
+  "cluster_id": "research-cluster",
+  "event_type": "JOB_COMPLETED",
+  "severity": "INFO",
+  "observed_at": "2026-10-10T13:00:12Z",
+  "occurred_at": null,
+  "job": {
+    "id": "12345",
+    "array_task_id": "7",
+    "submitted_at": "2026-10-10T12:00:00Z",
+    "started_at": "2026-10-10T12:02:00Z",
+    "state": "COMPLETED"
+  }
+}

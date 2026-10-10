@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "monitor": {
+    "mode": "local",
+    "cluster_id": "research-cluster",
+    "user_jobs_only": true,
+    "poll_seconds": 60,
+    "query_timeout_seconds": 10,
+    "accounting_lookback_seconds": 3600,
+    "accounting_overlap_seconds": 300,
+    "initial_observation": "suppress",
+    "command_output_limit_bytes": 1048576,
+    "retained_identity_limit": 10000,
+    "retained_event_limit": 20000
+  },
+  "storage": {
+    "path": "/home/researcher/.local/state/slurm-notify/state.sqlite3"
+  },
+  "providers": {
+    "primary": {
+      "type": "webhook",
+      "url_env": "SLURM_NOTIFY_WEBHOOK_URL",
+      "authorization_env": "SLURM_NOTIFY_WEBHOOK_AUTHORIZATION",
+      "request_timeout_seconds": 10,
+      "payload_limit_bytes": 16384
+    }
+  },
+  "routes": [
+    {
+      "events": ["JOB_COMPLETED", "JOB_FAILED", "JOB_TIMEOUT", "JOB_OUT_OF_MEMORY", "JOB_NODE_FAILURE", "JOB_BOOT_FAILURE", "JOB_DEADLINE", "JOB_CANCELLED"],
+      "send_to": ["primary"]
+    }
+  ],
+  "delivery": {
+    "max_attempts": 5,
+    "initial_backoff_seconds": 5,
+    "max_backoff_seconds": 300,
+    "jitter_seconds": 15,
+    "jitter_seed": "42",
+    "batch_limit": 50
+  }
+}
