@@ -88,7 +88,8 @@ A private webhook adapter is exercised against loopback mock servers; its
 [transport decision](docs/adr/0003-private-webhook-transport.md) records dependencies
 and timeout limitations. A private Linux/macOS transport supervisor is tested
 with child-process fixtures and a custom harness that sends HTTP from the child.
-Eight process-boundary acceptance scenarios run separately. One subprocess helper is intentionally ignored
+Ten process-boundary acceptance scenarios run separately, including owned-state
+polling, restart recovery, and acceptance-before-commit replay. One subprocess helper is intentionally ignored
 in the main suite and invoked by runner tests. Eight Python/SQLite schema tests and
 six Git-hook tests run separately. The integrated pipeline persists deduplication
 history and checkpoints, but remains test-only and is not exposed by the executable.

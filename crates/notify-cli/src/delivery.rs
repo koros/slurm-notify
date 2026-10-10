@@ -2,12 +2,12 @@
 use super::storage::{DeliveryOutcome, DueDelivery, StorageError, Store};
 
 #[derive(Clone, Copy)]
-struct RetryPolicy {
-    max_attempts: u32,
-    initial_delay_seconds: i64,
-    max_delay_seconds: i64,
-    jitter_seconds: i64,
-    jitter_seed: u64,
+pub(super) struct RetryPolicy {
+    pub(super) max_attempts: u32,
+    pub(super) initial_delay_seconds: i64,
+    pub(super) max_delay_seconds: i64,
+    pub(super) jitter_seconds: i64,
+    pub(super) jitter_seed: u64,
 }
 
 impl RetryPolicy {
@@ -59,17 +59,17 @@ pub(super) enum ProviderOutcome {
 }
 
 #[derive(Debug)]
-enum WorkerError {
+pub(super) enum WorkerError {
     InvalidPolicy,
     Storage(StorageError),
     InvalidTime,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-struct BatchReport {
-    delivered: usize,
-    retrying: usize,
-    failed: usize,
+pub(super) struct BatchReport {
+    pub(super) delivered: usize,
+    pub(super) retrying: usize,
+    pub(super) failed: usize,
 }
 
 // Provider sends occur outside SQLite transactions. Stop on storage failure so
@@ -96,7 +96,7 @@ pub(super) fn unix_time() -> Option<i64> {
     .ok()
 }
 
-fn deliver_due_with_clock(
+pub(super) fn deliver_due_with_clock(
     store: &mut Store,
     cluster: &str,
     now: i64,

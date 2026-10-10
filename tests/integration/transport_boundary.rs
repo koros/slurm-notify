@@ -42,11 +42,21 @@ fn request(
     mode: &str,
     deadline: Duration,
 ) -> Result<ProviderOutcome, transport::Error> {
+    request_for(endpoint, "event-1", mode, deadline)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn request_for(
+    endpoint: &str,
+    event_id: &str,
+    mode: &str,
+    deadline: Duration,
+) -> Result<ProviderOutcome, transport::Error> {
     let input = transport::frame(
         &[
             endpoint.as_bytes(),
             b"Bearer fixture-placeholder",
-            b"event-1",
+            event_id.as_bytes(),
             b"{}",
             b"1000",
         ],
@@ -120,5 +130,216 @@ fn acceptance() {
     assert!(
         transport::supervise(&mut child, vec![255; 4], Duration::from_secs(2), 4096, 64).is_err()
     );
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame passed");
+    owned_pipeline_restart();
+    accepted_send_commit_failure_replays();
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay passed");
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn poll_fixture(
+    store: &mut storage::Store,
+    reconciler: &mut lifecycle::Reconciler,
+) -> Vec<lifecycle::Event> {
+    let request = scheduler::PollRequest {
+        active_program: std::path::Path::new("/fixture/squeue"),
+        accounting_program: std::path::Path::new("/fixture/sacct"),
+        cluster: "cluster",
+        user: "alice",
+        history_start: "2026-10-10T00:00:00",
+        history_end: "2026-10-10T01:00:00",
+        timeout: Duration::from_secs(1),
+        output_limit: 4096,
+        emit_discovered: true,
+    };
+    scheduler::poll_durable_with(
+        &request,
+        reconciler,
+        store,
+        &["primary"],
+        10,
+        |command, _, _| {
+            if command.get_program() == "/fixture/squeue" {
+                Ok(String::new())
+            } else {
+                Ok("cluster|1|alice|2026-10-10T00:00:01|2026-10-10T00:00:02|COMPLETED|0:0".into())
+            }
+        },
+    )
+    .unwrap()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn retry_policy() -> delivery::RetryPolicy {
+    delivery::RetryPolicy {
+        max_attempts: 3,
+        initial_delay_seconds: 5,
+        max_delay_seconds: 20,
+        jitter_seconds: 0,
+        jitter_seed: 0,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn state_directory(directory: &storage::tests::Directory) -> std::path::PathBuf {
+    directory
+        .path()
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .join("pipeline-state")
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn id_header(request: &str) -> String {
+    request
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("idempotency-key:"))
+        .unwrap()
+        .to_owned()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_pipeline_restart() {
+    let directory = storage::tests::Directory::new();
+    let path = state_directory(&directory);
+    let mut store = storage::Store::open_private(&path, Duration::from_millis(50)).unwrap();
+    assert!(matches!(
+        storage::Store::open_private(&path, Duration::from_millis(50)),
+        Err(storage::StorageError::StatePath(
+            state_path::Error::AlreadyOwned
+        ))
+    ));
+    let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+    assert_eq!(poll_fixture(&mut store, &mut reconciler).len(), 1);
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let report = delivery::deliver_due_with_clock(
+        &mut store,
+        "cluster",
+        10,
+        10,
+        retry_policy(),
+        |item| request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap(),
+        || Some(30),
+    )
+    .unwrap();
+    assert_eq!(report.retrying, 1);
+    let first_request = server.join().unwrap();
+    drop(store);
+    let mut store = storage::Store::open_private(&path, Duration::from_millis(50)).unwrap();
+    let (mut reconciler, checkpoint) = store.restore("cluster", 10).unwrap();
+    assert_eq!(checkpoint.as_deref(), Some("2026-10-10T01:00:00"));
+    assert!(poll_fixture(&mut store, &mut reconciler).is_empty());
+    assert!(store.due_deliveries("cluster", 89, 10).unwrap().is_empty());
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    assert_eq!(
+        delivery::deliver_due_with_clock(
+            &mut store,
+            "cluster",
+            90,
+            10,
+            retry_policy(),
+            |item| {
+                assert_eq!(item.attempt_number, 2);
+                request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            || Some(100)
+        )
+        .unwrap()
+        .delivered,
+        1
+    );
+    let second_request = server.join().unwrap();
+    assert_eq!(id_header(&first_request), id_header(&second_request));
+    assert!(first_request.ends_with("\r\n\r\n{}"));
+    assert!(second_request.ends_with("\r\n\r\n{}"));
+    // Child execution must not release the parent's lifetime ownership.
+    assert!(matches!(
+        storage::Store::open_private(&path, Duration::from_millis(50)),
+        Err(storage::StorageError::StatePath(
+            state_path::Error::AlreadyOwned
+        ))
+    ));
+    drop(store);
+    let mut store = storage::Store::open_private(&path, Duration::from_millis(50)).unwrap();
+    let (mut reconciler, _) = store.restore("cluster", 10).unwrap();
+    assert!(poll_fixture(&mut store, &mut reconciler).is_empty());
+    assert!(store.due_deliveries("cluster", 200, 10).unwrap().is_empty());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn accepted_send_commit_failure_replays() {
+    let directory = storage::tests::Directory::new();
+    let path = state_directory(&directory);
+    let mut store = storage::Store::open_private(&path, Duration::from_millis(50)).unwrap();
+    let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+    poll_fixture(&mut store, &mut reconciler);
+    // A trusted fixture connection bypasses the cooperative lock only to inject failure.
+    let database = rusqlite::Connection::open(path.join("state.sqlite3")).unwrap();
+    database.execute_batch("CREATE TRIGGER fail_result BEFORE UPDATE ON outbox BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let result = delivery::deliver_due_with_clock(
+        &mut store,
+        "cluster",
+        10,
+        10,
+        retry_policy(),
+        |item| request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap(),
+        || Some(30),
+    );
+    assert!(matches!(
+        result,
+        Err(delivery::WorkerError::Storage(
+            storage::StorageError::Database(_)
+        ))
+    ));
+    let first_request = server.join().unwrap();
+    assert_eq!(
+        database
+            .query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    database.execute_batch("DROP TRIGGER fail_result;").unwrap();
+    drop(database);
+    drop(store);
+    let mut store = storage::Store::open_private(&path, Duration::from_millis(50)).unwrap();
+    let (mut reconciler, _) = store.restore("cluster", 10).unwrap();
+    assert!(poll_fixture(&mut store, &mut reconciler).is_empty());
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    assert_eq!(
+        delivery::deliver_due_with_clock(
+            &mut store,
+            "cluster",
+            40,
+            10,
+            retry_policy(),
+            |item| {
+                assert_eq!(item.attempt_number, 1);
+                request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            || Some(50)
+        )
+        .unwrap()
+        .delivered,
+        1
+    );
+    assert_eq!(
+        id_header(&first_request),
+        id_header(&server.join().unwrap())
+    );
+    assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
 }

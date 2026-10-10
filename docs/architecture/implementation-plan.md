@@ -532,3 +532,24 @@ Next independent work: integrate owned storage with the durable mock polling and
 supervised delivery pipeline, then test restart/ownership failures together. Payload
 and configuration decisions await review before public exposure. Licensing, SMTP,
 installed-helper selection, supported platforms, and runtime activation remain open.
+
+## Current increment: owned mock pipeline restart and delivery integration
+
+Added two custom process acceptance scenarios that compose owned storage, durable
+mock scheduler polling, restored reconciliation/checkpoints, the completion-clock
+worker, and actual loopback HTTP from its supervised child. Verify 429 retry/reopen,
+persisted due time, stable ID, checkpoint/deduplication restoration, no delivery
+replay after acknowledgment, and competing-owner rejection before/after child use.
+Also verify external acceptance followed by a failed local result commit: zero
+partial attempts, pending outbox, same-ID replay after reopen, then successful commit.
+
+Existing 95 Rust tests, eight SQLite tests, and six hook tests pass, with ten custom
+process acceptance scenarios. Formatting, strict Clippy, locked build, and placeholder
+smoke checks pass. No dependencies, migration, public contract, or runtime defaults
+changed. Visibility changes only allow sibling test modules to compose private
+components. The `{}` body and virtual completion times remain controlled fixtures.
+
+Next: private accounting overlap/window planning and bounded restart catch-up,
+including delayed accounting records. Public payload/configuration review, frozen
+payloads/opaque IDs, safe installed-helper selection, SMTP, licensing, and actual
+runtime activation remain pending before working monitoring can be claimed.

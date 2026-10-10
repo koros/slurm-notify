@@ -70,3 +70,33 @@ hard-link and relative-path rejection, initialization-failure release, independe
 process exclusion/release, and forced-owner termination without a stale lock. Child
 fixtures run through the existing bounded supervisor and need no Slurm or external
 network. Existing database/restart, delivery, and process suites also pass.
+
+## Owned polling and delivery integration follow-up
+
+The custom process acceptance harness now composes the actual owned Store, injected
+scheduler query/reconciliation commit, clock-aware due worker, and supervised HTTP
+child. Component interfaces are visible only to sibling test modules; no library,
+normal executable command, config contract, or installed helper is introduced.
+
+One scenario acquires private state, rejects a second owner, commits a synthetic
+COMPLETED observation, receives HTTP 429 with Retry-After, and records completion at
+an injected time. It closes/reopens owned state, restores the checkpoint and event
+ledger, confirms repeated polling emits nothing, respects the persisted due time,
+and accepts HTTP 202 with the original ID. Another reopen confirms no delivered
+outbox row is replayed. Competing ownership remains rejected after child execution.
+
+A second scenario injects an SQLite result-update failure after actual mock-server
+HTTP acceptance. The result transaction adds no attempt and leaves the original
+outbox pending. After dropping/reopening owned state, restored reconciliation emits
+no duplicate event but delivery retries with the same ID and unchanged fixture body.
+The eventual successful acknowledgment commits delivery. This deliberately verifies
+at-least-once replay, not exactly-once external delivery.
+
+The server observes ID headers and the caller-provided `{}` body, which remains a
+fixture rather than the proposed public event format. Completion timestamps are
+injected for deterministic scheduling, while the HTTP child uses its actual clock.
+Ephemeral server ports change between fixture sends; production destination revisions
+and frozen normalized payload storage are still unimplemented and are not validated
+by this test composition. The tests exercise orderly close/reopen, not a full-agent
+crash between every transaction boundary. Existing killed-owner tests cover lock
+recovery separately. No real Slurm queries or external notifications occur.

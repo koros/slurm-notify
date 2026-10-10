@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Eq)]
-enum QueryError {
+pub(super) enum QueryError {
     MissingCommand,
     Io,
     Timeout,
@@ -159,7 +159,7 @@ fn active_command(program: &std::path::Path, user: &str) -> Command {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum PollError {
+pub(super) enum PollError {
     InvalidRequest,
     Active(QueryError),
     Accounting(QueryError),
@@ -210,16 +210,16 @@ fn valid_timestamp(value: &str) -> bool {
         && number(17, 19) < 60
 }
 
-struct PollRequest<'a> {
-    active_program: &'a std::path::Path,
-    accounting_program: &'a std::path::Path,
-    cluster: &'a str,
-    user: &'a str,
-    history_start: &'a str,
-    history_end: &'a str,
-    timeout: Duration,
-    output_limit: usize,
-    emit_discovered: bool,
+pub(super) struct PollRequest<'a> {
+    pub(super) active_program: &'a std::path::Path,
+    pub(super) accounting_program: &'a std::path::Path,
+    pub(super) cluster: &'a str,
+    pub(super) user: &'a str,
+    pub(super) history_start: &'a str,
+    pub(super) history_end: &'a str,
+    pub(super) timeout: Duration,
+    pub(super) output_limit: usize,
+    pub(super) emit_discovered: bool,
 }
 
 // Explicit windows and limits only; no public defaults. Injection lets ordinary
@@ -275,12 +275,12 @@ fn poll_with(
 }
 
 #[derive(Debug)]
-enum DurablePollError {
+pub(super) enum DurablePollError {
     Poll(PollError),
     Storage(super::storage::StorageError),
 }
 
-fn poll_durable_with(
+pub(super) fn poll_durable_with(
     request: &PollRequest<'_>,
     reconciler: &mut super::lifecycle::Reconciler,
     store: &mut super::storage::Store,
