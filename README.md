@@ -266,3 +266,8 @@ The private process harness now supervises SMTP negotiation separately from HTTP
 Stalled and drip-fed greeting/upgrade replies stop at the parent deadline despite
 longer socket timeouts. This loopback-only probe has no credentials, message path,
 or delivery acknowledgment; it is not an installed SMTP helper.
+
+Private TLS errors now distinguish certificate, local TLS configuration, handshake
+I/O, and other TLS protocol failures without retaining raw diagnostics. Supervised
+STARTTLS fixtures also bound stalled/drip-fed handshakes and check disconnects after
+ClientHello. Worker outcome mapping and authenticated submission remain pending.

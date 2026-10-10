@@ -4,10 +4,27 @@ use std::{io::Write, net::TcpStream, sync::Arc};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
-    Tls,
+    Certificate,
+    TlsConfiguration,
+    TlsProtocol,
+    HandshakeIo,
     Io,
     Reply,
     Upgrade,
+}
+
+// Inspect typed causes only; never retain or stringify remote diagnostics.
+fn handshake_error(error: std::io::Error) -> Error {
+    match error
+        .get_ref()
+        .and_then(|cause| cause.downcast_ref::<rustls::Error>())
+    {
+        Some(rustls::Error::InvalidCertificate(_) | rustls::Error::NoCertificatesPresented) => {
+            Error::Certificate
+        }
+        Some(_) => Error::TlsProtocol,
+        None => Error::HandshakeIo,
+    }
 }
 
 // Socket deadlines must already be set. Parent supervision is still required
@@ -17,12 +34,13 @@ fn greeting(
     config: Arc<rustls::ClientConfig>,
     name: rustls::pki_types::ServerName<'static>,
 ) -> Result<(), Error> {
-    let mut connection = rustls::ClientConnection::new(config, name).map_err(|_| Error::Tls)?;
+    let mut connection =
+        rustls::ClientConnection::new(config, name).map_err(|_| Error::TlsConfiguration)?;
     let mut socket = socket;
     while connection.is_handshaking() {
         connection
             .complete_io(&mut socket)
-            .map_err(|_| Error::Tls)?;
+            .map_err(handshake_error)?;
     }
     // No SMTP bytes are written until certificate verification completes.
     let mut stream = rustls::StreamOwned::new(connection, socket);
@@ -93,11 +111,12 @@ pub(super) fn required_starttls(
     {
         return Err(Error::Upgrade);
     }
-    let mut connection = rustls::ClientConnection::new(config, name).map_err(|_| Error::Tls)?;
+    let mut connection =
+        rustls::ClientConnection::new(config, name).map_err(|_| Error::TlsConfiguration)?;
     while connection.is_handshaking() {
         connection
             .complete_io(&mut socket)
-            .map_err(|_| Error::Tls)?;
+            .map_err(handshake_error)?;
     }
     let mut stream = rustls::StreamOwned::new(connection, socket);
     // No capabilities survive the plaintext EHLO. Obtain a fresh verified reply.
@@ -253,7 +272,7 @@ mod tests {
                 b"220 fixture ready\r\n",
                 b"250 fixture\r\n",
             );
-            assert_eq!(result, Err(Error::Tls));
+            assert_eq!(result, Err(Error::Certificate));
             assert_eq!(observation.bytes, 0);
         }
     }
@@ -423,9 +442,9 @@ mod tests {
     fn upgrade_verifies_certificate_before_fresh_ehlo() {
         for (name, expired, trust, expected) in [
             ("relay.invalid", false, true, Ok(())),
-            ("relay.invalid", false, false, Err(Error::Tls)),
-            ("other.invalid", false, true, Err(Error::Tls)),
-            ("relay.invalid", true, true, Err(Error::Tls)),
+            ("relay.invalid", false, false, Err(Error::Certificate)),
+            ("other.invalid", false, true, Err(Error::Certificate)),
+            ("relay.invalid", true, true, Err(Error::Certificate)),
         ] {
             let (result, plain, secure) = starttls_fixture(
                 b"250-relay\r\n250 starttls\r\n",
@@ -454,5 +473,34 @@ mod tests {
             ),
             (Err(Error::Reply), 2, 1)
         );
+    }
+    #[test]
+    fn handshake_categories_use_typed_causes_without_retaining_details() {
+        for (cause, expected) in [
+            (
+                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
+                Error::Certificate,
+            ),
+            (rustls::Error::NoCertificatesPresented, Error::Certificate),
+            (
+                rustls::Error::General("private-fixture-detail".into()),
+                Error::TlsProtocol,
+            ),
+        ] {
+            let error =
+                handshake_error(std::io::Error::new(std::io::ErrorKind::InvalidData, cause));
+            assert_eq!(error, expected);
+            assert!(!format!("{error:?}").contains("private-fixture-detail"));
+        }
+        for kind in [
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            assert_eq!(
+                handshake_error(std::io::Error::new(kind, "private-fixture-detail")),
+                Error::HandshakeIo
+            );
+        }
     }
 }

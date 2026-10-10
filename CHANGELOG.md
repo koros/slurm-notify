@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Static private TLS failure categories based on typed rustls causes, with certificate regression checks and supervised stalled, drip-fed, and disconnected STARTTLS handshake fixtures.
+
 - Separate loopback-only SMTP negotiation child with a bounded port frame and supervised stalled/drip-fed greeting and STARTTLS reply deadline checks, plus refusal and malformed-frame controls.
 
 - Private required-STARTTLS negotiation with bounded capability inspection, missing/refused upgrade checks, verified post-upgrade EHLO, and certificate failure fixtures.

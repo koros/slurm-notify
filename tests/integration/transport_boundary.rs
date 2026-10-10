@@ -159,7 +159,8 @@ fn acceptance() {
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
     smtp_negotiation_boundary::acceptance();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame passed");
+    smtp_negotiation_boundary::handshake_acceptance();
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -1387,3 +1387,35 @@ Next: distinguish TLS certificate policy blocks from transient handshake I/O
 failures and exercise the TLS handshake boundary under supervision before
 credentials or message submission. Message construction, durable email state,
 public review, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: TLS handshake classification and supervision
+
+Both private TLS exchanges inspect typed causes from rustls handshake I/O errors.
+Invalid or missing certificates return a static certificate category; other typed
+rustls failures return protocol, ordinary I/O failures return handshake I/O, and
+client-connection construction errors return local configuration. No error text
+or inner cause is retained. Existing real certificate fixtures now require the
+certificate category. One new unit test verifies certificate/protocol causes and
+ordinary timeout, EOF, and reset categories, including diagnostic-text exclusion.
+These are diagnostic categories, not approved worker retry/block mappings.
+
+Three additional process scenarios complete plaintext STARTTLS negotiation and
+observe a bounded TLS ClientHello record before a stalled handshake, drip-fed
+partial handshake record, or immediate disconnect. The first two return parent
+timeout at 500 ms, within the 1.5-second cleanup allowance, despite a two-second
+socket inactivity timeout. Drip bytes arrive every 20 ms and at least two writes
+are observed. Disconnect returns child failure promptly without a delivery ACK.
+Server accept/socket waits and record allocations remain bounded. No secure EHLO,
+AUTH, or envelope bytes can follow an incomplete handshake in these fixtures.
+The fixture-only child still discards specific categories at process exit;
+propagating them safely to the delivery worker remains a separate milestone.
+
+The full suite passes: 156 Rust tests plus one ignored helper, twenty-five custom
+process scenarios, eight SQLite tests, and six hook tests. No dependencies,
+persistence, runtime defaults, or public interfaces changed.
+
+Next: define a private SMTP negotiation diagnostic acknowledgment distinct from
+relay acceptance, preserving certificate policy and transient handshake evidence
+across the supervised child boundary. Then test blocked versus retry bookkeeping
+before implementing AUTH or message submission. Message construction, public
+review, licensing, cluster validation, and activation remain pending.
