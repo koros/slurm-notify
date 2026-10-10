@@ -855,3 +855,32 @@ Next: owned orchestration acceptance for supervised HTTP timeout and durable
 retry recovery, ensuring later maintenance does not erase pending sends.
 Terminal ledger compaction, public contract review, SMTP, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: owned supervised timeout retry recovery
+
+A process acceptance scenario deliberately delays the HTTP acknowledgment beyond
+the parent supervisor deadline. The local server captures the request before
+child termination; the fixture maps the exact parent timeout to a retry outcome,
+not success. The worker persists attempt one and backoff from its virtual
+completion time. Cleanup runs at a later virtual time when retry is already due
+and still protects the pending record. Reopening owned storage preserves the
+retry deadline, internal ID, and attempt count. A second supervised HTTP request
+receives 202 as attempt two. Later cleanup and another reopen retain the event
+ledger without a pending duplicate.
+
+The initial timeout is uncertain external acceptance: stable request identity
+allows provider idempotency, but cannot guarantee it. The test explicitly compares
+both idempotency headers and synthetic bodies. A broad elapsed-time bound checks
+parent return without claiming real-time guarantees. Virtual clock values and
+synthetic Slurm records remain fixtures. Timeout-to-retry mapping is still supplied
+by the test callback rather than a general supervisor/provider policy. No public
+contract, runtime behavior, schema, or dependencies changed.
+
+The full shared suite passes: 121 Rust tests plus one ignored helper, thirteen
+custom process acceptance scenarios, eight SQLite tests, and six hook tests.
+
+Next: private supervised-provider result classification, making parent timeout,
+child protocol/configuration failures, and uncertainty diagnostics explicit
+instead of relying on acceptance callback mappings. Terminal ledger compaction,
+public contract review, SMTP, licensing, cluster validation, and activation remain
+pending.

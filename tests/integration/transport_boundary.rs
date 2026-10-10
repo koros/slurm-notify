@@ -139,8 +139,9 @@ fn acceptance() {
     owned_pipeline_restart();
     orchestrated_owned_http_restart();
     orchestrated_cleanup_failure_and_post_delivery_cancellation();
+    orchestrated_timeout_retry_recovery();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -657,4 +658,132 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
             .unwrap(),
         None
     );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_timeout_retry_recovery() {
+    use polling_cycle::{Cycles, Hooks, Maintenance, Settings};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = Settings {
+        active_program: std::path::Path::new("/fixture/squeue"),
+        accounting_program: std::path::Path::new("/fixture/sacct"),
+        cluster: "cluster",
+        user: "alice",
+        timeout: Duration::from_secs(1),
+        output_limit: 4096,
+        emit_discovered: true,
+        capacity: 10,
+        destinations: &["primary"],
+        window: accounting_window::Policy {
+            lookback_seconds: 3600,
+            overlap_seconds: 300,
+        },
+    };
+    let maintenance = Maintenance {
+        delivery_limit: 10,
+        retry: retry_policy(),
+        retain_seconds: 50,
+        cleanup_limit: 10,
+        stale_after: 60,
+        health_sample_limit: 10,
+    };
+    let fixture = |command: &mut Command, _, _| {
+        Ok(if command.get_program() == "/fixture/squeue" {
+            String::new()
+        } else {
+            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+        })
+    };
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::from_millis(1500),
+    );
+    let mut cycles = Cycles::new(1).unwrap();
+    let mut times = [7200, 7200, 7210, 7300, 7300].into_iter();
+    let mut timed_out_id = String::new();
+    let tick_started = Instant::now();
+    let timed_out = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                timed_out_id = item.event_id.clone();
+                assert_eq!(
+                    request_for(
+                        &endpoint,
+                        &item.event_id,
+                        "--child",
+                        Duration::from_millis(500)
+                    ),
+                    Err(transport::Error::Timeout)
+                );
+                // Parent policy treats uncertain timeout as retry; no invented success.
+                ProviderOutcome::Retry
+            },
+            clock: || times.next(),
+            cancelled: || false,
+        },
+    );
+    assert!(tick_started.elapsed() < Duration::from_secs(2));
+    assert_eq!(timed_out.delivery.unwrap().unwrap().retrying, 1);
+    assert_eq!(timed_out.cleanup.unwrap().unwrap(), 0);
+    assert!(timed_out.health.unwrap().is_ok());
+    let first_request = server.join().unwrap();
+    assert!(first_request.contains(&timed_out_id));
+    assert!(store
+        .due_deliveries("cluster", 7214, 10)
+        .unwrap()
+        .is_empty());
+    let retry = store.due_deliveries("cluster", 7215, 10).unwrap();
+    assert_eq!(retry.len(), 1);
+    assert_eq!(retry[0].attempt_number, 2);
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut cycles = Cycles::new(2).unwrap();
+    let (endpoint, server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let recovered = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                assert_eq!(item.event_id, timed_out_id);
+                assert_eq!(item.attempt_number, 2);
+                request_for(&endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            clock: || Some(7300),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 1);
+    let second_request = server.join().unwrap();
+    assert_eq!(id_header(&first_request), id_header(&second_request));
+    assert!(first_request.ends_with("{}") && second_request.ends_with("{}"));
+    let cleaned = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |_: &storage::DueDelivery| panic!("timeout recovery duplicate send"),
+            clock: || Some(7400),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(cleaned.cleanup.unwrap().unwrap(), 1);
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    assert!(store
+        .due_deliveries("cluster", 7400, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
 }

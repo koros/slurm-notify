@@ -195,3 +195,8 @@ health reporting continues, and maintenance succeeds after restart without resen
 Private orchestration now validates settings and policies before polling or
 mutating storage. Invalid preflight leaves the poll budget and failure streak
 unchanged; stage reports distinguish preflight rejection from a failed poll.
+
+Owned process acceptance now covers a supervised HTTP acknowledgment timeout:
+the pending retry survives maintenance and restart, then succeeds with the same
+internal ID. Timeout acceptance remains uncertain, so retries can duplicate an
+external notification when a provider does not honor idempotency keys.
