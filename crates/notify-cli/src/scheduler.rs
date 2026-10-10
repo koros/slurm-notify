@@ -274,9 +274,344 @@ fn poll_with(
         .map_err(PollError::Parse)
 }
 
+#[derive(Debug)]
+enum DurablePollError {
+    Poll(PollError),
+    Storage(super::storage::StorageError),
+}
+
+fn poll_durable_with(
+    request: &PollRequest<'_>,
+    reconciler: &mut super::lifecycle::Reconciler,
+    store: &mut super::storage::Store,
+    destinations: &[&str],
+    observed_at: i64,
+    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+) -> Result<Vec<super::lifecycle::Event>, DurablePollError> {
+    let mut candidate = reconciler.clone();
+    let events = poll_with(request, &mut candidate, query).map_err(DurablePollError::Poll)?;
+    store
+        .persist_reconciler(
+            &candidate,
+            &events,
+            destinations,
+            request.cluster,
+            request.history_end,
+            observed_at,
+        )
+        .map_err(DurablePollError::Storage)?;
+    *reconciler = candidate;
+    Ok(events)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn durable_store(
+        directory: &super::super::storage::tests::Directory,
+    ) -> super::super::storage::Store {
+        super::super::storage::Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
+    }
+
+    fn durable_poll(
+        req: &PollRequest<'_>,
+        reconciler: &mut super::super::lifecycle::Reconciler,
+        store: &mut super::super::storage::Store,
+        active: &str,
+        accounting: &str,
+        destinations: &[&str],
+    ) -> Result<Vec<super::super::lifecycle::Event>, DurablePollError> {
+        poll_durable_with(req, reconciler, store, destinations, 10, |command, _, _| {
+            Ok(if command.get_program() == "squeue" {
+                active
+            } else {
+                accounting
+            }
+            .into())
+        })
+    }
+
+    fn database_count(directory: &super::super::storage::tests::Directory, table: &str) -> i64 {
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn durable_lifecycle_restores_deduplication_and_checkpoint_after_reopen() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, checkpoint) = store.restore("cluster", 20).unwrap();
+        assert!(checkpoint.is_none());
+        let active = "1|alice|s|actual|RUNNING";
+        assert_eq!(
+            durable_poll(
+                &request(),
+                &mut reconciler,
+                &mut store,
+                active,
+                "",
+                &["primary"]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        drop(store);
+        drop(reconciler);
+        let mut store = durable_store(&directory);
+        let (mut reconciler, checkpoint) = store.restore("cluster", 20).unwrap();
+        assert_eq!(checkpoint.as_deref(), Some(request().history_end));
+        assert!(durable_poll(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            active,
+            "",
+            &["primary"]
+        )
+        .unwrap()
+        .is_empty());
+        let completed = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        assert_eq!(
+            durable_poll(
+                &request(),
+                &mut reconciler,
+                &mut store,
+                "",
+                completed,
+                &["primary"]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        drop(store);
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        assert!(durable_poll(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            active,
+            completed,
+            &["primary"]
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(database_count(&directory, "jobs"), 1);
+        assert_eq!(database_count(&directory, "events"), 2);
+        assert_eq!(database_count(&directory, "outbox"), 2);
+    }
+
+    #[test]
+    fn pending_identity_promotion_is_persisted_without_ghost_rows() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        let mut req = request();
+        req.emit_discovered = false;
+        durable_poll(
+            &req,
+            &mut reconciler,
+            &mut store,
+            "1|alice|s|estimate|PENDING",
+            "",
+            &["primary"],
+        )
+        .unwrap();
+        drop(store);
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        assert_eq!(
+            durable_poll(
+                &req,
+                &mut reconciler,
+                &mut store,
+                "1|alice|s|actual|RUNNING",
+                "",
+                &["primary"]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        drop(store);
+        let mut store = durable_store(&directory);
+        let (reconciler, _) = store.restore("cluster", 20).unwrap();
+        assert_eq!(reconciler.latest.len(), 1);
+        assert_eq!(database_count(&directory, "jobs"), 1);
+    }
+
+    #[test]
+    fn suppressed_initial_events_remain_suppressed_after_restart() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        let mut req = request();
+        req.emit_discovered = false;
+        let active = "1|alice|s|actual|RUNNING";
+        assert!(
+            durable_poll(&req, &mut reconciler, &mut store, active, "", &["primary"])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(database_count(&directory, "events"), 1);
+        assert_eq!(database_count(&directory, "outbox"), 0);
+        drop(store);
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        assert!(durable_poll(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            active,
+            "",
+            &["primary"]
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            durable_poll(
+                &request(),
+                &mut reconciler,
+                &mut store,
+                "",
+                "cluster|1|alice|s|actual|FAILED|1:0",
+                &["primary"]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(database_count(&directory, "events"), 2);
+        assert_eq!(database_count(&directory, "outbox"), 1);
+    }
+
+    #[test]
+    fn failed_commit_preserves_memory_checkpoint_and_retry_event() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        let active = "1|alice|s|actual|RUNNING";
+        match durable_poll(&request(), &mut reconciler, &mut store, active, "", &[""]) {
+            Err(DurablePollError::Storage(super::super::storage::StorageError::Database(
+                error,
+            ))) => assert!(matches!(error, rusqlite::Error::SqliteFailure(_, _))),
+            other => panic!("expected transactional failure, got {other:?}"),
+        }
+        assert!(reconciler.latest.is_empty());
+        assert!(reconciler.emitted.is_empty());
+        assert!(store.restore("cluster", 20).unwrap().1.is_none());
+        assert_eq!(database_count(&directory, "events"), 0);
+        assert_eq!(
+            durable_poll(
+                &request(),
+                &mut reconciler,
+                &mut store,
+                active,
+                "",
+                &["primary"]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn durable_query_failure_does_not_advance_memory_or_database() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        match poll_durable_with(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            &["primary"],
+            10,
+            |_, _, _| Err(QueryError::MissingCommand),
+        ) {
+            Err(DurablePollError::Poll(PollError::Active(QueryError::MissingCommand))) => {}
+            other => panic!("unexpected query result {other:?}"),
+        }
+        assert!(reconciler.latest.is_empty());
+        assert!(store.restore("cluster", 20).unwrap().1.is_none());
+    }
+
+    #[test]
+    fn older_history_window_cannot_regress_durable_checkpoint() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        durable_poll(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            "1|alice|s|actual|RUNNING",
+            "",
+            &["primary"],
+        )
+        .unwrap();
+        let mut older = request();
+        older.history_end = "2026-10-10T01:00:00";
+        assert!(matches!(
+            durable_poll(
+                &older,
+                &mut reconciler,
+                &mut store,
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                &["primary"]
+            ),
+            Err(DurablePollError::Storage(
+                super::super::storage::StorageError::Conflict
+            ))
+        ));
+        assert_eq!(
+            store.restore("cluster", 20).unwrap().1.as_deref(),
+            Some(request().history_end)
+        );
+        assert_eq!(
+            reconciler.latest.values().next(),
+            Some(&super::super::lifecycle::State::Running)
+        );
+        assert_eq!(database_count(&directory, "events"), 1);
+    }
+
+    #[test]
+    fn restore_capacity_and_event_identity_errors_do_not_reset_database() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = durable_store(&directory);
+        let (mut reconciler, _) = store.restore("cluster", 20).unwrap();
+        let mut req = request();
+        req.emit_discovered = false;
+        durable_poll(
+            &req,
+            &mut reconciler,
+            &mut store,
+            "1|alice|s|actual|RUNNING",
+            "",
+            &[],
+        )
+        .unwrap();
+        assert!(matches!(
+            store.restore("cluster", 0),
+            Err(super::super::storage::StorageError::InvalidInput)
+        ));
+        assert_eq!(database_count(&directory, "events"), 1);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute("UPDATE events SET event_id='invalid'", [])
+            .unwrap();
+        assert!(matches!(
+            store.restore("cluster", 20),
+            Err(super::super::storage::StorageError::Conflict)
+        ));
+        assert_eq!(database_count(&directory, "events"), 1);
+    }
 
     fn helper(mode: &str) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());

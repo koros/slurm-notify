@@ -5,7 +5,7 @@ The schema is private and has no released compatibility guarantee.
 
 ## Context
 
-The in-memory prototype loses observations and deduplication history on restart.
+The initial in-memory prototype lost observations and deduplication history on restart.
 The handoff selects user-local SQLite and requires event recording and enqueueing
 in one transaction. External acknowledgement cannot provide exactly-once delivery.
 
@@ -104,3 +104,41 @@ schema rejection, bounded lock contention, and invalid/orphan input. Store openi
 currently assumes a private caller-owned test directory. Secure file creation,
 full schema verification, migration upgrades, pending-delivery reads, delivery
 outcome operations, state restoration, and actual process-crash tests remain pending.
+
+## Integrated candidate commits and bounded restoration
+
+The private mock-polling pipeline now clones the current reconciler, applies a
+successful snapshot to that candidate, commits its snapshots/ledger/fan-out and
+checkpoint, and only then replaces the live state. Query, parse, or storage failure
+preserves both live state and the existing checkpoint. Checkpoints cannot regress;
+fixed-width UTC query-window validation makes their lexical comparison ordered.
+Generic storage callers must also provide ordered checkpoint representations.
+
+Internal event IDs encode the cluster/job/submission/start/state tuple with explicit
+UTF-8 byte lengths. They are deterministic and unambiguous without hashing, but
+are not a public event contract or a privacy-preserving hash. The event ledger
+includes suppressed initial events without outbox destinations. Replays preserve
+the original routes, including a decision not to notify an initially suppressed
+event. No notification payload or complete logs are stored by this prototype.
+
+Restoration reads a consistent transaction snapshot, applies separate row limits
+to jobs and ledger entries, validates event IDs and job references, and restores
+initial-event suppression and terminal-state deduplication. Capacity or consistency
+failure leaves the database intact and returns an error. Restoration returns the
+checkpoint; it does not choose a catch-up window or polling interval automatically.
+The checkpoint records the last successful query window, not proof that accounting
+is complete through that time; future catch-up must allow overlapping late records.
+Historical actual attempts remain recorded. When a pending job gains an actual
+start, its obsolete pending row is removed atomically so reopening cannot recreate
+that provisional identity. Only pending state may be promoted; a terminal pre-start
+cancellation is not mistaken for an observed pending job.
+
+Eight added Rust tests cover deterministic identity encoding, full lifecycle reopen,
+pending promotion, suppressed events, failed commits/query recovery, corrupt IDs,
+restore capacity, and checkpoint regression. There are now 46 passing Rust tests.
+These are local database close/reopen tests, not proof of power-loss durability,
+real cluster semantics, multi-writer coordination, or external provider delivery.
+
+Secure production database creation, hard peak-memory/retention policies, schema
+upgrade compatibility, delivery outcome operations, runtime activation, and a
+production-ready SQLite dependency/toolchain assessment remain pending.

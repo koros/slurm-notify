@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Identity {
-    cluster: String,
-    job: String,
-    submit: String,
-    start: String,
+    pub(super) cluster: String,
+    pub(super) job: String,
+    pub(super) submit: String,
+    pub(super) start: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -26,7 +26,7 @@ pub(super) enum State {
 }
 
 impl State {
-    fn parse(value: &str) -> Self {
+    pub(super) fn parse(value: &str) -> Self {
         match value {
             "PENDING" | "REQUEUED" => Self::Pending,
             "RUNNING" => Self::Running,
@@ -43,7 +43,23 @@ impl State {
         }
     }
 
-    fn terminal(&self) -> bool {
+    pub(super) fn code(&self) -> &str {
+        match self {
+            Self::Pending => "PENDING",
+            Self::Running => "RUNNING",
+            Self::Completed => "COMPLETED",
+            Self::Failed => "FAILED",
+            Self::Timeout => "TIMEOUT",
+            Self::Cancelled => "CANCELLED",
+            Self::OutOfMemory => "OUT_OF_MEMORY",
+            Self::NodeFailure => "NODE_FAIL",
+            Self::BootFailure => "BOOT_FAIL",
+            Self::Deadline => "DEADLINE",
+            Self::Unknown(value) => value,
+        }
+    }
+
+    pub(super) fn terminal(&self) -> bool {
         matches!(
             self,
             Self::Completed
@@ -178,20 +194,20 @@ pub(super) fn parse_active(
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Event {
-    identity: Identity,
-    state: State,
+    pub(super) identity: Identity,
+    pub(super) state: State,
 }
 
 #[derive(Clone, Default)]
 pub(super) struct Reconciler {
-    // In-memory only; restart persistence and a bounded retention policy are future work.
-    latest: HashMap<Identity, State>,
-    emitted: HashSet<Event>,
+    // Candidate state is persisted by the private storage pipeline; retention is future work.
+    pub(super) latest: HashMap<Identity, State>,
+    pub(super) emitted: HashSet<Event>,
     capacity: Option<usize>,
 }
 
 impl Reconciler {
-    fn with_capacity(capacity: usize) -> Self {
+    pub(super) fn with_capacity(capacity: usize) -> Self {
         Self {
             capacity: Some(capacity),
             ..Self::default()
@@ -253,7 +269,10 @@ impl Reconciler {
             // This carries initial-discovery policy across a changing Start field.
             let mut pending = record.identity.clone();
             pending.start.clear();
-            if !record.identity.start.is_empty() && !self.latest.contains_key(&record.identity) {
+            if !record.identity.start.is_empty()
+                && !self.latest.contains_key(&record.identity)
+                && self.latest.get(&pending) == Some(&State::Pending)
+            {
                 if let Some(state) = self.latest.remove(&pending) {
                     self.latest.insert(record.identity.clone(), state);
                 }

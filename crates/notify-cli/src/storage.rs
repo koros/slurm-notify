@@ -6,7 +6,7 @@ use std::time::Duration;
 const MIGRATION: &str = include_str!("../../notify-storage/migrations/0001.sql");
 
 #[derive(Debug)]
-enum StorageError {
+pub(super) enum StorageError {
     Database(rusqlite::Error),
     UnsupportedVersion,
     Conflict,
@@ -35,13 +35,29 @@ struct Event<'a> {
     destinations: &'a [&'a str],
 }
 
-struct Store {
+// Length-prefixed UTF-8 fields are unambiguous without hashing or a new dependency.
+// Internal prototype ID only: not a published webhook/event contract.
+fn event_id(event: &super::lifecycle::Event) -> String {
+    let mut id = String::from("internal-v1:");
+    for field in [
+        &event.identity.cluster,
+        &event.identity.job,
+        &event.identity.submit,
+        &event.identity.start,
+        event.state.code(),
+    ] {
+        id.push_str(&format!("{}:{field}", field.len()));
+    }
+    id
+}
+
+pub(super) struct Store {
     db: Connection,
 }
 
 impl Store {
     // Caller owns a private test directory. Secure production creation remains pending.
-    fn open(path: &Path, lock_timeout: Duration) -> Result<Self, StorageError> {
+    pub(super) fn open(path: &Path, lock_timeout: Duration) -> Result<Self, StorageError> {
         let db = Connection::open(path)?;
         db.busy_timeout(lock_timeout)?;
         db.pragma_update(None, "foreign_keys", true)?;
@@ -61,6 +77,139 @@ impl Store {
             _ => return Err(StorageError::UnsupportedVersion),
         }
         Ok(Self { db })
+    }
+
+    pub(super) fn persist_reconciler(
+        &mut self,
+        candidate: &super::lifecycle::Reconciler,
+        deliverable: &[super::lifecycle::Event],
+        destinations: &[&str],
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+    ) -> Result<(), StorageError> {
+        let jobs: Vec<_> = candidate
+            .latest
+            .iter()
+            .map(|(identity, state)| Job {
+                cluster: &identity.cluster,
+                id: &identity.job,
+                submitted: &identity.submit,
+                started: &identity.start,
+                state: state.code(),
+            })
+            .collect();
+        let ledger: Vec<_> = candidate.emitted.iter().collect();
+        let ids: Vec<_> = ledger.iter().map(|event| event_id(event)).collect();
+        let events: Vec<_> = ledger
+            .iter()
+            .zip(&ids)
+            .map(|(event, id)| Event {
+                id,
+                job: Job {
+                    cluster: &event.identity.cluster,
+                    id: &event.identity.job,
+                    submitted: &event.identity.submit,
+                    started: &event.identity.start,
+                    state: event.state.code(),
+                },
+                kind: event.state.code(),
+                destinations: if deliverable.contains(event) {
+                    destinations
+                } else {
+                    &[]
+                },
+            })
+            .collect();
+        self.record_poll(&jobs, &events, cluster, through, observed_at)
+    }
+
+    // A read transaction gives jobs/events/checkpoint one consistent snapshot.
+    // LIMIT bounds restored rows; an overflow fails rather than discarding history.
+    pub(super) fn restore(
+        &mut self,
+        cluster: &str,
+        capacity: usize,
+    ) -> Result<(super::lifecycle::Reconciler, Option<String>), StorageError> {
+        use super::lifecycle::{Event as LifecycleEvent, Identity, Reconciler, State};
+        let limit = i64::try_from(capacity)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or(StorageError::InvalidInput)?;
+        let tx = self.db.transaction()?;
+        let mut restored = Reconciler::with_capacity(capacity);
+        let mut statement = tx.prepare(
+            "SELECT job_id,submitted_at,started_at,state FROM jobs WHERE cluster=?1 LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![cluster, limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (job, submit, start, code) = row?;
+            let state = State::parse(&code);
+            if state.code() != code {
+                return Err(StorageError::Conflict);
+            }
+            restored.latest.insert(
+                Identity {
+                    cluster: cluster.into(),
+                    job,
+                    submit,
+                    start,
+                },
+                state,
+            );
+        }
+        drop(statement);
+        let mut statement = tx.prepare("SELECT event_id,job_id,submitted_at,started_at,event_type FROM events WHERE cluster=?1 LIMIT ?2")?;
+        let rows = statement.query_map(params![cluster, limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, job, submit, start, code) = row?;
+            let state = State::parse(&code);
+            let event = LifecycleEvent {
+                identity: Identity {
+                    cluster: cluster.into(),
+                    job,
+                    submit,
+                    start,
+                },
+                state,
+            };
+            if (!event.state.terminal() && event.state != State::Running)
+                || event.state.code() != code
+                || event_id(&event) != id
+                || !restored.latest.contains_key(&event.identity)
+            {
+                return Err(StorageError::Conflict);
+            }
+            restored.emitted.insert(event);
+        }
+        drop(statement);
+        if restored.latest.len() > capacity || restored.emitted.len() > capacity {
+            return Err(StorageError::InvalidInput);
+        }
+        let checkpoint = tx
+            .query_row(
+                "SELECT history_through FROM checkpoints WHERE cluster=?1",
+                [cluster],
+                |row| row.get(0),
+            )
+            .optional()?;
+        tx.commit()?;
+        Ok((restored, checkpoint))
     }
 
     // observed_at is Unix seconds in this private experiment. Network delivery
@@ -84,6 +233,29 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT history_through FROM checkpoints WHERE cluster=?1",
+                [cluster],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if previous
+            .as_deref()
+            .map(|checkpoint| checkpoint > through)
+            .unwrap_or(false)
+        {
+            return Err(StorageError::Conflict);
+        }
+        // Promotion removes only a pending identity. Keep historical actual
+        // attempts and their event references for restart deduplication.
+        for job in jobs.iter().filter(|job| !job.started.is_empty()) {
+            tx.execute(
+                "DELETE FROM jobs WHERE cluster=?1 AND job_id=?2 AND submitted_at=?3
+                AND started_at='' AND state='PENDING'",
+                params![job.cluster, job.id, job.submitted],
+            )?;
+        }
         for job in jobs {
             tx.execute(
                 "INSERT INTO jobs VALUES (?1,?2,?3,?4,?5,?6)
@@ -145,14 +317,14 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-    struct Directory(std::path::PathBuf);
+    pub(crate) struct Directory(std::path::PathBuf);
     impl Directory {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
                 "slurm-notify-storage-{}-{}",
                 std::process::id(),
@@ -166,7 +338,7 @@ mod tests {
             }
             Self(path)
         }
-        fn path(&self) -> std::path::PathBuf {
+        pub(crate) fn path(&self) -> std::path::PathBuf {
             self.0.join("state.sqlite")
         }
     }
@@ -203,6 +375,34 @@ mod tests {
                 row.get(0)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn event_identity_encoding_is_deterministic_and_unambiguous() {
+        use super::super::lifecycle::{Event as LifecycleEvent, Identity, State};
+        let first = LifecycleEvent {
+            identity: Identity {
+                cluster: "a:b".into(),
+                job: "c".into(),
+                submit: "s".into(),
+                start: "t".into(),
+            },
+            state: State::Running,
+        };
+        let second = LifecycleEvent {
+            identity: Identity {
+                cluster: "a".into(),
+                job: "b:c".into(),
+                submit: "s".into(),
+                start: "t".into(),
+            },
+            state: State::Running,
+        };
+        assert_eq!(event_id(&first), event_id(&first.clone()));
+        assert_ne!(event_id(&first), event_id(&second));
+        let mut terminal = first.clone();
+        terminal.state = State::Completed;
+        assert_ne!(event_id(&first), event_id(&terminal));
     }
 
     #[test]

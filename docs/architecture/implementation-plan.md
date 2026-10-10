@@ -310,3 +310,27 @@ Local validation: 38 Rust tests, eight SQLite tests, and six hook tests pass,
 alongside formatting, strict Clippy, build, and executable smoke checks. Local
 hooks are installed in this checkout. Each clone requires its own install step;
 GitHub branch protection/required reviews remain separate repository settings.
+
+## Current increment: durable mock-pipeline recovery
+
+Connected the mock query/reconcile pipeline to candidate-state SQLite commits.
+Live memory is updated only after snapshots, stable ledger IDs, routed outbox
+records, and checkpoint commit successfully. Restoration reads a consistent,
+capacity-limited snapshot and verifies event identity/reference consistency.
+Suppressed initial events stay suppressed after reopen. Pending identity promotion
+removes obsolete database rows without discarding historical attempts.
+
+Checkpoint regression now fails atomically. Query and storage failure tests verify
+that retry still emits the expected event and the failed poll advances neither
+memory nor durable checkpoint. Deterministic length-prefixed IDs remain private;
+no public CLI, event schema, configuration, or dependency change was introduced.
+
+Validation: 46 Rust tests, eight SQLite tests, and six hook tests pass. The shared
+formatter, strict Clippy, build, and executable smoke checks pass. Local hooks and
+CI continue to run the shared suite. Close/reopen recovery is verified; real process
+crashes, hosted CI, and live-cluster execution are not claimed by this increment.
+
+Next: committed outbox reads, atomic delivery outcomes/retry state, and mock provider
+integration. Production runtime activation also requires secure database creation,
+public interface decisions, a current dependency/security assessment, and explicit
+operational defaults. The executable still reports unavailable monitoring.

@@ -81,10 +81,12 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Thirty-eight tests exercise private, test-only scheduler parsers, a bounded command
-runner, and lifecycle reconciliation. One subprocess helper is intentionally ignored
-in the main suite and invoked by runner tests. Eight additional Python/SQLite tests validate a proposed private ledger/outbox
-schema. Neither prototype is connected to the executable.
+The executable prints its development status and exits with code 1. Forty-six Rust
+tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
+and SQLite commit/reopen recovery. One subprocess helper is intentionally ignored
+in the main suite and invoked by runner tests. Eight Python/SQLite schema tests and
+six Git-hook tests run separately. The integrated pipeline persists deduplication
+history and checkpoints, but remains test-only and is not exposed by the executable.
 The proposed CLI commands are not implemented. See [contributor guidance](CONTRIBUTING.md)
 and the [implementation plan](docs/architecture/implementation-plan.md).
 
