@@ -1,0 +1,574 @@
+//! Private test-only direct-process scheduler boundary; no polling defaults.
+use std::io::{self, Read};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+#[derive(Debug, PartialEq, Eq)]
+enum QueryError {
+    MissingCommand,
+    Io,
+    Timeout,
+    OutputLimit,
+    Exit(Option<i32>),
+    InvalidUtf8,
+    Cleanup,
+}
+
+fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, QueryError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| QueryError::Io)?;
+    if bytes.len() > limit {
+        Err(QueryError::OutputLimit)
+    } else {
+        Ok(bytes)
+    }
+}
+
+// Linux/macOS C ABI for kill(2). Keep the unsafe boundary small and private.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn kill_group(pid: u32) -> io::Result<()> {
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    let group = i32::try_from(pid)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid process group"))?;
+    if group <= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid process group",
+        ));
+    }
+    // SAFETY: kill takes two integer values, no pointers. The negative PID targets
+    // only the group created for this child. SIGKILL is 9 on Linux and macOS.
+    if unsafe { kill(-group, 9) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn prepare_environment(command: &mut Command) {
+    let mut names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
+    names.extend(command.get_envs().map(|(name, _)| name.to_owned()));
+    for name in names {
+        let text = name.to_string_lossy();
+        if text.starts_with("SQUEUE_")
+            || text.starts_with("SACCT_")
+            || text == "SLURM_TIME_FORMAT"
+            || text == "SLURM_BITSTR_LEN"
+        {
+            command.env_remove(name);
+        }
+    }
+    command.env("LC_ALL", "C").env("TZ", "UTC");
+}
+
+// Each call owns one direct child. Callers must serialize queries. stderr is
+// drained but never included in diagnostics because it may contain sensitive data.
+fn run(command: &mut Command, timeout: Duration, limit: usize) -> Result<String, QueryError> {
+    prepare_environment(command);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                QueryError::MissingCommand
+            } else {
+                QueryError::Io
+            }
+        })?;
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (sender, receiver) = mpsc::channel();
+    let out_sender = sender.clone();
+    let out_reader = thread::spawn(move || {
+        let _ = out_sender.send((true, read_bounded(stdout, limit)));
+    });
+    let err_reader = thread::spawn(move || {
+        let _ = sender.send((false, read_bounded(stderr, limit)));
+    });
+    let deadline = Instant::now() + timeout;
+    let result = (|| {
+        let mut output = None;
+        let mut drained = 0;
+        while drained < 2 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let (is_stdout, bytes) = receiver
+                .recv_timeout(remaining)
+                .map_err(|_| QueryError::Timeout)?;
+            let bytes = bytes?;
+            if is_stdout {
+                output = Some(bytes);
+            }
+            drained += 1;
+        }
+        loop {
+            let status = child.try_wait().map_err(|_| QueryError::Io)?;
+            if let Some(status) = status {
+                if !status.success() {
+                    return Err(QueryError::Exit(status.code()));
+                }
+                return String::from_utf8(output.unwrap()).map_err(|_| QueryError::InvalidUtf8);
+            }
+            if Instant::now() >= deadline {
+                return Err(QueryError::Timeout);
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+    })();
+    // Terminate residual same-group descendants even when the direct child exits.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let _ = kill_group(child.id());
+    if result.is_err() {
+        let _ = child.kill();
+    }
+    child.wait().map_err(|_| QueryError::Cleanup)?;
+    let cleanup_deadline = Instant::now() + Duration::from_secs(1);
+    while !out_reader.is_finished() || !err_reader.is_finished() {
+        if Instant::now() >= cleanup_deadline {
+            return Err(QueryError::Cleanup);
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    out_reader.join().map_err(|_| QueryError::Cleanup)?;
+    err_reader.join().map_err(|_| QueryError::Cleanup)?;
+    result
+}
+
+fn active_command(program: &std::path::Path, user: &str) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(["--noheader", "--array", "--local"])
+        .arg(format!("--user={user}"))
+        .arg("--format=%i|%u|%V|%S|%T");
+    command
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PollError {
+    InvalidRequest,
+    Active(QueryError),
+    Accounting(QueryError),
+    Parse(super::lifecycle::ParseError),
+}
+
+// Deliberately accepts only fixed-width UTC calendar timestamps, not Slurm's
+// relative date language. Lexical ordering is safe after calendar validation.
+fn valid_timestamp(value: &str) -> bool {
+    let b = value.as_bytes();
+    if b.len() != 19
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return false;
+    }
+    if b.iter()
+        .enumerate()
+        .any(|(i, c)| ![4, 7, 10, 13, 16].contains(&i) && !c.is_ascii_digit())
+    {
+        return false;
+    }
+    let number = |start: usize, end: usize| value[start..end].parse::<u32>().unwrap();
+    let year = number(0, 4);
+    let month = number(5, 7);
+    let day = number(8, 10);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return false,
+    };
+    year > 0
+        && day > 0
+        && day <= days
+        && number(11, 13) < 24
+        && number(14, 16) < 60
+        && number(17, 19) < 60
+}
+
+struct PollRequest<'a> {
+    active_program: &'a std::path::Path,
+    accounting_program: &'a std::path::Path,
+    cluster: &'a str,
+    user: &'a str,
+    history_start: &'a str,
+    history_end: &'a str,
+    timeout: Duration,
+    output_limit: usize,
+    emit_discovered: bool,
+}
+
+// Explicit windows and limits only; no public defaults. Injection lets ordinary
+// tests run the complete query/parse/reconcile path without Slurm access.
+fn poll_with(
+    request: &PollRequest<'_>,
+    reconciler: &mut super::lifecycle::Reconciler,
+    mut query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+) -> Result<Vec<super::lifecycle::Event>, PollError> {
+    if !valid_timestamp(request.history_start)
+        || !valid_timestamp(request.history_end)
+        || request.history_start >= request.history_end
+        || request.timeout.is_zero()
+        || request.output_limit == 0
+        || request.user.is_empty()
+        || request.cluster.is_empty()
+    {
+        return Err(PollError::InvalidRequest);
+    }
+    let started = Instant::now();
+    let mut active = active_command(request.active_program, request.user);
+    let active_output =
+        query(&mut active, request.timeout, request.output_limit).map_err(PollError::Active)?;
+    let remaining = request.timeout.saturating_sub(started.elapsed());
+    if remaining.is_zero() {
+        return Err(PollError::Accounting(QueryError::Timeout));
+    }
+    let mut accounting = Command::new(request.accounting_program);
+    accounting
+        .args([
+            "--noheader",
+            "--parsable2",
+            "--allocations",
+            "--array",
+            "--local",
+            "--duplicates",
+        ])
+        .arg(format!("--user={}", request.user))
+        .arg(format!("--starttime={}", request.history_start))
+        .arg(format!("--endtime={}", request.history_end))
+        .arg("--format=Cluster,JobID,User,Submit,Start,State%32,ExitCode");
+    let accounting_output =
+        query(&mut accounting, remaining, request.output_limit).map_err(PollError::Accounting)?;
+    reconciler
+        .observe_snapshot(
+            &active_output,
+            &accounting_output,
+            request.cluster,
+            request.user,
+            request.emit_discovered,
+        )
+        .map_err(PollError::Parse)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn helper(mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "scheduler::tests::child_helper",
+                "--nocapture",
+            ])
+            .env("SLURM_NOTIFY_TEST_CHILD", mode);
+        command
+    }
+
+    #[test]
+    #[ignore = "invoked only as a subprocess by runner tests"]
+    fn child_helper() {
+        match std::env::var("SLURM_NOTIFY_TEST_CHILD").unwrap().as_str() {
+            "descendant" => {
+                let mut descendant = helper("sleep");
+                // Inherit the runner's process group and both output pipes.
+                let mut child = descendant.spawn().unwrap();
+                let _ = child.wait();
+            }
+            "environment" => {
+                for name in ["SQUEUE_FORMAT", "SACCT_FORMAT", "SLURM_TIME_FORMAT"] {
+                    assert!(std::env::var_os(name).is_none());
+                }
+                assert_eq!(std::env::var("LC_ALL").unwrap(), "C");
+                assert_eq!(std::env::var("TZ").unwrap(), "UTC");
+                assert_eq!(std::env::var("SLURM_CONF").unwrap(), "/test/site.conf");
+            }
+            "fail" => {
+                eprintln!("sensitive diagnostic");
+                std::process::exit(7);
+            }
+            "sleep" => thread::sleep(Duration::from_secs(30)),
+            "flood" => {
+                use std::io::Write;
+                let _ = std::io::stdout().write_all(&vec![b'x'; 100_000]);
+            }
+            "stderr" => {
+                use std::io::Write;
+                let _ = std::io::stderr().write_all(&vec![b'x'; 100_000]);
+            }
+            "invalid" => {
+                use std::io::Write;
+                std::io::stdout().write_all(&[0xff]).unwrap();
+            }
+            "ok" => println!("fixture-output"),
+            _ => panic!("invalid helper mode"),
+        }
+    }
+
+    #[test]
+    fn calendar_validation_handles_leap_years_and_malformed_input() {
+        for value in ["2024-02-29T23:59:59", "2000-02-29T00:00:00"] {
+            assert!(valid_timestamp(value));
+        }
+        for value in [
+            "1900-02-29T00:00:00",
+            "2026-02-29T00:00:00",
+            "2026-04-31T00:00:00",
+            "2026-10-10T24:00:00",
+            "2026-10-10T00:60:00",
+            "2026-10-10T00:00:60",
+            "0000-01-01T00:00:00",
+            "now",
+            "2026-10-10T00:00:00Z",
+            "éééééééééa",
+        ] {
+            assert!(!valid_timestamp(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_windows_and_limits_never_execute_queries() {
+        let mut reconciler = super::super::lifecycle::Reconciler::default();
+        for mode in 0..5 {
+            let mut req = request();
+            match mode {
+                0 => req.history_start = req.history_end,
+                1 => req.history_start = "now",
+                2 => req.timeout = Duration::ZERO,
+                3 => req.output_limit = 0,
+                _ => req.user = "",
+            }
+            assert_eq!(
+                poll_with(&req, &mut reconciler, |_, _, _| panic!(
+                    "invalid request queried scheduler"
+                ))
+                .unwrap_err(),
+                PollError::InvalidRequest
+            );
+        }
+    }
+
+    fn request() -> PollRequest<'static> {
+        PollRequest {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(5),
+            output_limit: 4096,
+            emit_discovered: true,
+        }
+    }
+
+    #[test]
+    fn complete_mock_poll_deduplicates_then_reports_completion() {
+        let mut reconciler = super::super::lifecycle::Reconciler::default();
+        let mut terminal = false;
+        for expected in [1, 0, 1, 0] {
+            let events = poll_with(&request(), &mut reconciler, |command, budget, limit| {
+                assert!(budget <= Duration::from_secs(5));
+                assert_eq!(limit, 4096);
+                if command.get_program() == "squeue" {
+                    Ok(if terminal {
+                        ""
+                    } else {
+                        "1|alice|s|actual|RUNNING"
+                    }
+                    .into())
+                } else {
+                    let args: Vec<_> = command.get_args().map(|v| v.to_str().unwrap()).collect();
+                    assert!(args.contains(&"--starttime=2026-10-10T00:00:00"));
+                    assert!(args.contains(&"--endtime=2026-10-11T00:00:00"));
+                    assert!(args.contains(&"--duplicates"));
+                    Ok(if terminal {
+                        "cluster|1|alice|s|actual|COMPLETED|0:0"
+                    } else {
+                        ""
+                    }
+                    .into())
+                }
+            })
+            .unwrap();
+            assert_eq!(events.len(), expected);
+            if expected == 0 {
+                terminal = true;
+            }
+        }
+    }
+
+    #[test]
+    fn failed_second_query_does_not_consume_active_events() {
+        let mut reconciler = super::super::lifecycle::Reconciler::default();
+        let error = poll_with(&request(), &mut reconciler, |command, _, _| {
+            if command.get_program() == "squeue" {
+                Ok("1|alice|s|actual|RUNNING".into())
+            } else {
+                Err(QueryError::MissingCommand)
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error, PollError::Accounting(QueryError::MissingCommand));
+        assert_eq!(
+            poll_with(&request(), &mut reconciler, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    "1|alice|s|actual|RUNNING"
+                } else {
+                    ""
+                }
+                .into())
+            })
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn malformed_accounting_and_active_command_failure_are_distinct() {
+        let mut reconciler = super::super::lifecycle::Reconciler::default();
+        assert_eq!(
+            poll_with(&request(), &mut reconciler, |_, _, _| Err(
+                QueryError::Exit(Some(1))
+            ))
+            .unwrap_err(),
+            PollError::Active(QueryError::Exit(Some(1)))
+        );
+        assert!(matches!(
+            poll_with(&request(), &mut reconciler, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    "1|alice|s|actual|RUNNING"
+                } else {
+                    "malformed"
+                }
+                .into())
+            }),
+            Err(PollError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn runner_can_be_injected_without_contacting_slurm() {
+        let mut reconciler = super::super::lifecycle::Reconciler::default();
+        let mut req = request();
+        req.active_program = std::path::Path::new("/nonexistent-slurm-notify-test/squeue");
+        assert_eq!(
+            poll_with(&req, &mut reconciler, run).unwrap_err(),
+            PollError::Active(QueryError::MissingCommand)
+        );
+    }
+
+    #[test]
+    fn formatting_overrides_are_removed_but_site_config_is_preserved() {
+        let mut command = helper("environment");
+        command
+            .env("SQUEUE_FORMAT", "bad")
+            .env("SACCT_FORMAT", "bad")
+            .env("SLURM_TIME_FORMAT", "bad")
+            .env("SLURM_CONF", "/test/site.conf");
+        assert!(run(&mut command, Duration::from_secs(5), 4096).is_ok());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn timeout_closes_descendant_held_pipes() {
+        let start = Instant::now();
+        assert_eq!(
+            run(&mut helper("descendant"), Duration::from_millis(200), 4096),
+            Err(QueryError::Timeout)
+        );
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(kill_group(0).is_err());
+    }
+
+    #[test]
+    fn success_and_nonzero_exit_are_distinct() {
+        assert!(run(&mut helper("ok"), Duration::from_secs(5), 4096)
+            .unwrap()
+            .contains("fixture-output"));
+        assert_eq!(
+            run(&mut helper("fail"), Duration::from_secs(5), 4096),
+            Err(QueryError::Exit(Some(7)))
+        );
+    }
+
+    #[test]
+    fn missing_command_is_diagnosable() {
+        let mut command = Command::new("/nonexistent-slurm-notify-test/squeue");
+        assert_eq!(
+            run(&mut command, Duration::from_secs(1), 4096),
+            Err(QueryError::MissingCommand)
+        );
+    }
+
+    #[test]
+    fn timeout_kills_and_reaps_direct_child() {
+        let start = Instant::now();
+        assert_eq!(
+            run(&mut helper("sleep"), Duration::from_millis(100), 4096),
+            Err(QueryError::Timeout)
+        );
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(run(&mut helper("ok"), Duration::from_secs(5), 4096).is_ok());
+    }
+
+    #[test]
+    fn both_streams_are_bounded_and_invalid_encoding_is_rejected() {
+        for mode in ["flood", "stderr"] {
+            assert_eq!(
+                run(&mut helper(mode), Duration::from_secs(5), 4096),
+                Err(QueryError::OutputLimit)
+            );
+        }
+        assert_eq!(
+            run(&mut helper("invalid"), Duration::from_secs(5), 4096),
+            Err(QueryError::InvalidUtf8)
+        );
+    }
+
+    #[test]
+    fn arguments_preserve_user_as_literal_and_expand_arrays() {
+        let command = active_command(std::path::Path::new("squeue"), "alice;echo secret");
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--noheader",
+                "--array",
+                "--local",
+                "--user=alice;echo secret",
+                "--format=%i|%u|%V|%S|%T"
+            ]
+        );
+    }
+}
