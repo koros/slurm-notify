@@ -1174,3 +1174,23 @@ Next: draft the private SMTP transport boundary and failure/retry acceptance pla
 covering TLS/authentication, bounded execution, and secret-safe diagnostics before
 selecting a compatible test-only implementation dependency. Terminal compaction,
 public contract review, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: private SMTP boundary proposal
+
+ADR 0006 proposes one explicit relay, recipient, and frozen message per private
+SMTP destination, behind a separate bounded child request mode. It records required
+TLS/auth ordering, phase-aware acceptance/retry/block semantics, sanitized diagnostics,
+message validation, resource limits, and dependency assessment gates. RFC 5321 and
+RFC 3207 primary references inform protocol semantics; local policies and public
+contracts remain proposed. No dependency or SMTP client is implemented here.
+
+The acceptance matrix covers TLS certificate rejection before AUTH, STARTTLS
+capability refresh, final DATA acknowledgment, temporary/permanent replies,
+uncertain replay, bounded slow/DNS behavior, owned restart, cancellation, and
+per-recipient isolation. Existing generic acceptance diagnostics require explicit
+SMTP extensions before integration. Stable Message-ID is correlation, not guaranteed
+deduplication. No runtime defaults, schema, or public interfaces changed.
+
+Next: private SMTP transaction-phase classification with synthetic response fixtures,
+including authentication/TLS blocks and final acknowledgment uncertainty, before
+selecting a client dependency. Existing implementation validation remains unchanged.

@@ -231,3 +231,7 @@ allows maintenance to resume without another scheduler query.
 Shared orchestration acceptance fixtures now cover missing-checkpoint maintenance
 and cancellation before preflight, including retained ownership until store close.
 A missing checkpoint leaves poll age unknown and stale in private health reports.
+
+The [private SMTP boundary proposal](docs/adr/0006-private-smtp-boundary.md)
+records transport, TLS/authentication, privacy, and acceptance requirements before
+dependency selection. SMTP implementation and public email contracts remain pending.
