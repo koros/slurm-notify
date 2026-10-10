@@ -29,3 +29,7 @@ powerfmt = { version = "=0.2.0", default-features = false }
 name = "transport_boundary"
 path = "../../tests/integration/transport_boundary.rs"
 harness = false
+
+[dev-dependencies.libc]
+# Reuse the already locked version for Unix openat/flock constants and ABI.
+version = "=0.2.190"

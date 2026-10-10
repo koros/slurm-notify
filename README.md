@@ -81,9 +81,9 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Eighty-nine Rust
+The executable prints its development status and exits with code 1. Ninety-five Rust
 tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
-SQLite commit/reopen recovery, and a mock-provider outbox worker with durable provider-requested retry delays.
+SQLite commit/reopen recovery, private Unix state permissions/ownership, and a mock-provider outbox worker with durable provider-requested retry delays.
 A private webhook adapter is exercised against loopback mock servers; its
 [transport decision](docs/adr/0003-private-webhook-transport.md) records dependencies
 and timeout limitations. A private Linux/macOS transport supervisor is tested

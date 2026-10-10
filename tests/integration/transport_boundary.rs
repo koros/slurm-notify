@@ -13,6 +13,9 @@ mod transport;
 #[path = "../../crates/notify-cli/src/webhook.rs"]
 mod webhook;
 
+#[path = "../../crates/notify-cli/src/state_path.rs"]
+mod state_path;
+
 use delivery::ProviderOutcome;
 use std::process::Command;
 use std::time::{Duration, Instant};

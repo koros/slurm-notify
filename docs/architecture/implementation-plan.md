@@ -511,3 +511,24 @@ Next: review the field/default/format/privacy decisions before exposing interfac
 Independent private engineering can continue with secure state-path creation and
 single-owner locking. Public serializers/config loaders, compatibility baselines,
 SMTP, support/license decisions, and runtime activation remain pending.
+
+## Current increment: private state permissions and single-owner locking
+
+Added a private Linux/macOS owned-storage entry point: descriptor-based directory
+walking, explicit private permissions, regular-file/owner/link checks, no-follow
+opens, sidecar validation, and nonblocking lifetime advisory locking. Database
+initialization failure and forced owner exit release the lock without deleting its
+persistent inode. Existing low-level fixture storage is unchanged. ADR 0005 records
+same-user trust, local-filesystem assumptions, symlink-free paths, and the distinction
+between a private directory and the draft arbitrary database filename.
+
+Six new tests bring the Rust suite to 95 passing tests; eight SQLite and six hook
+tests, plus eight process-boundary acceptance scenarios, pass. Formatting, strict
+Clippy, locked build, and smoke checks pass. Explicit test-only libc reuses the
+already locked version; no new package, migration, public contract, or executable
+activation occurred. Normal executable dependency tree remains empty.
+
+Next independent work: integrate owned storage with the durable mock polling and
+supervised delivery pipeline, then test restart/ownership failures together. Payload
+and configuration decisions await review before public exposure. Licensing, SMTP,
+installed-helper selection, supported platforms, and runtime activation remain open.

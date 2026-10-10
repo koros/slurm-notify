@@ -15,6 +15,9 @@ mod webhook;
 #[cfg(test)]
 mod transport;
 
+#[cfg(test)]
+mod state_path;
+
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
     std::process::exit(1);

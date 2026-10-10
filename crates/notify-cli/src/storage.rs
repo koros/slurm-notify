@@ -11,6 +11,8 @@ pub(super) enum StorageError {
     UnsupportedVersion,
     Conflict,
     InvalidInput,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    StatePath(super::state_path::Error),
 }
 
 impl From<rusqlite::Error> for StorageError {
@@ -68,12 +70,36 @@ pub(super) enum DeliveryOutcome {
 
 pub(super) struct Store {
     db: Connection,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    _owner: Option<super::state_path::Guard>,
 }
 
 impl Store {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn open_private(
+        directory: &Path,
+        lock_timeout: Duration,
+    ) -> Result<Self, StorageError> {
+        let owner =
+            super::state_path::Guard::acquire(directory).map_err(StorageError::StatePath)?;
+        let db = Connection::open_with_flags(
+            &owner.database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        let mut store = Self::initialize(db, lock_timeout)?;
+        store._owner = Some(owner);
+        Ok(store)
+    }
+
     // Caller owns a private test directory. Secure production creation remains pending.
     pub(super) fn open(path: &Path, lock_timeout: Duration) -> Result<Self, StorageError> {
-        let db = Connection::open(path)?;
+        Self::initialize(Connection::open(path)?, lock_timeout)
+    }
+
+    fn initialize(db: Connection, lock_timeout: Duration) -> Result<Self, StorageError> {
         db.busy_timeout(lock_timeout)?;
         db.pragma_update(None, "foreign_keys", true)?;
         let enabled: i64 = db.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
@@ -91,7 +117,11 @@ impl Store {
             1 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            _owner: None,
+        })
     }
 
     pub(super) fn due_deliveries(
