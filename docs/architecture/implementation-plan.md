@@ -795,3 +795,29 @@ Next: private orchestration acceptance for cleanup failure isolation and
 cancellation after a completed delivery batch, ensuring committed deliveries
 survive while maintenance remains retryable. Terminal ledger compaction, public
 contract review, SMTP, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: maintenance failure and post-delivery cancellation acceptance
+
+An additional owned-store process scenario sends one event to two ephemeral
+loopback destinations through the supervised HTTP child. Cancellation after the
+completed delivery batch skips cleanup/reporting while preserving both successful
+attempts. After reopening the owner, a test trigger rejects deletion of the
+second destination. The cleanup transaction restores both outbox rows and attempt
+histories, while the tick still produces its read-only health report. Another
+reopen and trigger removal allow maintenance retry to delete both completed
+records without invoking the send callback. Event deduplication remains intact
+and foreign-key checks pass.
+
+This validates cancellation and failure isolation across actual child delivery
+and database reopen. It uses synthetic scheduling, virtual time, and private
+payload fixtures. The trigger and raw test database connection are deliberate
+fault injection, not supported production storage access. No implementation,
+dependency, schema, public contract, or executable behavior changed.
+
+The full suite passes: 119 Rust tests plus one ignored helper, twelve custom
+process acceptance scenarios, eight SQLite tests, and six hook tests.
+
+Next: private orchestration preflight validation of all caller-supplied policies
+and limits before poll or delivery side effects, with rejection and boundary tests.
+Terminal ledger compaction, public contract review, SMTP, licensing, cluster
+validation, and activation remain pending.

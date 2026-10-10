@@ -187,3 +187,7 @@ The process acceptance harness now exercises composed orchestration with owned
 storage and supervised loopback HTTP delivery, including cancellation, persisted
 rate-limit retries across restart, scheduler failure isolation, and cleanup.
 Payloads and scheduler records remain synthetic private fixtures.
+
+The process harness also verifies cancellation after a completed delivery batch
+and cleanup failure isolation: deliveries stay committed, cleanup rolls back,
+health reporting continues, and maintenance succeeds after restart without resends.

@@ -22,6 +22,7 @@ mod accounting_window;
 mod polling_cycle;
 
 use delivery::ProviderOutcome;
+use rusqlite::OptionalExtension;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -137,8 +138,9 @@ fn acceptance() {
     );
     owned_pipeline_restart();
     orchestrated_owned_http_restart();
+    orchestrated_cleanup_failure_and_post_delivery_cancellation();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -500,4 +502,159 @@ fn orchestrated_owned_http_restart() {
         .unwrap()
         .is_empty());
     assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
+    use polling_cycle::{Cycles, Hooks, Maintenance, Settings, StageError};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = Settings {
+        active_program: std::path::Path::new("/fixture/squeue"),
+        accounting_program: std::path::Path::new("/fixture/sacct"),
+        cluster: "cluster",
+        user: "alice",
+        timeout: Duration::from_secs(1),
+        output_limit: 4096,
+        emit_discovered: true,
+        capacity: 10,
+        destinations: &["primary", "secondary"],
+        window: accounting_window::Policy {
+            lookback_seconds: 3600,
+            overlap_seconds: 300,
+        },
+    };
+    let maintenance = Maintenance {
+        delivery_limit: 10,
+        retry: retry_policy(),
+        retain_seconds: 50,
+        cleanup_limit: 10,
+        stale_after: 60,
+        health_sample_limit: 10,
+    };
+    let fixture = |command: &mut Command, _, _| {
+        Ok(if command.get_program() == "/fixture/squeue" {
+            String::new()
+        } else {
+            "cluster|1|alice|s|actual|COMPLETED|0:0".into()
+        })
+    };
+    let (primary, first_server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let (secondary, second_server) = webhook::tests::server(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
+        Duration::ZERO,
+    );
+    let mut checks = 0;
+    let mut sends = 0;
+    let mut cycles = Cycles::new(1).unwrap();
+    let cancelled = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |item: &storage::DueDelivery| {
+                sends += 1;
+                let endpoint = if item.destination == "primary" {
+                    &primary
+                } else {
+                    &secondary
+                };
+                request_for(endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
+            },
+            clock: || Some(7200),
+            cancelled: || {
+                checks += 1;
+                checks == 3
+            },
+        },
+    );
+    assert!(cancelled.cancelled);
+    assert_eq!(sends, 2);
+    assert_eq!(cancelled.delivery.unwrap().unwrap().delivered, 2);
+    assert!(cancelled.cleanup.is_none() && cancelled.health.is_none());
+    assert_eq!(
+        id_header(&first_server.join().unwrap()),
+        id_header(&second_server.join().unwrap())
+    );
+    assert!(store
+        .due_deliveries("cluster", 7200, 10)
+        .unwrap()
+        .is_empty());
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    // Deliberate test-only injection against the trusted owned database.
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_second_cleanup BEFORE DELETE ON outbox WHEN OLD.destination='secondary' BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+    let mut cycles = Cycles::new(2).unwrap();
+    let failed = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |_: &storage::DueDelivery| panic!("delivered notification replayed"),
+            clock: || Some(7300),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(failed.delivery.unwrap().unwrap().delivered, 0);
+    assert_eq!(failed.cleanup.unwrap().unwrap_err(), StageError::Storage);
+    assert!(failed.health.unwrap().is_ok());
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM outbox WHERE status='delivered'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(db);
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    db.execute_batch("DROP TRIGGER reject_second_cleanup;")
+        .unwrap();
+    let cleaned = cycles.tick(
+        &settings,
+        &maintenance,
+        &mut store,
+        Hooks {
+            query: fixture,
+            send: |_: &storage::DueDelivery| panic!("cleanup retry replayed notification"),
+            clock: || Some(7400),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(cleaned.cleanup.unwrap().unwrap(), 2);
+    assert!(cleaned.health.unwrap().is_ok());
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM outbox", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+    assert_eq!(
+        db.query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
+            .optional()
+            .unwrap(),
+        None
+    );
 }
