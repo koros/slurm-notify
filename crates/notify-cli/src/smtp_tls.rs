@@ -3,7 +3,7 @@ use super::smtp_reply::{read_reply, read_reply_with_text, Limits};
 use std::{io::Write, net::TcpStream, sync::Arc};
 
 #[derive(Debug, PartialEq, Eq)]
-enum Error {
+pub(super) enum Error {
     Tls,
     Io,
     Reply,
@@ -54,7 +54,7 @@ fn greeting(
     Ok(())
 }
 
-fn required_starttls(
+pub(super) fn required_starttls(
     mut socket: TcpStream,
     config: Arc<rustls::ClientConfig>,
     name: rustls::pki_types::ServerName<'static>,

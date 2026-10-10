@@ -261,3 +261,8 @@ STARTTLS, and an absolute supervised SMTP deadline remain unimplemented.
 Required-STARTTLS fixtures now reject missing/misleading advertisements and refused
 upgrades, verify certificates before a fresh EHLO, and stop on failed secure EHLO.
 Only greeting and negotiation commands exist; SMTP AUTH and submission remain pending.
+
+The private process harness now supervises SMTP negotiation separately from HTTP.
+Stalled and drip-fed greeting/upgrade replies stop at the parent deadline despite
+longer socket timeouts. This loopback-only probe has no credentials, message path,
+or delivery acknowledgment; it is not an installed SMTP helper.

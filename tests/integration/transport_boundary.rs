@@ -24,6 +24,12 @@ mod polling_cycle;
 #[path = "../../crates/notify-cli/src/supervised_provider.rs"]
 mod supervised_provider;
 
+mod smtp_negotiation_boundary;
+#[path = "../../crates/notify-cli/src/smtp_reply.rs"]
+mod smtp_reply;
+#[path = "../../crates/notify-cli/src/smtp_tls.rs"]
+mod smtp_tls;
+
 use delivery::ProviderOutcome;
 use rusqlite::OptionalExtension;
 use std::process::Command;
@@ -31,6 +37,11 @@ use std::time::{Duration, Instant};
 
 fn main() {
     let mode = std::env::args().nth(1);
+    if mode.as_deref() == Some("--smtp-negotiation") {
+        // Negotiation is not delivery: this probe never emits a delivery ACK.
+        let _ = smtp_negotiation_boundary::serve(std::io::stdin().lock());
+        std::process::exit(1);
+    }
     if matches!(mode.as_deref(), Some("--child" | "--blocked-resolver")) {
         let blocked = mode.as_deref() == Some("--blocked-resolver");
         let result = transport::serve(
@@ -147,7 +158,8 @@ fn acceptance() {
     orchestrated_mid_batch_cancellation_restart();
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership passed");
+    smtp_negotiation_boundary::acceptance();
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

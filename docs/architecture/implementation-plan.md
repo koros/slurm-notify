@@ -1356,3 +1356,34 @@ parent deadlines for stalled/drip-fed greeting and upgrade replies. Then disting
 certificate policy blocks from transient handshake failures before AUTH/message
 integration. Message construction, durable email persistence, public review,
 licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: supervised private SMTP negotiation deadlines
+
+The existing custom harness now has a separate negotiation-only child mode,
+using the private required-STARTTLS exchange and existing Unix supervisor. Its
+single-field length-prefixed stdin frame accepts only a nonzero decimal loopback
+port (at most five bytes), validates EOF before connecting, and retains empty
+trust roots. It inherits the supervisor's cleared environment and bounded pipes.
+It is fixture-only, has no credentials or submission, and never emits a delivery
+acknowledgment. Negotiation exits are not mapped into worker SMTP outcomes yet.
+
+Four loopback scenarios stall or drip-feed greeting and upgrade replies. Drip
+bytes arrive every 20 ms without completing a line, below parser byte limits and
+well inside the child's two-second socket inactivity timeout. Parent timeout is
+500 ms; tests require the timeout category and return within 1.5 seconds including
+cleanup. Servers confirm closure, at least two drip writes, and exact EHLO/STARTTLS
+commands before stalled upgrade responses. Accept/connect/read/write waits and
+fixture writes are finite. Two controls cover complete upgrade refusal without a
+delivery acknowledgment and oversized frame-prefix rejection before network use.
+
+The full suite passes: 155 Rust tests plus one ignored helper, twenty-two custom
+process scenarios, eight SQLite tests, and six hook tests. No dependency, runtime,
+public contract, or persistence change was made. These tests bound the plaintext
+negotiation waits; TLS handshake, secure EHLO, DNS, AUTH, and DATA-specific SMTP
+process acceptance remain pending. Existing supervision cleanup may add latency
+after the request deadline, so this is not a hard real-time execution guarantee.
+
+Next: distinguish TLS certificate policy blocks from transient handshake I/O
+failures and exercise the TLS handshake boundary under supervision before
+credentials or message submission. Message construction, durable email state,
+public review, licensing, cluster validation, and activation remain pending.
