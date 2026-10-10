@@ -10,6 +10,46 @@ pub(super) enum Error {
     ClockFailure,
 }
 
+// Fixed categories only: never retain raw client errors or remote content.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Diagnostic {
+    Http(u16),
+    Dns,
+    Connection,
+    Protocol,
+    Io,
+    Configuration,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct SendReport {
+    pub(super) outcome: ProviderOutcome,
+    pub(super) diagnostic: Diagnostic,
+}
+
+fn transport_report(kind: ureq::ErrorKind) -> SendReport {
+    use ureq::ErrorKind;
+    let (outcome, diagnostic) = match kind {
+        ErrorKind::InvalidUrl
+        | ErrorKind::UnknownScheme
+        | ErrorKind::InsecureRequestHttpsOnly
+        | ErrorKind::InvalidProxyUrl
+        | ErrorKind::ProxyUnauthorized => (ProviderOutcome::Rejected, Diagnostic::Configuration),
+        ErrorKind::Dns => (ProviderOutcome::Retry, Diagnostic::Dns),
+        ErrorKind::ConnectionFailed | ErrorKind::ProxyConnect => {
+            (ProviderOutcome::Retry, Diagnostic::Connection)
+        }
+        ErrorKind::BadStatus | ErrorKind::BadHeader | ErrorKind::TooManyRedirects => {
+            (ProviderOutcome::Retry, Diagnostic::Protocol)
+        }
+        _ => (ProviderOutcome::Retry, Diagnostic::Io),
+    };
+    SendReport {
+        outcome,
+        diagnostic,
+    }
+}
+
 // Deliberately no Debug: endpoint queries and authorization may contain secrets.
 pub(super) struct Webhook {
     endpoint: String,
@@ -86,8 +126,18 @@ impl Webhook {
         &self,
         event_id: &str,
         payload: &[u8],
-        mut clock: impl FnMut() -> Option<i64>,
+        clock: impl FnMut() -> Option<i64>,
     ) -> Result<ProviderOutcome, Error> {
+        self.send_diagnostic_with_clock(event_id, payload, clock)
+            .map(|report| report.outcome)
+    }
+
+    pub(super) fn send_diagnostic_with_clock(
+        &self,
+        event_id: &str,
+        payload: &[u8],
+        mut clock: impl FnMut() -> Option<i64>,
+    ) -> Result<SendReport, Error> {
         let started_at = clock()
             .filter(|time| *time >= 0)
             .ok_or(Error::InvalidRequest)?;
@@ -104,17 +154,20 @@ impl Webhook {
         }
         let response = match request.send_bytes(payload) {
             Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(_)) => return Ok(ProviderOutcome::Retry),
+            Err(ureq::Error::Transport(error)) => return Ok(transport_report(error.kind())),
         };
         let completed_at = clock()
             .filter(|time| *time >= started_at)
             .ok_or(Error::ClockFailure)?;
         // Do not read, retain, or log response bodies or raw transport errors.
-        Ok(classify(
-            response.status(),
-            response.header("Retry-After"),
-            completed_at,
-        ))
+        Ok(SendReport {
+            outcome: classify(
+                response.status(),
+                response.header("Retry-After"),
+                completed_at,
+            ),
+            diagnostic: Diagnostic::Http(response.status()),
+        })
     }
 }
 
@@ -369,6 +422,55 @@ pub(super) mod tests {
             ProviderOutcome::Retry
         );
         assert!(!handle.join().unwrap());
+    }
+
+    #[test]
+    fn transport_diagnostics_classify_without_remote_details() {
+        assert_eq!(
+            transport_report(ureq::ErrorKind::InvalidUrl).outcome,
+            ProviderOutcome::Rejected
+        );
+        assert_eq!(
+            transport_report(ureq::ErrorKind::Dns).diagnostic,
+            Diagnostic::Dns
+        );
+        assert_eq!(
+            transport_report(ureq::ErrorKind::ConnectionFailed).diagnostic,
+            Diagnostic::Connection
+        );
+        assert_eq!(
+            transport_report(ureq::ErrorKind::BadHeader).diagnostic,
+            Diagnostic::Protocol
+        );
+        assert_eq!(
+            transport_report(ureq::ErrorKind::Io).diagnostic,
+            Diagnostic::Io
+        );
+    }
+
+    #[test]
+    fn http_diagnostic_excludes_endpoint_authorization_and_response_body() {
+        let (endpoint, handle) = server(
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 18\r\n\r\nfixture-body-value",
+            Duration::ZERO,
+        );
+        let webhook = Webhook::new(
+            &endpoint,
+            Some("Bearer fixture-placeholder".into()),
+            Duration::from_secs(1),
+            16,
+        )
+        .unwrap();
+        let report = webhook
+            .send_diagnostic_with_clock("event", b"{}", || Some(10))
+            .unwrap();
+        assert_eq!(report.diagnostic, Diagnostic::Http(403));
+        assert_eq!(report.outcome, ProviderOutcome::Rejected);
+        let rendered = format!("{report:?}");
+        for sensitive in [&endpoint[..], "fixture-placeholder", "fixture-body-value"] {
+            assert!(!rendered.contains(sensitive));
+        }
+        handle.join().unwrap();
     }
 
     #[test]

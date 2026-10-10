@@ -211,3 +211,25 @@ but unrecorded delivery can replay with the same ID. Due-time arithmetic remains
 checked, including overflow after a large forward clock jump. Forward jumps advance
 stored timestamps; no synthetic correction or monotonic-to-wall conversion is added.
 Wall-clock changes across restart can still postpone or accelerate due selection.
+
+## Bounded jitter follow-up
+
+The private policy now requires an explicit jitter bound and seed. A length-prefixed
+FNV-style hash of the event ID, destination, and attempt selects a deterministic
+whole-second offset in the inclusive range zero through the bound. This is a
+non-cryptographic spreading mechanism; it does not promise uniqueness, randomness,
+or protection against adversarial collisions. The seed is caller-supplied, without
+an approved product default or new random-number dependency. Existing fixtures
+explicitly select zero jitter.
+
+Due time is completion plus max(capped exponential backoff, provider delay) plus
+jitter. Jitter never shortens either floor and remains effective after exponential
+backoff reaches its cap. The exponential cap limits only the backoff component;
+provider delays and additive jitter can extend the total delay beyond it. Require
+zero <= jitter bound <= backoff cap and check each addition for overflow. Final
+attempts remain failed without rescheduling. Committed due times survive reopen
+and are not recomputed from a changed seed or policy.
+
+Four tests verify bounds/repeatability/destination spreading, provider-delay floors
+and reopen, invalid policy before sending, and jitter-only arithmetic overflow
+without a partial attempt commit.

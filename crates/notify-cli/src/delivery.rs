@@ -6,6 +6,8 @@ struct RetryPolicy {
     max_attempts: u32,
     initial_delay_seconds: i64,
     max_delay_seconds: i64,
+    jitter_seconds: i64,
+    jitter_seed: u64,
 }
 
 impl RetryPolicy {
@@ -13,6 +15,26 @@ impl RetryPolicy {
         self.max_attempts > 0
             && self.initial_delay_seconds > 0
             && self.max_delay_seconds >= self.initial_delay_seconds
+            && (0..=self.max_delay_seconds).contains(&self.jitter_seconds)
+    }
+
+    // Stable non-cryptographic spreading; the seed and bound are explicit inputs.
+    fn jitter(&self, item: &DueDelivery) -> i64 {
+        let mut hash = 0xcbf29ce484222325u64 ^ self.jitter_seed;
+        for field in [
+            item.event_id.as_bytes(),
+            item.destination.as_bytes(),
+            &item.attempt_number.to_be_bytes(),
+        ] {
+            for byte in (field.len() as u64)
+                .to_be_bytes()
+                .iter()
+                .chain(field.iter())
+            {
+                hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        (hash % (self.jitter_seconds as u64 + 1)) as i64
     }
 
     fn delay(&self, attempt: i64) -> i64 {
@@ -83,7 +105,13 @@ fn deliver_due_with_clock(
     mut send: impl FnMut(&DueDelivery) -> ProviderOutcome,
     mut clock: impl FnMut() -> Option<i64>,
 ) -> Result<BatchReport, WorkerError> {
-    if !policy.valid() || now < 0 || now.checked_add(policy.max_delay_seconds).is_none() {
+    if !policy.valid()
+        || now < 0
+        || now
+            .checked_add(policy.max_delay_seconds)
+            .and_then(|time| time.checked_add(policy.jitter_seconds))
+            .is_none()
+    {
         return Err(WorkerError::InvalidPolicy);
     }
     let items = store
@@ -118,6 +146,7 @@ fn deliver_due_with_clock(
                     Some(
                         completed_at
                             .checked_add(policy.delay(item.attempt_number).max(hint))
+                            .and_then(|time| time.checked_add(policy.jitter(&item)))
                             .ok_or(WorkerError::InvalidPolicy)?,
                     )
                 } else {
@@ -150,6 +179,8 @@ mod tests {
             max_attempts: 3,
             initial_delay_seconds: 5,
             max_delay_seconds: 20,
+            jitter_seconds: 0,
+            jitter_seed: 0,
         }
     }
     fn open(directory: &Directory) -> Store {
@@ -181,6 +212,106 @@ mod tests {
     }
     fn db(directory: &Directory) -> rusqlite::Connection {
         rusqlite::Connection::open(directory.path()).unwrap()
+    }
+
+    #[test]
+    fn jitter_is_bounded_repeatable_and_spreads_destinations() {
+        let directory = Directory::new();
+        let store = seeded(&directory, &["primary"]);
+        let mut item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let policy = RetryPolicy {
+            jitter_seconds: 10,
+            jitter_seed: 42,
+            ..policy()
+        };
+        let mut slots = std::collections::HashSet::new();
+        for index in 0..50 {
+            item.destination = format!("destination-{index}");
+            let jitter = policy.jitter(&item);
+            assert!((0..=10).contains(&jitter));
+            assert_eq!(jitter, policy.jitter(&item));
+            slots.insert(jitter);
+        }
+        assert!(slots.len() > 1);
+    }
+
+    #[test]
+    fn jitter_extends_provider_floor_and_persisted_due_time_survives_reopen() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let policy = RetryPolicy {
+            jitter_seconds: 10,
+            jitter_seed: 42,
+            ..policy()
+        };
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let due = 30 + 60 + policy.jitter(&item);
+        deliver_due_with_clock(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            policy,
+            |_| ProviderOutcome::RetryAfter(60),
+            || Some(30),
+        )
+        .unwrap();
+        drop(store);
+        let store = open(&directory);
+        assert!(store
+            .due_deliveries("cluster", due - 1, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.due_deliveries("cluster", due, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn jitter_overflow_does_not_commit_the_attempt() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let policy = (0..100)
+            .map(|jitter_seed| RetryPolicy {
+                jitter_seconds: 10,
+                jitter_seed,
+                ..policy()
+            })
+            .find(|policy| policy.jitter(&item) > 0)
+            .unwrap();
+        assert!(matches!(
+            deliver_due_with_clock(
+                &mut store,
+                "cluster",
+                10,
+                10,
+                policy,
+                |_| ProviderOutcome::Retry,
+                || Some(i64::MAX - 5)
+            ),
+            Err(WorkerError::InvalidPolicy)
+        ));
+        assert_eq!(
+            store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+            1
+        );
+    }
+
+    #[test]
+    fn invalid_jitter_policy_fails_before_send() {
+        let directory = Directory::new();
+        let mut store = seeded(&directory, &["primary"]);
+        for jitter_seconds in [-1, 21] {
+            let invalid = RetryPolicy {
+                jitter_seconds,
+                ..policy()
+            };
+            assert!(matches!(
+                deliver_due(&mut store, "cluster", 10, 10, invalid, |_| panic!(
+                    "invalid policy sent"
+                )),
+                Err(WorkerError::InvalidPolicy)
+            ));
+        }
     }
 
     #[test]

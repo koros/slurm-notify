@@ -94,3 +94,20 @@ acceptance. The injected-clock tests verify date arithmetic and regression. Rela
 delay instructions continue to apply in full from parent attempt completion, so
 IPC/cleanup latency may conservatively postpone a date-derived retry further.
 The fixed-time send wrapper remains for deterministic existing fixtures.
+
+## Sanitized diagnostic follow-up
+
+The private adapter can now return an outcome plus a fixed diagnostic category:
+HTTP status, DNS, connection, protocol, generic I/O, or configuration. It retains
+no raw client error, source chain, endpoint, authorization, or remote body in that
+report. Normal outcome-only callers and the private child protocol remain unchanged;
+diagnostics are not yet persisted or exposed through a status CLI.
+
+Invalid URL/scheme/HTTPS-policy/proxy configuration and proxy authorization error
+kinds are terminal configuration failures. DNS, connection, protocol, and generic
+I/O failures retry within the attempt budget. HTTP classifications remain unchanged.
+The client's TLS certificate errors share its generic I/O kind and remain bounded
+retries; do not guess certificate reasons from raw error strings. Granular TLS
+classification and user-facing recovery guidance remain future work. Two new tests
+verify category mapping and that rendered reports exclude endpoint, authorization,
+and response content. There are no new dependencies or public diagnostic contracts.

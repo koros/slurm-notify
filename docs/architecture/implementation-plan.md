@@ -469,3 +469,25 @@ Next: bounded retry jitter and explicit transient/permanent transport diagnostic
 then draft normalized event payload/configuration proposals for review. Installed
 helper selection, secure state/credential handling, runtime activation, and approved
 platform support remain pending; the executable cannot monitor or notify yet.
+
+## Current increment: bounded jitter and sanitized transport diagnostics
+
+Added explicit deterministic jitter bounds/seeds, preserving backoff and provider
+floors while spreading retries even at the backoff cap. Due times persist unchanged
+across reopen; checked arithmetic rejects jitter overflow without committing an
+attempt. Added typed HTTP/transport reports without request or response secrets;
+permanent configuration error kinds are terminal, while transient categories retain
+the existing retry budget. TLS errors remain generic I/O retries because the client
+kind does not distinguish them reliably. Diagnostics are private and not persisted
+or exposed through a CLI or the child protocol.
+
+Six tests bring validation to 89 passing Rust tests, eight SQLite tests, and six
+hook tests, plus eight process-boundary acceptance scenarios. Formatting, strict
+Clippy, locked build, and executable smoke checks pass. No dependencies, schema,
+public contracts, or operational defaults changed. The normal executable remains
+unavailable for monitoring and notification delivery.
+
+Next: draft normalized webhook payload and configuration proposals for review,
+covering identity encoding, privacy, delivery semantics, and explicit defaults.
+Installed-helper selection, credential/state security, diagnostics persistence,
+platform support, licensing, and runtime activation remain pending.

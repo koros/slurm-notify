@@ -81,7 +81,7 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Eighty-three Rust
+The executable prints its development status and exits with code 1. Eighty-nine Rust
 tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
 SQLite commit/reopen recovery, and a mock-provider outbox worker with durable provider-requested retry delays.
 A private webhook adapter is exercised against loopback mock servers; its
