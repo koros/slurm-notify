@@ -1,5 +1,8 @@
 //! Repository foundation executable; monitoring is not implemented.
 #[cfg(test)]
+mod config_snapshot;
+
+#[cfg(test)]
 mod smtp_frozen_frame;
 
 #[cfg(test)]

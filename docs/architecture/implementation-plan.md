@@ -2818,3 +2818,29 @@ process acceptance, eight SQLite tests, six hook tests and 11 draft configuratio
 tests. The additional count-ceiling fixtures pass. No Rust changes; the last
 measured Rust line coverage remains 97.47% (15,163/15,557); Python fixture code is
 explicitly outside the Rust coverage metric.
+
+### Private owned configuration byte reader
+
+Added test-only config_snapshot using existing locked libc/zeroize dependencies.
+Descriptor-relative no-follow/nonblocking reads reject unsafe paths, ancestors,
+parent/file modes, symlinks, hard links and special files. Metadata bounds and an
+independent 65,537-byte read budget protect the 65,536-byte snapshot ceiling.
+Opaque zeroizing bytes publish only after metadata/byte-count rechecks and remain
+owned after source edits/removal. No file creation, lookup defaults or secret/path
+content appears in diagnostics.
+
+Five tests cover stream budget, interrupted/I/O reads, private-file reopen, owned
+bytes after edits/removal, path/mode/link/special-file rejection, empty/oversized
+files and observed read-time mutation. ADR 0016 records Unix scope, metadata race
+limits and the absence of an absolute filesystem deadline. Python draft validation
+remains separate; there is no installed cross-language configuration pipeline.
+
+Next: private descriptor replacement/mutation acceptance and resource-loading
+preparation, then a reviewed parser/config-to-plan mapping. Public CLI/config/event
+contracts and installed activation still require explicit review. No new dependency,
+schema, runtime default or supported product path is introduced.
+
+Validation: shared checks pass with 280 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.49% (15,391/15,788), above the 80% gate; Python
+fixture validation remains outside that metric.
