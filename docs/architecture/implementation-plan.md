@@ -1606,3 +1606,9 @@ validated; hosted-run status is recorded when available after push.
 Next implementation milestone remains authenticated SMTP child framing and
 supervised AUTH deadlines. Runtime defaults, schema, public contracts, licensing,
 cluster validation, and activation remain pending.
+
+Hosted validation of the first CI push exposed unsupported tool installation in
+the older installer pin. The installer was updated to a verified current immutable
+commit for cargo-llvm-cov; Actionlint uses its fixed release archive and explicit
+SHA-256 instead of unsupported installer fallback. Platform checks passed in that
+run. Hosted checks are rerun after the installation correction.
