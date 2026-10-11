@@ -248,3 +248,8 @@ Next: design and implement durable provider-profile descriptors and bindings, th
 verify exact relay/TLS/auth identity across restart. Public activation, credential
 integration, privacy defaults, licensing and real-cluster/relay validation remain
 separate gates. No new dependencies, schema versions or executable defaults change.
+
+The first pure provider descriptor increment is now implemented; see
+[ADR 0015](0015-private-smtp-provider-profile-revisions.md) for canonical profile
+identity, bounded trust hashing and the remaining persistence/transport sequence.
+Rendering permission still does not imply durable provider authorization.

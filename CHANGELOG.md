@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded SMTP provider-profile descriptors for relay/TLS/trust/auth identity and credential references, canonical stored validation, DER trust-set fingerprints and profile mismatch tests. Provider persistence and resolved transport integration remain pending.
+
 - Private revision-aware SMTP delivery permissions checked before sends and retry retirement, bounded unreferenced revision cleanup, and owned TLS retry/lost-result reopen acceptance. Durable relay/TLS/auth profile binding remains pending.
 
 - Private revision-bound atomic SMTP polling and v2 Message-ID selection, preserving original/legacy snapshots and suppressed history with policy-change, rollback, conflict, reopen and preflight tests. Revision-aware dispatch and provider profiles remain pending.

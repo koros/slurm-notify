@@ -2462,3 +2462,28 @@ Validation: shared checks pass with 246 Rust tests plus one ignored helper, cust
 process acceptance including guarded owned TLS retry/reopen, eight SQLite tests
 and six hook tests. Fresh Rust line coverage is 97.52% (12,288/12,601), above
 the unchanged 80% gate. All network acceptance uses temporary loopback fixtures.
+
+### Pure SMTP provider-profile descriptor
+
+ADR 0015 specifies the next provider-binding increments. The first bounded step
+implements private smtp_provider_revision descriptors covering destination, relay,
+port, TLS mode/server name, trust reference/content hash, AUTH PLAIN identity and
+credential reference. Canonical bytes are bounded, zeroizing and SHA-256 hashed;
+stored decoding rejects malformed fields, unknown versions and token/bytes
+mismatches. Profile resolution can compare exact validated content through matches.
+
+A bounded DER trust-set helper validates certificate parsing, rejects duplicates,
+and sorts before length-prefixed hashing so input order does not change identity.
+Tests cover an independent golden digest, all policy fields, exact matching, DNS/IP
+canonical spelling, unsafe inputs, limits, stored corruption and changed trust.
+No secrets are stored in profiles, and no lookups or network calls occur here.
+
+Next: additive provider revision/binding storage and atomic preparation. Then bind
+resolved relay/TLS/auth transport and explicit provider-pair permissions to those
+records, with owned endpoint/trust/identity restart acceptance. This increment
+adds no dependencies, migrations, public contracts or executable activation.
+
+Validation: shared checks pass with 252 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.58% (12,688/13,003), above the unchanged 80% gate. No real relay
+or cluster was contacted.

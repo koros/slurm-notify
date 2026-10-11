@@ -12,6 +12,8 @@ mod smtp_frozen_frame;
 mod smtp_metadata;
 #[path = "../../crates/notify-cli/src/smtp_poll.rs"]
 mod smtp_poll;
+#[path = "../../crates/notify-cli/src/smtp_provider_revision.rs"]
+mod smtp_provider_revision;
 #[path = "../../crates/notify-cli/src/smtp_render.rs"]
 mod smtp_render;
 #[path = "../../crates/notify-cli/src/smtp_revision.rs"]
