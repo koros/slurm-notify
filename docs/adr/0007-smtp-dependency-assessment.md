@@ -91,3 +91,13 @@ line is verified as bounded CRLF ASCII before framing. Message fields follow the
 library builder and [RFC 5322](https://www.rfc-editor.org/rfc/rfc5322.html).
 No connection, submission, relay acceptance, or durable frozen-message contract
 is introduced by this increment.
+
+
+## Subsequent security update
+
+The earlier compiler assessment above is historical. ADR 0009 supersedes the
+active builder pin with lettre 0.11.22 and development Rust 1.88.0. Builder-only
+features remain enabled; SMTP transport remains deferred. The new builder uses
+nom 8 instead of chumsky, allowing the obsolete stacker/psm constraints to be
+removed. Existing explicit Date/Message-ID, ASCII input bounds, DATA framing,
+frozen persistence and byte-observation acceptance continue to apply.

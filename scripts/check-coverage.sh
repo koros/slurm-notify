@@ -3,8 +3,10 @@
 set -eu
 mkdir -p target/coverage
 export CARGO_LLVM_COV_TARGET_DIR="$PWD/target/llvm-cov-target"
-# The supervisor deliberately clears LLVM_PROFILE_FILE in children. Remove only
-# stale fallback profiles before this run, then collect successful child exits.
+# Do not merge earlier runs or LLVM formats into this run's measurement.
+cargo llvm-cov clean --workspace --profraw-only
+# The supervisor deliberately clears LLVM_PROFILE_FILE in children. Remove stale
+# crate fallback profiles too, then collect successful child exits after testing.
 python3 - <<'PY_START'
 from pathlib import Path
 for profile in Path("crates/notify-cli").glob("default_*.profraw"):

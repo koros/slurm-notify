@@ -6,7 +6,7 @@ This project is in its repository foundation phase. Read the design handoff and
 ## Local development
 
 Install Rust through your normal development process. `rust-toolchain.toml` pins
-Rust 1.74.0 for reproducible foundation checks; it does not establish an MSRV or a
+Rust 1.88.0 for reproducible foundation checks; it does not establish an MSRV or a
 supported deployment platform. The workspace currently has one executable. The test-only storage prototype uses
 rusqlite with bundled SQLite; running Rust tests requires a native C compiler.
 There are no runtime dependencies in the placeholder executable.

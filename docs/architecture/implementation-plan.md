@@ -1924,3 +1924,32 @@ process acceptance, eight standalone version-1 SQLite tests and six hook tests),
 including formatting and strict Clippy. Coverage passes the 80% gate at 96.54%
 Rust lines (11,510/11,922). An overlapping check run encountered an existing owned
 state lock reacquisition failure; the sequential shared-check rerun passed.
+
+
+## Subsequent increment: patch private dependency advisories
+
+Prioritize the push-reported security alerts before atomic SMTP preparation.
+ADR 0009 records a complete lockfile OSV scan, verified advisory fixes and limits
+on inspecting GitHub's authenticated alert state. Update private lettre/url/time
+pins to 0.11.22/2.5.4/0.3.47; url now resolves only patched idna 1.1.0. A second
+OSV scan reports zero affected versions across 79 locked registry packages.
+
+Pin development and all CI compiler installs to Rust 1.88.0, required by patched
+time; product MSRV/support remains undecided. Cargo lock format becomes 4.
+Lettre stays builder-only and replaces chumsky with nom 8; obsolete stacker/psm
+constraints and unneeded dependency entries are removed. New preflight cases
+reject both Punycode hostnames from the IDNA advisory without connecting.
+Existing transport, privacy, schema and runtime behavior remain unchanged.
+
+Next: atomic private event/outbox/frozen-message preparation. Public review,
+licensing, credential lookup, real relay/cluster validation and activation remain
+pending.
+
+Validation: Rust 1.88 shared checks pass (193 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite and six hook tests), with strict Clippy,
+formatting, tracked-file guardrails and rustdoc. Coverage startup now clears prior
+raw profiles using cargo-llvm-cov clean --workspace --profraw-only plus crate
+fallback cleanup; earlier profiles used an incompatible LLVM format. A fresh run
+passes the unchanged 80% gate at 97.02% (8,497/8,758 Rust lines). Compiler/report
+counting changes make this denominator incomparable to earlier accumulated runs;
+no source exclusions were added. No GitHub alerts were suppressed or dismissed.

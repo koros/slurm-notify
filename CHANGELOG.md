@@ -5,6 +5,10 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+### Changed
+
+- Patch private prototype dependencies to lettre 0.11.22, url 2.5.4 and time 0.3.47; pin development/CI Rust 1.88.0 to compile their fixes, remove obsolete stacker/psm constraints and reject advisory Punycode examples before webhook access. Product support/MSRV remains undecided. Coverage startup clears previous generated profiles for each measurement.
+
 ### Added
 
 - Separate bounded private frozen SMTP child frame, exact stored envelope/DATA submission through retry/restart, lost-result replay, and missing/corrupt snapshot blocking before connection.

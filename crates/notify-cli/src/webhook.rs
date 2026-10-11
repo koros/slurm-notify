@@ -602,6 +602,8 @@ pub(super) mod tests {
     #[test]
     fn validates_configuration_and_request_before_network() {
         for endpoint in [
+            "https://xn--example-.invalid/",
+            "https://example.invalid.xn--/",
             "http://example.invalid/",
             "http://localhost/",
             "https://user:password@example.invalid/",

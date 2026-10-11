@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/koros/slurm-notify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/koros/slurm-notify/actions/workflows/ci.yml)
 [![Rust coverage gate ≥80%](https://img.shields.io/badge/Rust_coverage_gate-%E2%89%A580%25-blue)](docs/operations/ci-and-coverage.md)
-[![Development Rust 1.74.0](https://img.shields.io/badge/development_Rust-1.74.0-orange?logo=rust)](rust-toolchain.toml)
+[![Development Rust 1.88.0](https://img.shields.io/badge/development_Rust-1.88.0-orange?logo=rust)](rust-toolchain.toml)
 
 Slurm Notify is a planned user-space notification agent for researchers running
 Slurm jobs. Written in Rust, it will discover the current user's jobs, detect
@@ -154,7 +154,7 @@ execution permissions must be validated locally; the proposed 30-second polling
 interval is not an approved operational default.
 
 No license has been selected or granted; see [license decision placeholder](LICENSE.pending.md).
-Rust 1.74.0 is pinned for foundation development only, not as a product support
+Rust 1.88.0 is pinned for foundation development only, not as a product support
 baseline. Contract checks, security workflows, release automation, maintainer
 ownership, and branch protection remain future work.
 

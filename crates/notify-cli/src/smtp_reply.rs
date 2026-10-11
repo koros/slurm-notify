@@ -216,10 +216,7 @@ mod tests {
         struct Broken;
         impl Read for Broken {
             fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "private-server-fixture",
-                ))
+                Err(std::io::Error::other("private-server-fixture"))
             }
         }
         assert_eq!(read_reply(Broken, limits()), Err(Error::Io));

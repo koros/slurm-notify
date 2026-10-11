@@ -12,15 +12,14 @@ compiler compatibility and existing dependency pins still require review.
 ## Coverage gate
 
 The coverage job fails below **80% aggregate Rust workspace line coverage** using
-cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.74.0 compiler.
-The prebuilt coverage tool avoids changing the project compiler (building that
-tool itself requires a newer Rust version). Third-party Actions are commit-pinned;
+cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.88.0 compiler.
+The prebuilt coverage tool keeps the coverage installation reproducible. Third-party Actions are commit-pinned;
 installation disables fallback and retains checksum verification.
 
 Run locally from the repository root:
 
 ```sh
-rustup component add llvm-tools-preview --toolchain 1.74.0
+rustup component add llvm-tools-preview --toolchain 1.88.0
 # Install cargo-llvm-cov 0.6.21 using its upstream prebuilt installation instructions.
 sh scripts/check-coverage.sh
 ```
@@ -32,8 +31,10 @@ when the threshold fails. A failed test fails the job even without a report.
 There is no external coverage service or upload secret. The README coverage badge
 states the enforced minimum, not a claimed live measurement.
 
-The measured local baseline for this change is **95.87%** (8,165 of 8,517 lines),
-using macOS and Rust 1.74.0. Counts can vary slightly between platforms and runs.
+The measured local baseline after the dependency/compiler update is **97.02%**
+(8,497 of 8,758 lines), using macOS and Rust 1.88.0 with prior raw profiles cleared.
+Compiler/report counting changes mean these counts are not directly comparable to
+earlier measurements. Counts can also vary between platforms and runs.
 The denominator is cargo-llvm-cov's default workspace report: crate source,
 including embedded unit-test/fixture code. Dependency code, bundled SQLite C,
 Python/shell tooling, and integration harness source files excluded by the tool's
@@ -41,6 +42,9 @@ default filename filters are outside this Rust percentage. The custom process
 harness still executes and contributes coverage for included crate source. The
 script collects fallback LLVM profiles from successfully exited supervised children
 whose environment is deliberately cleared; killed children may produce no profile.
+Before each run, cargo-llvm-cov removes its prior raw profiles, and the script
+removes crate fallback profiles. This measures the current run without accumulating
+previous runs or mixing LLVM formats after a compiler upgrade.
 There are no project-specific filename exclusions or suppressed uncovered modules.
 This metric describes the private prototypes; it does not certify working product
 notifications. Python and shell behavior have separate CI checks, not a claim of

@@ -13,24 +13,22 @@ path = "src/main.rs"
 rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
-url = "=2.5.2"
+url = "=2.5.4"
 httpdate = "=1.0.3"
-# Constrain TLS's transitive dependency to a pre-edition-2024 release for Cargo 1.74.
+# Explicit zeroization version for the private prototypes.
 zeroize = "=1.8.1"
 # Reuse the locked codec for private AUTH PLAIN fixtures; no new package version.
 base64 = "=0.22.1"
 # Message builder only: SMTP transport, TLS, pooling and async features stay disabled.
-lettre = { version = "=0.11.19", default-features = false, features = ["builder"] }
-# Builder transitive pins retain the development Rust 1.74 compiler.
+lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
+# Retain unrelated builder transitive versions during the security update.
 email-encoding = "=0.4.1"
 idna_adapter = "=1.1.0"
-stacker = "=0.1.17"
-psm = "=0.1.24"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = "=0.12.1"
-time = "=0.3.36"
+time = "=0.3.47"
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
-# time's formatting dependency otherwise resolves to a Rust 1.79 release.
+# Explicit formatting dependency version for reproducible private TLS fixtures.
 powerfmt = { version = "=0.2.0", default-features = false }
 
 # Private process-boundary acceptance harness; not an installed helper binary.
