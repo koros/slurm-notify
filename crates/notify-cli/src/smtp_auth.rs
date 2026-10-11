@@ -8,7 +8,7 @@ use std::{io::Write, net::TcpStream, sync::Arc};
 use zeroize::Zeroizing;
 
 #[derive(Debug, PartialEq, Eq)]
-enum Error {
+pub(super) enum Error {
     Credentials,
     Transport(smtp_tls::Error),
     Unsupported,
@@ -19,11 +19,11 @@ enum Error {
 }
 
 // Intentionally no Debug/Clone implementation or credential accessors.
-struct Credentials {
+pub(super) struct Credentials {
     plain: Zeroizing<Vec<u8>>,
 }
 impl Credentials {
-    fn new(username: Option<&str>, password: Option<&str>) -> Result<Self, Error> {
+    pub(super) fn new(username: Option<&str>, password: Option<&str>) -> Result<Self, Error> {
         fn valid(text: Option<&str>, bound: usize) -> Option<&str> {
             text.filter(|value| {
                 !value.is_empty()

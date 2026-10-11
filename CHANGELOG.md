@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Separate bounded private SMTP credential frames with zeroized owned buffers and strict authentication-only acknowledgments; malformed/truncated inputs and cross-mode tokens are rejected.
+
 - GitHub CI/coverage/toolchain badges, Linux/macOS checks and rustdoc validation, an enforced 80% Rust line-coverage gate with report artifacts, workflow linting, PR dependency review, weekly dependency updates, and gated checksummed development build artifacts.
 
 - Bounded private AUTH PLAIN credentials and zeroized command buffers, with verified-STARTTLS/fresh-EHLO authentication fixtures and static reply/certificate failure checks; reused locked base64 as a test-only direct dependency.

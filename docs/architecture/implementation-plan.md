@@ -1612,3 +1612,31 @@ the older installer pin. The installer was updated to a verified current immutab
 commit for cargo-llvm-cov; Actionlint uses its fixed release archive and explicit
 SHA-256 instead of unsupported installer fallback. Platform checks passed in that
 run. Hosted checks are rerun after the installation correction.
+
+## Subsequent increment: private authentication framing primitives
+
+A separate three-field prototype frames loopback port, username, and password with
+length prefixes and explicit 5/64/128-byte ceilings (209 bytes including prefixes).
+The decoder checks lengths before allocation, requires exact EOF, validates a
+nonzero numeric u16 port and existing credential policy, and returns a request
+without Debug/Clone or raw credential accessors. Owned input fields and outgoing
+frames use zeroizing buffers; caller strings and internal TLS copies remain outside
+that guarantee. No credential source, arguments, or environment lookup was added.
+
+Authentication-only static acknowledgments use a distinct SMTP_AUTH prefix. Exact
+decoding rejects delivery/negotiation tokens, missing newlines, trailing bytes, and
+raw diagnostic text. Authenticated is authentication evidence only; this module
+has no delivery outcome conversion. Three tests cover maximum-size roundtrip,
+invalid credentials/ports, every truncated prefix/body, oversized length prefixes,
+extra input, and strict acknowledgment isolation. These are framing primitives,
+not an operational child protocol. No dependencies or public contracts changed.
+
+Next: preserve zeroizing frame ownership through the supervised writer, wire a
+separate authenticated fixture child with verified test trust, and test slow,
+drip-fed, and disconnected AUTH replies under the parent deadline. Worker outcome
+integration, credential lookup, message submission, licensing, and activation
+remain pending.
+
+Validation: shared suite passes (169 Rust tests plus one ignored helper, 37 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy. The coverage gate passes at 95.90% Rust lines (8,300/8,655).
