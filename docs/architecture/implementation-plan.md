@@ -2922,3 +2922,24 @@ require explicit contract review.
 Validation: shared checks pass with 295 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.49% (15,897/16,307), above the 80% gate.
+
+### Private composed-resource pending-delivery acceptance
+
+Two tests feed actual protected trust loading and injected credential resolution
+through the existing pair-permission pending-delivery guard. Denial/cancellation
+skip composition even with a missing trust file. After a synthetic retry, missing
+or changed trust, an empty password and a mismatched identity block without send,
+clock use or attempt consumption. Reopens preserve attempt two, frozen message
+bytes, provider binding and checkpoint. Restored trust and a rotated password
+recover the same pending message; another reopen verifies it is no longer due.
+
+No production behavior, dependency, default or public contract changes. Outcomes
+come from synthetic callbacks; this is not SMTP delivery evidence. ADR 0019 records
+the new acceptance evidence alongside the existing resource-boundary limits.
+
+Next: composed-resource resolution with bounded supervised transport acceptance.
+Installed configuration mapping and activation still require explicit review.
+
+Validation: shared checks pass with 297 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.49% (16,141/16,556), above the 80% gate.

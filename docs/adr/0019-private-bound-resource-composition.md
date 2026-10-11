@@ -33,6 +33,16 @@ lookup, credential failure and constructor rechecks of profile, identity and tru
 Fixtures use temporary files and synthetic certificates; no SMTP, scheduler or
 external network access is required.
 
+Two additional pending-delivery acceptance tests compose the actual private
+filesystem trust and injected credential loaders through the existing permission
+guard. Denial and cancellation skip resolution even when the trust file is absent.
+A synthetic retry schedules attempt two; missing trust, changed trust, an empty
+password and a wrong username then block without sending or consulting the outcome
+clock. Reopening between failures preserves the pending attempt, frozen bytes,
+provider binding and scheduler checkpoint. A restored trust file and rotated
+password recover the same message on attempt two. Reopening after the synthetic
+delivered outcome confirms the work is no longer due. No SMTP connection is made.
+
 Trust and credential sources are read sequentially, without promising a transaction
 across external resources. ADRs 0016–0018 retain their metadata, filesystem deadline
 and injected-source allocation/deadline limitations. This is local preparation,
@@ -41,6 +51,5 @@ CLI, schema, environment adapter or source-selection policy.
 
 ## Next
 
-Exercise the private composed resolver inside the existing permission-guarded
-pending-delivery path, including failure/restart preservation. Public configuration
-mapping and runtime activation still require explicit contract review.
+Exercise composed-resource resolution with bounded supervised transport acceptance.
+Public configuration mapping and runtime activation still require explicit review.

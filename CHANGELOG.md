@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private composed-resource pending-delivery acceptance verifies permission/cancellation gates, trust/credential blocks without consuming attempts, frozen bytes and binding/checkpoint preservation across reopen, and rotated-password recovery through synthetic send callbacks.
+
 - Private SMTP resource composition joins owned trust and injected credentials to immutable provider bindings, with profile/trust gates before lookup and five rotation/failure tests; no permission grant, delivery or installed activation.
 
 - Private injected SMTP credential resolution with preflight reference/identity checks, bounded zeroizing values, exact identity matching and four ownership/rotation/failure tests; no ambient environment lookup or installed activation.
