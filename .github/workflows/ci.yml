@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install project compiler and matching LLVM tools
         run: rustup toolchain install 1.74.0 --profile minimal --component llvm-tools-preview
-      - uses: taiki-e/install-action@e5f8d33e7166e0491b2ab4ff0567cc6cd6772737 # v2.61.7
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-llvm-cov@0.6.21
           fallback: none
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: taiki-e/install-action@e5f8d33e7166e0491b2ab4ff0567cc6cd6772737 # v2.61.7
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: actionlint@1.7.7
           fallback: none
