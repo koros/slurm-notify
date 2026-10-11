@@ -1,7 +1,7 @@
 # ADR 0015: private SMTP provider-profile revisions
 
 Status: pure descriptors, trust fingerprints and atomic provider storage implemented;
-provider-aware polling and resolved transport integration pending. This establishes no public configuration contract.
+provider-aware polling implemented; resolved transport integration pending. This establishes no public configuration contract.
 
 ## Identity and validation
 
@@ -115,3 +115,30 @@ rendering/provider-pair permission and exact resolved relay/TLS/auth identity be
 transport. This increment is the private atomic storage boundary; existing polling
 and delivery adapters retain their prior fixture behavior. No new dependencies,
 public contracts, executable activation or real-cluster/relay testing is introduced.
+
+### Immutable provider-aware polling
+
+Private ProviderPlan captures one validated provider descriptor and v2 rendering
+descriptor per SMTP route before scheduler work. Its constructor rejects missing,
+duplicate, unknown and invalid profiles; profile order does not select routing.
+No Debug/Clone implementation exposes profile metadata. Polling validates Date,
+uses the immutable route policy to render bounded messages and invokes the atomic
+profile-storage boundary. Reconciliation memory is published only after commit.
+
+The shared private preparation worker retains legacy/render-only adapters and now
+has explicit profile settings with route coverage preflight. Provider-aware polls
+commit both binding sets with messages, jobs, ledger and checkpoint. Plain routes
+receive no SMTP profiles. Changed profiles apply only to new events; restored
+history preserves its original profile and bytes. Suppressed and render-only
+history does not receive inferred provider provenance on replay.
+
+Four tests cover invalid/incomplete/duplicate profiles, reordered valid profiles,
+new-policy selection with reopened old snapshots, deduplicated replay, late binding
+rollback with unchanged memory/checkpoint and reopen recovery, invalid Date before
+queries, rendering failure and suppressed/render-only history without backfill.
+Existing Message-ID algorithms and delivery adapters are unchanged.
+
+Next: validate explicit rendering/provider-pair permissions and resolve the exact
+bound relay, trust and authentication identity before transport, with owned TLS
+endpoint/restart acceptance. No new schema, dependencies, public contracts, runtime
+defaults, installed monitoring or real-cluster/relay activation is introduced.

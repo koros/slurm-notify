@@ -35,10 +35,85 @@ pub(super) struct Plan<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
     Policy,
+    Provider(super::smtp_provider_revision::Error),
     Metadata(smtp_render::Error),
     Route,
     Render(smtp_render::Error),
     Selection(smtp_metadata::Error),
+}
+
+// Captures immutable validated rendering/provider descriptors before any query.
+// No Debug/Clone: profile identities and addresses are private metadata.
+pub(super) struct ProviderPlan<'a, 'b> {
+    rendering: &'a Plan<'b>,
+    revisions: Vec<super::smtp_revision::Descriptor>,
+    providers: Vec<super::smtp_provider_revision::Descriptor>,
+}
+impl<'a, 'b> ProviderPlan<'a, 'b> {
+    pub(super) fn new(
+        rendering: &'a Plan<'b>,
+        profiles: &[super::smtp_provider_revision::Profile<'_>],
+    ) -> Result<Self, Error> {
+        if profiles.len() != rendering.routes.len() {
+            return Err(Error::Policy);
+        }
+        let mut names = std::collections::HashSet::new();
+        if profiles.iter().any(|profile| {
+            rendering.route(profile.destination).is_none() || !names.insert(profile.destination)
+        }) {
+            return Err(Error::Policy);
+        }
+        let providers = profiles
+            .iter()
+            .map(super::smtp_provider_revision::Descriptor::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::Provider)?;
+        let revisions = rendering
+            .routes
+            .iter()
+            .map(|route| {
+                super::smtp_revision::Descriptor::from_revision_plan(rendering, route.name)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| Error::Policy)?;
+        Ok(Self {
+            rendering,
+            revisions,
+            providers,
+        })
+    }
+    pub(super) fn poll_with(
+        &self,
+        request: &PollRequest<'_>,
+        reconciler: &mut Reconciler,
+        store: &mut Store,
+        observed_at: i64,
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    ) -> Result<Vec<Event>, smtp_poll::Error> {
+        if smtp_metadata::timestamp(observed_at).is_err() {
+            return Err(smtp_poll::Error::InvalidInput);
+        }
+        smtp_poll::poll_with_profiles(
+            request,
+            reconciler,
+            store,
+            &smtp_poll::ProfileSettings {
+                settings: smtp_poll::Settings {
+                    destinations: self.rendering.destinations,
+                    smtp_destinations: &self.rendering.smtp_destinations,
+                    max_messages: self.rendering.max_messages,
+                },
+                revisions: &self.revisions,
+                providers: &self.providers,
+            },
+            observed_at,
+            query,
+            |event, name| {
+                self.rendering
+                    .prepare_revision(event, name, observed_at, &self.revisions)
+            },
+        )
+    }
 }
 
 impl<'a> Plan<'a> {
@@ -140,33 +215,41 @@ impl<'a> Plan<'a> {
             },
             observed_at,
             query,
-            |event, name| {
-                let route = self.route(name).ok_or(())?;
-                let revision = revisions
-                    .iter()
-                    .find(|revision| revision.destination() == name)
-                    .ok_or(())?;
-                let selected = smtp_metadata::select_revision(
-                    event,
-                    name,
-                    route.metadata.namespace,
-                    observed_at,
-                    revision.token(),
-                )
-                .map_err(|_| ())?;
-                smtp_render::prepare(
-                    event,
-                    &smtp_render::Metadata {
-                        sender: route.metadata.sender,
-                        recipient: route.metadata.recipient,
-                        identity: &selected.identity,
-                        timestamp: selected.timestamp,
-                    },
-                    route.visibility,
-                )
-                .map_err(|_| ())
-            },
+            |event, name| self.prepare_revision(event, name, observed_at, &revisions),
         )
+    }
+
+    fn prepare_revision(
+        &self,
+        event: &Event,
+        name: &str,
+        observed_at: i64,
+        revisions: &[super::smtp_revision::Descriptor],
+    ) -> Result<Prepared, ()> {
+        let route = self.route(name).ok_or(())?;
+        let revision = revisions
+            .iter()
+            .find(|revision| revision.destination() == name)
+            .ok_or(())?;
+        let selected = smtp_metadata::select_revision(
+            event,
+            name,
+            route.metadata.namespace,
+            observed_at,
+            revision.token(),
+        )
+        .map_err(|_| ())?;
+        smtp_render::prepare(
+            event,
+            &smtp_render::Metadata {
+                sender: route.metadata.sender,
+                recipient: route.metadata.recipient,
+                identity: &selected.identity,
+                timestamp: selected.timestamp,
+            },
+            route.visibility,
+        )
+        .map_err(|_| ())
     }
 
     pub(super) fn poll_with(
@@ -453,6 +536,277 @@ mod tests {
             })
             .unwrap()
     }
+    fn provider_profile<'a>(
+        name: &'a str,
+        relay: &'static str,
+    ) -> super::super::smtp_provider_revision::Profile<'a> {
+        super::super::smtp_provider_revision::Profile {
+            destination: name,
+            relay,
+            port: 587,
+            tls: super::super::smtp_provider_revision::TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        }
+    }
+    #[test]
+    fn provider_plan_rejects_incomplete_duplicate_unknown_and_invalid_profiles() {
+        let routes = [
+            route("a", JobVisibility::Hidden),
+            route("b", JobVisibility::Hidden),
+        ];
+        let rendering = Plan::new(&["a", "b", "plain"], &routes, 4).unwrap();
+        for profiles in [
+            vec![],
+            vec![provider_profile("a", "relay.invalid")],
+            vec![
+                provider_profile("a", "relay.invalid"),
+                provider_profile("a", "relay.invalid"),
+            ],
+            vec![
+                provider_profile("a", "relay.invalid"),
+                provider_profile("plain", "relay.invalid"),
+            ],
+            vec![
+                provider_profile("a", "relay.invalid"),
+                provider_profile("b", "unsafe\r\n"),
+            ],
+        ] {
+            assert!(ProviderPlan::new(&rendering, &profiles).is_err());
+        }
+        assert!(ProviderPlan::new(
+            &rendering,
+            &[
+                provider_profile("b", "relay.invalid"),
+                provider_profile("a", "relay.invalid")
+            ]
+        )
+        .is_ok());
+    }
+    #[test]
+    fn provider_poll_commits_both_bindings_and_changed_profiles_preserve_reopened_history() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [route("a", JobVisibility::Hidden)];
+        let rendering = Plan::new(&["a", "plain"], &routes, 4).unwrap();
+        let plan =
+            ProviderPlan::new(&rendering, &[provider_profile("a", "relay.invalid")]).unwrap();
+        let request = revision_request();
+        let records = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        plan.poll_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            10,
+            revision_query(records),
+        )
+        .unwrap();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let original = store
+            .bound_smtp_provider(&item.event_id, "a")
+            .unwrap()
+            .unwrap();
+        let bytes = store.frozen_smtp(&item.event_id, "a").unwrap().unwrap();
+        assert!(store
+            .bound_smtp_provider(&item.event_id, "plain")
+            .unwrap()
+            .is_none());
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut reconciler, _) = store.restore("cluster", 10).unwrap();
+        let changed =
+            ProviderPlan::new(&rendering, &[provider_profile("a", "changed.invalid")]).unwrap();
+        let records = format!("{records}\ncluster|2|alice|s|actual|FAILED|1:0");
+        assert_eq!(
+            changed
+                .poll_with(
+                    &request,
+                    &mut reconciler,
+                    &mut store,
+                    20,
+                    revision_query(&records)
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .bound_smtp_provider(&item.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .token(),
+            original.token()
+        );
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .data(),
+            bytes.data()
+        );
+        let new = store
+            .due_deliveries("cluster", 20, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.event.identity.job == "2" && item.destination == "a")
+            .unwrap();
+        assert_eq!(
+            store
+                .bound_smtp_provider(&new.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .profile()
+                .relay,
+            "changed.invalid"
+        );
+        assert!(changed
+            .poll_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                30,
+                revision_query(&records)
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(table_count(&directory, "smtp_provider_revisions"), 2);
+        assert_eq!(table_count(&directory, "smtp_provider_bindings"), 2);
+    }
+    #[test]
+    fn provider_poll_late_write_failure_preserves_memory_and_recovers_after_reopen() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [route("a", JobVisibility::Hidden)];
+        let rendering = Plan::new(&["a"], &routes, 4).unwrap();
+        let plan =
+            ProviderPlan::new(&rendering, &[provider_profile("a", "relay.invalid")]).unwrap();
+        let request = revision_request();
+        let records = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_provider BEFORE INSERT ON smtp_provider_bindings BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        assert!(matches!(
+            plan.poll_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query(records)
+            ),
+            Err(smtp_poll::Error::Storage(_))
+        ));
+        assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+        for table in [
+            "events",
+            "outbox",
+            "smtp_messages",
+            "smtp_revision_bindings",
+            "smtp_provider_revisions",
+            "smtp_provider_bindings",
+            "checkpoints",
+        ] {
+            assert_eq!(table_count(&directory, table), 0);
+        }
+        drop(store);
+        db.execute_batch("DROP TRIGGER reject_provider;").unwrap();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert!(checkpoint.is_none());
+        assert_eq!(
+            plan.poll_with(
+                &request,
+                &mut restored,
+                &mut store,
+                20,
+                revision_query(records)
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(table_count(&directory, "smtp_provider_bindings"), 1);
+    }
+    #[test]
+    fn provider_poll_suppression_legacy_replay_and_render_failure_do_not_backfill() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [route("a", JobVisibility::Identifier)];
+        let rendering = Plan::new(&["a"], &routes, 4).unwrap();
+        let plan =
+            ProviderPlan::new(&rendering, &[provider_profile("a", "relay.invalid")]).unwrap();
+        let mut request = revision_request();
+        for time in [-1, 4_102_444_800] {
+            assert!(matches!(
+                plan.poll_with(
+                    &request,
+                    &mut reconciler,
+                    &mut store,
+                    time,
+                    |_, _, _| panic!("invalid time queried")
+                ),
+                Err(smtp_poll::Error::InvalidInput)
+            ));
+        }
+        let oversized = format!("cluster|{}|alice|s|actual|COMPLETED|0:0", "1".repeat(33));
+        assert!(matches!(
+            plan.poll_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query(&oversized)
+            ),
+            Err(smtp_poll::Error::Preparation)
+        ));
+        assert!(reconciler.latest.is_empty());
+        let records = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        request.emit_discovered = false;
+        assert!(plan
+            .poll_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query(records)
+            )
+            .unwrap()
+            .is_empty());
+        request.emit_discovered = true;
+        let records = format!("{records}\ncluster|2|alice|s|actual|FAILED|1:0");
+        rendering
+            .poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                20,
+                revision_query(&records),
+            )
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        assert!(plan
+            .poll_with(
+                &request,
+                &mut restored,
+                &mut store,
+                30,
+                revision_query(&records)
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(table_count(&directory, "smtp_provider_revisions"), 0);
+        assert_eq!(table_count(&directory, "smtp_provider_bindings"), 0);
+        assert_eq!(table_count(&directory, "smtp_messages"), 1);
+    }
+
     #[test]
     fn revision_poll_changes_new_events_and_preserves_bound_and_legacy_history() {
         let directory = crate::storage::tests::Directory::new();

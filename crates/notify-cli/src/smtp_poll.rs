@@ -52,7 +52,11 @@ pub(super) fn poll_with(
         request,
         reconciler,
         store,
-        (settings, None),
+        PreparationSettings {
+            settings,
+            revisions: None,
+            providers: None,
+        },
         observed_at,
         query,
         prepare,
@@ -77,7 +81,45 @@ pub(super) fn poll_with_revisions(
         request,
         reconciler,
         store,
-        (&settings.settings, Some(settings.revisions)),
+        PreparationSettings {
+            settings: &settings.settings,
+            revisions: Some(settings.revisions),
+            providers: None,
+        },
+        observed_at,
+        query,
+        prepare,
+    )
+}
+
+pub(super) struct ProfileSettings<'a> {
+    pub(super) settings: Settings<'a>,
+    pub(super) revisions: &'a [super::smtp_revision::Descriptor],
+    pub(super) providers: &'a [super::smtp_provider_revision::Descriptor],
+}
+struct PreparationSettings<'a> {
+    settings: &'a Settings<'a>,
+    revisions: Option<&'a [super::smtp_revision::Descriptor]>,
+    providers: Option<&'a [super::smtp_provider_revision::Descriptor]>,
+}
+pub(super) fn poll_with_profiles(
+    request: &PollRequest<'_>,
+    reconciler: &mut Reconciler,
+    store: &mut Store,
+    settings: &ProfileSettings<'_>,
+    observed_at: i64,
+    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
+) -> Result<Vec<Event>, Error> {
+    poll_prepared(
+        request,
+        reconciler,
+        store,
+        PreparationSettings {
+            settings: &settings.settings,
+            revisions: Some(settings.revisions),
+            providers: Some(settings.providers),
+        },
         observed_at,
         query,
         prepare,
@@ -88,12 +130,16 @@ fn poll_prepared(
     request: &PollRequest<'_>,
     reconciler: &mut Reconciler,
     store: &mut Store,
-    settings: (&Settings<'_>, Option<&[super::smtp_revision::Descriptor]>),
+    settings: PreparationSettings<'_>,
     observed_at: i64,
     query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
     mut prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
 ) -> Result<Vec<Event>, Error> {
-    let (settings, revisions) = settings;
+    let PreparationSettings {
+        settings,
+        revisions,
+        providers,
+    } = settings;
     if observed_at < 0 || !valid_settings(settings) {
         return Err(Error::InvalidInput);
     }
@@ -104,6 +150,19 @@ fn poll_prepared(
                 !revision.revision_identity()
                     || !settings.smtp_destinations.contains(&revision.destination())
                     || !names.insert(revision.destination())
+            })
+        {
+            return Err(Error::InvalidInput);
+        }
+    }
+    if let Some(providers) = providers {
+        let mut names = std::collections::HashSet::new();
+        if providers.len() != settings.smtp_destinations.len()
+            || providers.iter().any(|provider| {
+                !settings
+                    .smtp_destinations
+                    .contains(&provider.profile().destination)
+                    || !names.insert(provider.profile().destination)
             })
         {
             return Err(Error::InvalidInput);
@@ -138,20 +197,31 @@ fn poll_prepared(
         smtp_destinations: settings.smtp_destinations,
         messages: &messages,
     };
-    match revisions {
-        Some(revisions) => store.persist_prepared_revisions(
+    match (revisions, providers) {
+        (Some(rendering), Some(providers)) => store.persist_prepared_profiles(
+            preparation,
+            super::storage::SmtpRevisions {
+                rendering,
+                providers,
+            },
+            request.cluster,
+            request.history_end,
+            observed_at,
+        ),
+        (Some(revisions), None) => store.persist_prepared_revisions(
             preparation,
             revisions,
             request.cluster,
             request.history_end,
             observed_at,
         ),
-        None => store.persist_prepared_reconciler(
+        (None, None) => store.persist_prepared_reconciler(
             preparation,
             request.cluster,
             request.history_end,
             observed_at,
         ),
+        (None, Some(_)) => return Err(Error::InvalidInput),
     }
     .map_err(Error::Storage)?;
     *reconciler = candidate;

@@ -2520,3 +2520,34 @@ public contracts, executable activation or real-cluster/relay testing is introdu
 Validation: shared checks pass with 258 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.66% (13,209/13,526), above the unchanged 80% gate.
+
+### Immutable provider-aware polling
+
+Private ProviderPlan captures one validated provider descriptor and v2 rendering
+descriptor per SMTP route before scheduler work. Its constructor rejects missing,
+duplicate, unknown and invalid profiles; profile order does not select routing.
+No Debug/Clone implementation exposes profile metadata. Polling validates Date,
+uses the immutable route policy to render bounded messages and invokes the atomic
+profile-storage boundary. Reconciliation memory is published only after commit.
+
+The shared private preparation worker retains legacy/render-only adapters and now
+has explicit profile settings with route coverage preflight. Provider-aware polls
+commit both binding sets with messages, jobs, ledger and checkpoint. Plain routes
+receive no SMTP profiles. Changed profiles apply only to new events; restored
+history preserves its original profile and bytes. Suppressed and render-only
+history does not receive inferred provider provenance on replay.
+
+Four tests cover invalid/incomplete/duplicate profiles, reordered valid profiles,
+new-policy selection with reopened old snapshots, deduplicated replay, late binding
+rollback with unchanged memory/checkpoint and reopen recovery, invalid Date before
+queries, rendering failure and suppressed/render-only history without backfill.
+Existing Message-ID algorithms and delivery adapters are unchanged.
+
+Next: validate explicit rendering/provider-pair permissions and resolve the exact
+bound relay, trust and authentication identity before transport, with owned TLS
+endpoint/restart acceptance. No new schema, dependencies, public contracts, runtime
+defaults, installed monitoring or real-cluster/relay activation is introduced.
+
+Validation: shared checks pass with 262 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.64% (13,560/13,888), above the unchanged 80% gate.
