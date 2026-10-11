@@ -9,9 +9,13 @@ Slurm jobs. Written in Rust, it will discover the current user's jobs, detect
 lifecycle events, and route notifications to configurable destinations without
 requiring administrator privileges or changes to existing batch scripts.
 
-**Status: repository foundation, pre-implementation.** A minimal Cargo workspace
-and automated CI checks exist. The executable only reports that monitoring is
-unavailable. No notifications or release binaries exist yet.
+**Status: private, test-driven prototype.** Synthetic scheduler discovery and
+reconciliation, durable SQLite state, supervised webhook/SMTP transports, and
+caller-driven orchestration are implemented behind test-only interfaces. Tests
+cover restart, retry, cancellation and bound SMTP profile protection. The executable
+still reports unavailable monitoring; no usable monitoring agent or release
+binaries exist yet. See the [product readiness assessment](docs/architecture/product-readiness.md)
+for remaining work and review gates.
 The name `slurm-notify` is a working name.
 
 ## Design and scope

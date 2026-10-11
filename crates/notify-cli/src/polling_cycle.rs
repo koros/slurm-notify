@@ -1336,6 +1336,236 @@ mod tests {
             .is_empty());
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn mixed_mid_batch_cancel_and_resolution_blocks_preserve_exact_pending_work() {
+        use crate::{
+            smtp_provider_delivery::{Permission, Permissions, Resolved},
+            smtp_provider_revision::{self, Profile, TlsMode},
+        };
+        let mut mixed_settings = settings();
+        mixed_settings.destinations = &["primary", "aaa"];
+        let ordinary_calls = std::cell::Cell::new(0);
+        let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
+            .unwrap()
+            .serialize_der()
+            .unwrap();
+        let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
+        let profile = Profile {
+            destination: "primary",
+            relay: "127.0.0.1",
+            port: 587,
+            tls: TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: &trust,
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        };
+        let profiles = [profile];
+        let routes = [render_route(crate::smtp_render::JobVisibility::Hidden)];
+        let denied = Permissions::new(&[]).unwrap();
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        let mut samples = 0;
+        let report = cycles.tick_mixed_bound_smtp(&mixed_settings, &maintenance(), &mut store,
+            MixedBoundSmtp { ordinary_destinations: &["aaa"], smtp: BoundSmtp { rendering: Rendering { routes: &routes, max_messages: 1 }, profiles: &profiles, permissions: &denied, timeout: Duration::from_secs(1) } },
+            Hooks { query: smtp_query,
+                send: (|_: &crate::smtp_provider_revision::Descriptor| -> Result<Resolved, crate::smtp_provider_delivery::Error> { panic!("cancelled resolution") },
+                    |_: &crate::storage::DueDelivery| -> Command { panic!("cancelled spawn") }, |_: &crate::storage::DueDelivery| panic!("cancelled ordinary")),
+                clock: || Some(7200), cancelled: || { samples += 1; samples > 1 } });
+        assert!(report.cancelled);
+        assert!(matches!(
+            report.poll,
+            Some(Ok(Outcome::Committed { events: 1, .. }))
+        ));
+        drop(store);
+        let mut store = open(&directory);
+        let item = store
+            .due_deliveries("cluster", 7200, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "primary")
+            .unwrap();
+        let frozen = store
+            .frozen_smtp(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let rendering = store
+            .bound_smtp_revision(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let provider = store
+            .bound_smtp_provider(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let entries = [Permission {
+            cluster: "cluster",
+            destination: "primary",
+            rendering: rendering.token(),
+            provider: provider.token(),
+        }];
+        let allowed = Permissions::new(&entries).unwrap();
+        let cancel = std::cell::Cell::new(false);
+        let resolve_calls = std::cell::Cell::new(0);
+        let helper_calls = std::cell::Cell::new(0);
+        let clock_calls = std::cell::Cell::new(0);
+        for mode in 0..=5 {
+            cancel.set(false);
+            clock_calls.set(0);
+            let mut cycles = Cycles::new(1).unwrap();
+            cycles.remaining = 0;
+            let report = cycles.tick_mixed_bound_smtp(
+                &mixed_settings,
+                &maintenance(),
+                &mut store,
+                MixedBoundSmtp {
+                    ordinary_destinations: &["aaa"],
+                    smtp: BoundSmtp {
+                        rendering: Rendering {
+                            routes: &routes,
+                            max_messages: 1,
+                        },
+                        profiles: &profiles,
+                        permissions: &allowed,
+                        timeout: Duration::from_secs(1),
+                    },
+                },
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("exhausted query"),
+                    send: (
+                        |bound: &crate::smtp_provider_revision::Descriptor| {
+                            resolve_calls.set(resolve_calls.get() + 1);
+                            match mode {
+                                1 => Err(crate::smtp_provider_delivery::Error::Trust),
+                                2 => Err(crate::smtp_provider_delivery::Error::Profile),
+                                3 => Err(crate::smtp_provider_delivery::Error::Credentials),
+                                4 => {
+                                    let changed_profile = Profile {
+                                        port: 588,
+                                        ..profiles[0]
+                                    };
+                                    let changed =
+                                        smtp_provider_revision::Descriptor::new(&changed_profile)
+                                            .unwrap();
+                                    Resolved::new(
+                                        &changed,
+                                        &changed_profile,
+                                        &[&root],
+                                        "fixture-user",
+                                        "fixture-secret",
+                                    )
+                                }
+                                5 => Resolved::new(
+                                    bound,
+                                    &profiles[0],
+                                    &[&root],
+                                    "fixture-user",
+                                    "fixture-secret",
+                                ),
+                                _ => panic!("cancelled before resolution"),
+                            }
+                        },
+                        |due: &crate::storage::DueDelivery| {
+                            assert_eq!(mode, 5);
+                            assert_eq!(due.attempt_number, 1);
+                            helper_calls.set(helper_calls.get() + 1);
+                            let mut command = Command::new("/bin/sh");
+                            command.args([
+                                "-c",
+                                "cat >/dev/null; printf 'SMTP_SUBMIT FINAL ACCEPTED RA\n'",
+                            ]);
+                            command
+                        },
+                        |due: &crate::storage::DueDelivery| {
+                            assert_eq!(mode, 0);
+                            assert_eq!(due.destination, "aaa");
+                            ordinary_calls.set(ordinary_calls.get() + 1);
+                            cancel.set(true);
+                            Ok(crate::delivery::ProviderOutcome::Delivered)
+                        },
+                    ),
+                    clock: || {
+                        clock_calls.set(clock_calls.get() + 1);
+                        Some(7200)
+                    },
+                    cancelled: || cancel.get(),
+                },
+            );
+            assert!(matches!(report.poll, Some(Ok(Outcome::Exhausted))));
+            if mode == 0 {
+                assert!(report.cancelled);
+                assert!(matches!(report.delivery, Some(Err(StageError::Cancelled))));
+                assert_eq!(report.delivery_failure.unwrap().committed.delivered, 1);
+                assert_eq!(clock_calls.get(), 3);
+                assert_eq!(resolve_calls.get(), 0);
+            } else if mode < 5 {
+                assert!(!report.cancelled);
+                assert!(matches!(
+                    report.delivery,
+                    Some(Err(StageError::DispatchBlocked))
+                ));
+                let failure = report.delivery_failure.unwrap();
+                let expected = match mode {
+                    1 => crate::smtp_provider_delivery::Error::Trust,
+                    3 => crate::smtp_provider_delivery::Error::Credentials,
+                    _ => crate::smtp_provider_delivery::Error::Profile,
+                };
+                assert_eq!(
+                    failure.diagnostic,
+                    Some(crate::supervised_provider::Diagnostic::SmtpProviderResolution(expected))
+                );
+                assert_eq!(failure.committed.delivered, 0);
+                assert!(!failure.acceptance_uncertain);
+                assert_eq!(clock_calls.get(), 2);
+            } else {
+                assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+                assert!(report.cleanup.is_some() && report.health.is_some());
+            }
+            if mode < 5 {
+                assert!(report.cleanup.is_none() && report.health.is_none());
+            }
+            drop(store);
+            store = open(&directory);
+            let due = store.due_deliveries("cluster", 7200, 10).unwrap();
+            if mode < 5 {
+                assert_eq!(due.len(), 1);
+                assert_eq!(due[0].destination, "primary");
+                assert_eq!(due[0].attempt_number, 1);
+            } else {
+                assert!(due.is_empty());
+            }
+            assert_eq!(
+                store
+                    .frozen_smtp(&item.event_id, "primary")
+                    .unwrap()
+                    .unwrap()
+                    .data(),
+                frozen.data()
+            );
+            assert_eq!(
+                store
+                    .bound_smtp_provider(&item.event_id, "primary")
+                    .unwrap()
+                    .unwrap()
+                    .token(),
+                provider.token()
+            );
+            assert_eq!(
+                store
+                    .bound_smtp_revision(&item.event_id, "primary")
+                    .unwrap()
+                    .unwrap()
+                    .token(),
+                rendering.token()
+            );
+        }
+        assert_eq!(ordinary_calls.get(), 1);
+        assert_eq!(resolve_calls.get(), 5);
+        assert_eq!(helper_calls.get(), 1);
+    }
+
     fn smtp_message(
         event: &super::super::lifecycle::Event,
         _: &str,

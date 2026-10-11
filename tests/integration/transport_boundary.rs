@@ -2443,7 +2443,7 @@ fn owned_revision_delivery_restart() {
 fn owned_bound_transport_restart() {
     use base64::Engine;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-    use smtp_provider_delivery::{Hooks, Permission, Permissions, Resolved};
+    use smtp_provider_delivery::{Permission, Permissions, Resolved};
     use std::{
         io::{Read, Write},
         net::TcpListener,
@@ -2715,32 +2715,50 @@ fn owned_bound_transport_restart() {
             port: decoy.local_addr().unwrap().port(),
             ..provider.profile()
         };
-        let failure = smtp_provider_delivery::deliver_due(
+        let changed_profiles = [changed_profile];
+        let mut cycles = polling_cycle::Cycles::new(1).unwrap();
+        let mut times = [17, 17].into_iter();
+        let tick = cycles.tick_mixed_bound_smtp(
+            &cycle_settings,
+            &maintenance,
             &mut store,
-            "cluster",
-            17,
-            10,
-            retry_policy(),
-            Hooks {
-                permissions: &permissions,
-                resolve: |bound: &smtp_provider_revision::Descriptor| {
-                    Resolved::new(
-                        bound,
-                        &changed_profile,
-                        &[&root],
-                        "fixture-user",
-                        "rotated-fixture",
-                    )
+            polling_cycle::MixedBoundSmtp {
+                ordinary_destinations: &["webhook"],
+                smtp: polling_cycle::BoundSmtp {
+                    rendering: polling_cycle::Rendering {
+                        routes: &routes,
+                        max_messages: 1,
+                    },
+                    profiles: &changed_profiles,
+                    permissions: &permissions,
+                    timeout: Duration::from_secs(3),
                 },
-                send: |_: &storage::DueDelivery,
-                       _: &smtp_revision::Descriptor,
-                       _: &storage::FrozenMessage,
-                       _: Resolved| panic!("changed endpoint spawned"),
-                clock: || panic!("blocked endpoint clock"),
+            },
+            polling_cycle::Hooks {
+                query,
+                send: (
+                    |bound: &smtp_provider_revision::Descriptor| {
+                        Resolved::new(
+                            bound,
+                            &changed_profiles[0],
+                            &[&root],
+                            "fixture-user",
+                            "rotated-fixture",
+                        )
+                    },
+                    |_: &storage::DueDelivery| -> Command { panic!("changed endpoint spawned") },
+                    |_: &storage::DueDelivery| panic!("completed ordinary route replayed"),
+                ),
+                clock: || times.next(),
                 cancelled: || false,
             },
-        )
-        .unwrap_err();
+        );
+        assert!(matches!(
+            tick.delivery,
+            Some(Err(polling_cycle::StageError::DispatchBlocked))
+        ));
+        assert!(tick.cleanup.is_none() && tick.health.is_none());
+        let failure = tick.delivery_failure.unwrap();
         assert_eq!(
             failure.diagnostic,
             Some(supervised_provider::Diagnostic::SmtpProviderResolution(

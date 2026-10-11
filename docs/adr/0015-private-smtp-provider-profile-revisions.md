@@ -282,3 +282,27 @@ No schema, dependency, public contract or runtime-default changes are introduced
 Next: mixed-route mid-batch cancellation and blocked-resolution acceptance, then
 review the remaining prototype-to-product gaps. Public contracts, installed runtime,
 real-cluster validation and release gates remain separate outstanding work.
+
+### Mixed-route cancellation and blocked-resolution recovery
+
+New process-fixture acceptance cancels after ordinary delivery has committed and
+before pending SMTP resolution. Reopened state retains ordinary progress, exact
+SMTP DATA, both revision tokens and attempt number one. Subsequent trust, profile,
+credential and wrong-context failures block before helper creation or completion
+clock sampling. Failure reports remain static and show no uncertain acceptance;
+cleanup/health stages are skipped. A later approved resolution completes the pending
+row without repeating ordinary delivery. Assertions check callback and clock counts.
+
+Owned TLS restart acceptance now tests changed-profile resolution through the full
+mixed tick rather than directly invoking the guard. It verifies no helper or ordinary
+replay, no decoy connection, unchanged retry attempt and recovery through the original
+bound relay. Existing temporary/lost-result acceptance remains intact. No production
+code, dependencies, defaults, schema or public contracts change in this increment.
+
+The README now describes the private prototype accurately. A current product-readiness
+assessment separates verified fixture behavior from the missing installed runtime,
+contract review, onboarding, platform/cluster validation and release work.
+
+Next: prepare a concrete CLI/config/event contract review package using the existing
+proposals, before activating an installed runtime. Continue private transport deadline
+acceptance where needed; do not infer approval of public surfaces from prototype tests.
