@@ -1544,3 +1544,42 @@ ensuring missing/invalid credentials block before connection, unsupported secure
 capabilities never trigger fallback, and secrets stay out of diagnostics. Message
 construction/submission, public review, licensing, cluster validation, and activation
 remain pending.
+
+## Subsequent increment: bounded verified-TLS AUTH PLAIN experiment
+
+A private credential type validates nonempty printable ASCII username/password
+before invoking an injected connector, rejecting controls, NUL, non-ASCII, missing
+values, and username/password lengths above explicit fixture ceilings of 64/128
+bytes. It has no Debug, Clone, or credential accessors. The empty authorization
+identity and explicit authentication identity/password form a bounded SASL PLAIN
+payload. Owned payload and encoded command buffers use existing zeroize support,
+reserve bounded capacity, and are dropped immediately after the AUTH write.
+Caller-owned inputs and TLS internal copies are outside that zeroization guarantee.
+Unicode/SASLprep and other credential-source compatibility remain unvalidated.
+
+The shared TLS helper now returns a verified STARTTLS stream; existing negotiation
+behavior and fixtures remain intact. Authentication obtains a fresh secure EHLO
+and requires a case-insensitive exact AUTH extension advertising PLAIN on a
+capability line. Pre-TLS capabilities are discarded. Unsupported mechanisms do
+not trigger fallback. One AUTH command is sent over verified TLS: 235 succeeds
+only as authentication, 4xx is temporary, 5xx is permanent, and challenges or
+unexpected replies fail without internal retry. Teardown cannot replace an explicit
+AUTH result. No branch submits a message or produces Delivered.
+
+Three tests cover validation/no-connect behavior, exact command encoding/size,
+trusted one-command authentication and reply classes, no fallback or stale capability
+use, inconsistent secure EHLO, and unknown issuer/wrong hostname/expiry rejection
+with zero observed AUTH commands. Fixture command buffers are bounded and zeroized;
+boolean assertions avoid credential-byte output. Accept/connect/socket waits remain
+finite; supervised AUTH deadlines and cross-process credentials are still pending.
+
+Base64 0.22.1 is now a pinned direct dev dependency, reusing the existing locked
+package for standard encoding without adding a package version. The lockfile changes
+only the local crate dependency list. The full suite passes: 166 Rust tests plus
+one ignored helper, thirty-seven custom process scenarios, eight SQLite tests, and
+six hook tests. No runtime defaults, schema, or public contract changed.
+
+Next: separate bounded private authenticated-SMTP child request framing and sanitized
+AUTH acknowledgments, then supervised slow/disconnected AUTH response fixtures.
+Credential lookup, worker outcome integration, message construction/submission,
+public review, licensing, cluster validation, and activation remain pending.

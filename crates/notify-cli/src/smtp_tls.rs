@@ -75,10 +75,38 @@ fn greeting(
 }
 
 pub(super) fn required_starttls(
-    mut socket: TcpStream,
+    socket: TcpStream,
     config: Arc<rustls::ClientConfig>,
     name: rustls::pki_types::ServerName<'static>,
 ) -> Result<(), Error> {
+    let mut stream = verified_starttls(socket, config, name)?;
+    let limits = || Limits {
+        line_bytes: 128,
+        total_bytes: 256,
+        lines: 4,
+    };
+    // No capabilities survive the plaintext EHLO. Obtain a fresh verified reply.
+    stream
+        .write_all(b"EHLO fixture.invalid\r\n")
+        .and_then(|()| stream.flush())
+        .map_err(|_| Error::Io)?;
+    if read_reply(&mut stream, limits())
+        .map_err(|_| Error::Reply)?
+        .code
+        != 250
+    {
+        return Err(Error::Reply);
+    }
+    stream.conn.send_close_notify();
+    stream.flush().map_err(|_| Error::Io)?;
+    Ok(())
+}
+
+pub(super) fn verified_starttls(
+    mut socket: TcpStream,
+    config: Arc<rustls::ClientConfig>,
+    name: rustls::pki_types::ServerName<'static>,
+) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, Error> {
     let limits = || Limits {
         line_bytes: 128,
         total_bytes: 256,
@@ -125,22 +153,7 @@ pub(super) fn required_starttls(
             .complete_io(&mut socket)
             .map_err(handshake_error)?;
     }
-    let mut stream = rustls::StreamOwned::new(connection, socket);
-    // No capabilities survive the plaintext EHLO. Obtain a fresh verified reply.
-    stream
-        .write_all(b"EHLO fixture.invalid\r\n")
-        .and_then(|()| stream.flush())
-        .map_err(|_| Error::Io)?;
-    if read_reply(&mut stream, limits())
-        .map_err(|_| Error::Reply)?
-        .code
-        != 250
-    {
-        return Err(Error::Reply);
-    }
-    stream.conn.send_close_notify();
-    stream.flush().map_err(|_| Error::Io)?;
-    Ok(())
+    Ok(rustls::StreamOwned::new(connection, socket))
 }
 
 #[cfg(test)]

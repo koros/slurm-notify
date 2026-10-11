@@ -291,3 +291,9 @@ STARTTLS diagnostics now distinguish a missing extension, temporary refusal, and
 permanent refusal. Temporary refusals schedule durable retries; missing/permanent
 cases stay pending for correction. Owned reopen fixtures verify the distinction,
 and no refusal path writes TLS, credentials, or message commands.
+
+A private AUTH PLAIN experiment now validates bounded ASCII credentials before
+connecting, verifies required STARTTLS, and uses only fresh secure EHLO capabilities.
+Loopback fixtures cover authentication replies, unsupported mechanisms, and trust,
+hostname, and expiry failures before AUTH. It has no message submission, installed
+credential frame, or worker authentication-result integration.
