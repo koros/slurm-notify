@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private injected webhook URL/authorization resolution with bounded owned zeroizing bytes, shared endpoint/header validation, static failures and four preflight/ownership/frame tests; no ambient lookup, network access or installed activation.
+
 - Composed private trust/credential resolution in supervised loopback STARTTLS acceptance, including resource blocks before child creation, retry/lost-result restart preservation and rotated-password recovery with verified frozen bytes.
 
 - Private composed-resource pending-delivery acceptance verifies permission/cancellation gates, trust/credential blocks without consuming attempts, frozen bytes and binding/checkpoint preservation across reopen, and rotated-password recovery through synthetic send callbacks.

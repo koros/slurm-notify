@@ -12,6 +12,9 @@ mod credential_resolution;
 mod provider_resolution;
 
 #[cfg(test)]
+mod webhook_resolution;
+
+#[cfg(test)]
 mod smtp_frozen_frame;
 
 #[cfg(test)]

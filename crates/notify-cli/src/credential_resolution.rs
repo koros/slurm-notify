@@ -9,7 +9,7 @@ pub(super) enum Error {
     Lookup,
     Credentials,
 }
-fn reference(name: &str) -> bool {
+pub(super) fn reference(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name.bytes().enumerate().all(|(index, byte)| {

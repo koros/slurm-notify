@@ -2964,3 +2964,24 @@ CLI/config/event baselines and runtime activation still require explicit review.
 Validation: shared checks pass with 297 Rust tests plus one ignored helper, the
 expanded custom process acceptance, eight SQLite tests, six hook tests and 11 draft
 configuration tests. Rust line coverage is 97.49% (16,140/16,556), above the 80% gate.
+
+### Private injected webhook resource resolution
+
+Added test-only webhook_resolution for bounded owned URL and optional authorization
+values from an injected source. Preflight reference/policy checks precede lookup;
+shared existing endpoint validation precedes authorization lookup. Configured
+authorization errors do not fall back. Consuming preparation checks event/payload
+bounds and produces the existing zeroizing supervised transport frame.
+
+Four tests cover owned exact bytes after source removal, no-lookup preflight,
+invalid endpoints before authorization, static failures, configured authorization
+and identifier/payload ceilings. Extracted existing URL/header validators preserve
+transport behavior; no dependencies, runtime defaults or public contracts change.
+ADR 0020 records callback/parser memory and deadline limitations.
+
+Next: owned webhook resources in supervised transport/restart acceptance. Installed
+configuration mapping and runtime activation still require explicit contract review.
+
+Validation: shared checks pass with 301 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.47% (16,315/16,738), above the 80% gate.

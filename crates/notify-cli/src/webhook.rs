@@ -65,18 +65,8 @@ impl Webhook {
         timeout: Duration,
         max_payload: usize,
     ) -> Result<Self, Error> {
-        let url = Url::parse(endpoint).map_err(|_| Error::InvalidConfiguration)?;
-        let loopback = match url.host() {
-            Some(Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(Host::Ipv6(ip)) => ip.is_loopback(),
-            _ => false,
-        };
-        if url.host().is_none()
-            || !(url.scheme() == "https" || url.scheme() == "http" && loopback)
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.fragment().is_some()
-            || timeout.is_zero()
+        let url = endpoint_url(endpoint)?;
+        if timeout.is_zero()
             || max_payload == 0
             || authorization
                 .as_ref()
@@ -171,7 +161,25 @@ impl Webhook {
     }
 }
 
-fn header_value(value: &str) -> bool {
+pub(super) fn endpoint_url(endpoint: &str) -> Result<Url, Error> {
+    let url = Url::parse(endpoint).map_err(|_| Error::InvalidConfiguration)?;
+    let loopback = match url.host() {
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    };
+    if url.host().is_none()
+        || !(url.scheme() == "https" || url.scheme() == "http" && loopback)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(Error::InvalidConfiguration);
+    }
+    Ok(url)
+}
+
+pub(super) fn header_value(value: &str) -> bool {
     !value.is_empty() && value.len() <= 4096 && value.bytes().all(|b| (32..=126).contains(&b))
 }
 
