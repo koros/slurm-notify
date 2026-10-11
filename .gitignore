@@ -4,3 +4,7 @@
 .env.*
 __pycache__/
 *.pyc
+
+# LLVM coverage outputs (including supervised children with cleared environments).
+*.profraw
+*.profdata

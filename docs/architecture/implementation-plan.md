@@ -1583,3 +1583,26 @@ Next: separate bounded private authenticated-SMTP child request framing and sani
 AUTH acknowledgments, then supervised slow/disconnected AUTH response fixtures.
 Credential lookup, worker outcome integration, message construction/submission,
 public review, licensing, cluster validation, and activation remain pending.
+
+## User-requested increment: CI badges and 80% coverage gate
+
+CI now checks the shared suite and rustdoc on Linux/macOS, validates workflows
+with pinned Actionlint, and reviews PR dependency vulnerabilities. A separate job
+runs pinned cargo-llvm-cov with the development compiler's matching LLVM tools,
+exports JSON/LCOV/HTML, and fails below 80% aggregate workspace line coverage.
+Actions and tools are pinned; least-privilege permissions and checksum verification
+remain enabled. Weekly Dependabot updates cover Cargo and GitHub Actions. Main
+pushes build and smoke-check a checksummed development placeholder artifact only
+after platform, coverage, and workflow checks pass. No releases are published.
+
+The local measured baseline is 95.87% Rust lines (8,165/8,517). Scope and limitations,
+including embedded unit fixtures, default harness-file filters, and separate Python
+checks, are documented. No coverage exclusions were added. The README badge labels
+the coverage requirement and links to the policy. Coverage remains mandatory in CI
+and optional in local hooks; branch-protection settings require separate repository
+administrator configuration. Local coverage, Actionlint, and shared suites were
+validated; hosted-run status is recorded when available after push.
+
+Next implementation milestone remains authenticated SMTP child framing and
+supervised AUTH deadlines. Runtime defaults, schema, public contracts, licensing,
+cluster validation, and activation remain pending.

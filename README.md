@@ -1,12 +1,16 @@
 # Slurm Notify
 
+[![CI](https://github.com/koros/slurm-notify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/koros/slurm-notify/actions/workflows/ci.yml)
+[![Rust coverage gate ≥80%](https://img.shields.io/badge/Rust_coverage_gate-%E2%89%A580%25-blue)](docs/operations/ci-and-coverage.md)
+[![Development Rust 1.74.0](https://img.shields.io/badge/development_Rust-1.74.0-orange?logo=rust)](rust-toolchain.toml)
+
 Slurm Notify is a planned user-space notification agent for researchers running
 Slurm jobs. Written in Rust, it will discover the current user's jobs, detect
 lifecycle events, and route notifications to configurable destinations without
 requiring administrator privileges or changes to existing batch scripts.
 
 **Status: repository foundation, pre-implementation.** A minimal Cargo workspace
-and basic CI definition exist. The executable only reports that monitoring is
+and automated CI checks exist. The executable only reports that monitoring is
 unavailable. No notifications or release binaries exist yet.
 The name `slurm-notify` is a working name.
 

@@ -79,3 +79,12 @@ external contributions or publishing a release.
 The SQLite schema experiment uses Python 3's standard-library `sqlite3`; Cargo does
 not run these tests. The CI workflow invokes them separately. No Python runtime
 requirement is introduced for the eventual notification executable.
+
+## CI and coverage
+
+CI now checks Linux and macOS, documentation, workflow syntax, and pull-request
+dependency vulnerabilities, and enforces at least 80% aggregate Rust line coverage.
+Run `sh scripts/check-coverage.sh` after installing cargo-llvm-cov 0.6.21 and the
+pinned compiler's llvm-tools-preview component. Coverage tools are optional for
+local hooks and mandatory in CI. Reports and development artifact scope are
+explained in [CI and coverage](docs/operations/ci-and-coverage.md).

@@ -1,16 +1,26 @@
-name: Foundation CI
+name: CI
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install pinned development toolchain
@@ -19,3 +29,86 @@ jobs:
         run: python3 scripts/check-staged.py --all
       - name: Run shared checks
         run: sh scripts/check.sh
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+
+  coverage:
+    name: Rust coverage (at least 80%)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install project compiler and matching LLVM tools
+        run: rustup toolchain install 1.74.0 --profile minimal --component llvm-tools-preview
+      - uses: taiki-e/install-action@e5f8d33e7166e0491b2ab4ff0567cc6cd6772737 # v2.61.7
+        with:
+          tool: cargo-llvm-cov@0.6.21
+          fallback: none
+      - name: Enforce workspace line coverage
+        run: sh scripts/check-coverage.sh
+      - name: Upload coverage reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rust-coverage
+          path: target/coverage/
+          if-no-files-found: warn
+          retention-days: 14
+
+  workflow-lint:
+    name: Workflow validation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: taiki-e/install-action@e5f8d33e7166e0491b2ab4ff0567cc6cd6772737 # v2.61.7
+        with:
+          tool: actionlint@1.7.7
+          fallback: none
+      - run: actionlint -color
+
+  dependency-review:
+    name: Dependency review
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/dependency-review-action@595b5aeba73380359d98a5e087f648dbb0edce1b # v4.7.3
+        with:
+          fail-on-severity: moderate
+          license-check: false
+
+  development-build:
+    name: Development build artifact
+    needs: [rust, coverage, workflow-lint]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install pinned development compiler
+        run: rustup toolchain install 1.74.0 --profile minimal
+      - name: Build and smoke-check development placeholder
+        shell: bash
+        run: |
+          cargo build --workspace --release --locked
+          set +e
+          output=$(target/release/slurm-notify 2>&1)
+          status=$?
+          set -e
+          test "$status" -eq 1
+          test "$output" = "Slurm Notify is under development; monitoring is not implemented."
+          mkdir -p target/development-artifact
+          cp target/release/slurm-notify target/development-artifact/
+          cp README.md LICENSE.pending.md target/development-artifact/
+          cd target/development-artifact
+          sha256sum slurm-notify > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: development-placeholder-linux-x86_64
+          path: target/development-artifact/
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,63 @@
+# CI and coverage
+
+GitHub's CI workflow runs on pushes, pull requests, and manual dispatch. It checks
+tracked-file guardrails, formatting, strict Clippy, locked Rust tests (including
+the custom child-process harness), SQLite and hook tests, build/smoke behavior,
+and rustdoc on Linux and macOS. Actionlint validates workflow syntax. Pull requests
+also receive dependency review, failing on newly introduced moderate-or-higher
+vulnerabilities. License allow/deny policy remains undecided and is not imposed
+by dependency review. Dependabot opens weekly Cargo and GitHub Actions updates;
+compiler compatibility and existing dependency pins still require review.
+
+## Coverage gate
+
+The coverage job fails below **80% aggregate Rust workspace line coverage** using
+cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.74.0 compiler.
+The prebuilt coverage tool avoids changing the project compiler (building that
+tool itself requires a newer Rust version). Third-party Actions are commit-pinned;
+installation disables fallback and retains checksum verification.
+
+Run locally from the repository root:
+
+```sh
+rustup component add llvm-tools-preview --toolchain 1.74.0
+# Install cargo-llvm-cov 0.6.21 using its upstream prebuilt installation instructions.
+sh scripts/check-coverage.sh
+```
+
+See the [upstream tool instructions](https://github.com/taiki-e/cargo-llvm-cov/tree/v0.6.21).
+Reports are written to `target/coverage/rust.json`, `lcov.info`, and `html/` before
+threshold enforcement; CI retains them as `rust-coverage` for 14 days, including
+when the threshold fails. A failed test fails the job even without a report.
+There is no external coverage service or upload secret. The README coverage badge
+states the enforced minimum, not a claimed live measurement.
+
+The measured local baseline for this change is **95.87%** (8,165 of 8,517 lines),
+using macOS and Rust 1.74.0. Counts can vary slightly between platforms and runs.
+The denominator is cargo-llvm-cov's default workspace report: crate source,
+including embedded unit-test/fixture code. Dependency code, bundled SQLite C,
+Python/shell tooling, and integration harness source files excluded by the tool's
+default filename filters are outside this Rust percentage. The custom process
+harness still executes and contributes coverage for included crate source. The
+script collects fallback LLVM profiles from successfully exited supervised children
+whose environment is deliberately cleared; killed children may produce no profile.
+There are no project-specific filename exclusions or suppressed uncovered modules.
+This metric describes the private prototypes; it does not certify working product
+notifications. Python and shell behavior have separate CI checks, not a claim of
+80% measured coverage. Coverage is authoritative in CI; local Git hooks retain
+their existing shared checks without requiring contributors to install LLVM tools.
+
+## Build artifacts and release boundary
+
+Successful main pushes produce a checksummed Linux x86_64 **development placeholder**
+artifact after platform checks, coverage, and workflow validation pass. It is
+retained for seven days and smoke-tested to report unimplemented monitoring with
+exit status 1. This artifact is not a supported notification binary or a release.
+Release publication and deployment are not automated while licensing, public
+contracts, and release acceptance remain unresolved.
+
+Repository branch protection is a separate GitHub administrator setting. To enforce
+these checks before merging, require `Checks (ubuntu-22.04)`, `Checks (macos-14)`,
+`Rust coverage (at least 80%)`, `Workflow validation`, and `Dependency review` in a
+ruleset. Workflow files alone do not prevent bypass via direct pushes. This change
+does not alter remote branch-protection settings.
