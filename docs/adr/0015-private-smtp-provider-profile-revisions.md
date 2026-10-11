@@ -1,7 +1,7 @@
 # ADR 0015: private SMTP provider-profile revisions
 
-Status: pure descriptor and trust fingerprint implemented; persistence and resolved
-transport integration pending. This establishes no public configuration contract.
+Status: pure descriptors, trust fingerprints and atomic provider storage implemented;
+provider-aware polling and resolved transport integration pending. This establishes no public configuration contract.
 
 ## Identity and validation
 
@@ -86,3 +86,32 @@ ambiguous inputs, maximum fields, overlong fields, truncation/corruption/unknown
 versions, token mismatch, order-stable trust sets and root resource limits.
 Existing locked ring/rustls/rcgen dependencies are reused without version changes.
 Schema remains 3; existing rendering dispatch and the executable stay unchanged.
+
+### Private provider storage and atomic preparation
+
+Additive migration 0004 advances the private schema to 4. Provider descriptors
+are keyed by cluster/destination/token; bindings reference the outbox and the
+rendering binding with the same cluster. Foreign keys protect referenced provider
+records and cascade bindings during completed outbox cleanup. Unreferenced
+provider descriptors remain for a later bounded cleanup operation.
+
+Store::persist_prepared_profiles requires a complete, unique provider descriptor
+set matching the validated rendering destinations. It commits jobs, ledger,
+outbox, frozen messages, both descriptor sets, both bindings and checkpoint in
+one transaction. Existing token/bytes conflicts fail without overwriting records.
+Only newly prepared pairs insert descriptors/bindings; replay does not backfill
+legacy or render-only snapshots. Changed profiles apply to newly emitted events
+and preserve existing profiles and exact message bytes after reopen.
+
+Bound provider loading limits canonical BLOBs in SQL before materialization,
+validates the fingerprint/profile and checks the cluster, destination, rendering
+binding and snapshot. Malformed or missing referenced records fail closed. Tests
+cover schema upgrades and failed migration recovery, immutable conflicts, route
+coverage, late binding/checkpoint rollback, reopen, changed policy, missing/corrupt
+records, foreign-key coherence and completed cleanup while preserving the ledger.
+
+Next: connect immutable provider plans to scheduler polling, then enforce explicit
+rendering/provider-pair permission and exact resolved relay/TLS/auth identity before
+transport. This increment is the private atomic storage boundary; existing polling
+and delivery adapters retain their prior fixture behavior. No new dependencies,
+public contracts, executable activation or real-cluster/relay testing is introduced.

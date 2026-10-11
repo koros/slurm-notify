@@ -2487,3 +2487,36 @@ Validation: shared checks pass with 252 Rust tests plus one ignored helper, cust
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.58% (12,688/13,003), above the unchanged 80% gate. No real relay
 or cluster was contacted.
+
+### Private provider storage and atomic preparation
+
+Additive migration 0004 advances the private schema to 4. Provider descriptors
+are keyed by cluster/destination/token; bindings reference the outbox and the
+rendering binding with the same cluster. Foreign keys protect referenced provider
+records and cascade bindings during completed outbox cleanup. Unreferenced
+provider descriptors remain for a later bounded cleanup operation.
+
+Store::persist_prepared_profiles requires a complete, unique provider descriptor
+set matching the validated rendering destinations. It commits jobs, ledger,
+outbox, frozen messages, both descriptor sets, both bindings and checkpoint in
+one transaction. Existing token/bytes conflicts fail without overwriting records.
+Only newly prepared pairs insert descriptors/bindings; replay does not backfill
+legacy or render-only snapshots. Changed profiles apply to newly emitted events
+and preserve existing profiles and exact message bytes after reopen.
+
+Bound provider loading limits canonical BLOBs in SQL before materialization,
+validates the fingerprint/profile and checks the cluster, destination, rendering
+binding and snapshot. Malformed or missing referenced records fail closed. Tests
+cover schema upgrades and failed migration recovery, immutable conflicts, route
+coverage, late binding/checkpoint rollback, reopen, changed policy, missing/corrupt
+records, foreign-key coherence and completed cleanup while preserving the ledger.
+
+Next: connect immutable provider plans to scheduler polling, then enforce explicit
+rendering/provider-pair permission and exact resolved relay/TLS/auth identity before
+transport. This increment is the private atomic storage boundary; existing polling
+and delivery adapters retain their prior fixture behavior. No new dependencies,
+public contracts, executable activation or real-cluster/relay testing is introduced.
+
+Validation: shared checks pass with 258 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.66% (13,209/13,526), above the unchanged 80% gate.

@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private schema v4 for immutable SMTP provider revisions and cluster-coherent bindings, atomic prepared persistence, bounded loading and migration/conflict/rollback/reopen tests. Provider-aware polling and resolved dispatch remain pending.
+
 - Private bounded SMTP provider-profile descriptors for relay/TLS/trust/auth identity and credential references, canonical stored validation, DER trust-set fingerprints and profile mismatch tests. Provider persistence and resolved transport integration remain pending.
 
 - Private revision-aware SMTP delivery permissions checked before sends and retry retirement, bounded unreferenced revision cleanup, and owned TLS retry/lost-result reopen acceptance. Durable relay/TLS/auth profile binding remains pending.

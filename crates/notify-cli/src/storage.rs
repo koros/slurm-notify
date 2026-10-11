@@ -3,6 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
+const PROVIDER_MIGRATION: &str = include_str!("../../notify-storage/migrations/0004.sql");
 const REVISION_MIGRATION: &str = include_str!("../../notify-storage/migrations/0003.sql");
 const SMTP_MIGRATION: &str = include_str!("../../notify-storage/migrations/0002.sql");
 
@@ -101,7 +102,13 @@ pub(super) struct PollPreparation<'a> {
     pub(super) messages: &'a [SmtpPreparation<'a>],
 }
 
+pub(super) struct SmtpRevisions<'a> {
+    pub(super) rendering: &'a [super::smtp_revision::Descriptor],
+    pub(super) providers: &'a [super::smtp_provider_revision::Descriptor],
+}
+
 struct SmtpPlan<'a> {
+    providers: std::collections::HashMap<&'a str, &'a super::smtp_provider_revision::Descriptor>,
     revisions: std::collections::HashMap<&'a str, &'a super::smtp_revision::Descriptor>,
     destinations: &'a [&'a str],
     messages: std::collections::HashMap<(String, &'a str), &'a super::smtp_message::Prepared>,
@@ -186,7 +193,7 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1..=3 => {}
+            1..=4 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
@@ -197,6 +204,12 @@ impl Store {
         }
         if version < 3 {
             if let Err(error) = db.execute_batch(REVISION_MIGRATION) {
+                let _ = db.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+        }
+        if version < 4 {
+            if let Err(error) = db.execute_batch(PROVIDER_MIGRATION) {
                 let _ = db.execute_batch("ROLLBACK");
                 return Err(error.into());
             }
@@ -684,6 +697,32 @@ impl Store {
         Ok(Some(descriptor))
     }
 
+    pub(super) fn bound_smtp_provider(
+        &self,
+        event_id: &str,
+        destination: &str,
+    ) -> Result<Option<super::smtp_provider_revision::Descriptor>, StorageError> {
+        type Row = (Option<String>, Option<Vec<u8>>, bool);
+        let row: Option<Row> = self.db.query_row("SELECT CASE WHEN length(r.revision)=64 THEN r.revision END, CASE WHEN typeof(r.descriptor)='blob' AND length(r.descriptor) BETWEEN 1 AND 4096 THEN r.descriptor END, COALESCE(b.cluster=e.cluster AND b.cluster=s.cluster,0) FROM smtp_provider_bindings b LEFT JOIN smtp_provider_revisions r ON r.cluster=b.cluster AND r.destination=b.destination AND r.revision=b.revision LEFT JOIN events e ON e.event_id=b.event_id LEFT JOIN smtp_revision_bindings s ON s.event_id=b.event_id AND s.destination=b.destination WHERE b.event_id=?1 AND b.destination=?2", params![event_id,destination], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+        let Some((token, bytes, coherent)) = row else {
+            return Ok(None);
+        };
+        if !coherent {
+            return Err(StorageError::InvalidInput);
+        }
+        let provider = super::smtp_provider_revision::Descriptor::from_stored(
+            &token.ok_or(StorageError::InvalidInput)?,
+            zeroize::Zeroizing::new(bytes.ok_or(StorageError::InvalidInput)?),
+        )
+        .map_err(|_| StorageError::InvalidInput)?;
+        if provider.profile().destination != destination
+            || self.bound_smtp_revision(event_id, destination)?.is_none()
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        Ok(Some(provider))
+    }
+
     // One bounded transaction; every binding (including pending work) protects
     // its descriptor. This operation does not remove snapshots or ledger history.
     pub(super) fn prune_smtp_revisions(
@@ -748,6 +787,7 @@ impl Store {
             through,
             observed_at,
             SmtpPlan {
+                providers: std::collections::HashMap::new(),
                 revisions: std::collections::HashMap::new(),
                 destinations: &[],
                 messages: std::collections::HashMap::new(),
@@ -764,7 +804,7 @@ impl Store {
         through: &str,
         observed_at: i64,
     ) -> Result<(), StorageError> {
-        self.persist_prepared(preparation, None, cluster, through, observed_at)
+        self.persist_prepared(preparation, None, None, cluster, through, observed_at)
     }
 
     pub(super) fn persist_prepared_revisions<'a>(
@@ -775,13 +815,39 @@ impl Store {
         through: &str,
         observed_at: i64,
     ) -> Result<(), StorageError> {
-        self.persist_prepared(preparation, Some(revisions), cluster, through, observed_at)
+        self.persist_prepared(
+            preparation,
+            Some(revisions),
+            None,
+            cluster,
+            through,
+            observed_at,
+        )
+    }
+
+    pub(super) fn persist_prepared_profiles<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        revisions: SmtpRevisions<'a>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+    ) -> Result<(), StorageError> {
+        self.persist_prepared(
+            preparation,
+            Some(revisions.rendering),
+            Some(revisions.providers),
+            cluster,
+            through,
+            observed_at,
+        )
     }
 
     fn persist_prepared<'a>(
         &mut self,
         preparation: PollPreparation<'a>,
         revisions: Option<&'a [super::smtp_revision::Descriptor]>,
+        providers: Option<&'a [super::smtp_provider_revision::Descriptor]>,
         cluster: &str,
         through: &str,
         observed_at: i64,
@@ -809,6 +875,7 @@ impl Store {
             return Err(StorageError::InvalidInput);
         }
         let mut smtp = SmtpPlan {
+            providers: std::collections::HashMap::new(),
             revisions: std::collections::HashMap::new(),
             destinations: smtp_destinations,
             messages: std::collections::HashMap::new(),
@@ -835,6 +902,22 @@ impl Store {
                     .ok_or(StorageError::InvalidInput)?;
                 let envelope = message.message.envelope();
                 if revision.envelope() != (envelope.0.as_str(), envelope.1.as_str()) {
+                    return Err(StorageError::InvalidInput);
+                }
+            }
+        }
+        if let Some(providers) = providers {
+            if providers.len() != smtp.revisions.len() || providers.is_empty() {
+                return Err(StorageError::InvalidInput);
+            }
+            for provider in providers {
+                let profile = provider.profile();
+                if !smtp.revisions.contains_key(profile.destination)
+                    || smtp
+                        .providers
+                        .insert(profile.destination, provider)
+                        .is_some()
+                {
                     return Err(StorageError::InvalidInput);
                 }
             }
@@ -1012,6 +1095,7 @@ impl Store {
             through,
             observed_at,
             SmtpPlan {
+                providers: std::collections::HashMap::new(),
                 revisions: std::collections::HashMap::new(),
                 destinations: &[],
                 messages: std::collections::HashMap::new(),
@@ -1129,6 +1213,17 @@ impl Store {
                         tx.execute(
                             "INSERT INTO smtp_revision_bindings VALUES (?1,?2,?3,?4)",
                             params![event.id, destination, cluster, revision.token()],
+                        )?;
+                    }
+                    if let Some(provider) = smtp.providers.get(destination) {
+                        tx.execute("INSERT INTO smtp_provider_revisions VALUES (?1,?2,?3,?4) ON CONFLICT DO NOTHING", params![cluster,destination,provider.token(),provider.canonical()])?;
+                        let identical: bool = tx.query_row("SELECT descriptor=?4 FROM smtp_provider_revisions WHERE cluster=?1 AND destination=?2 AND revision=?3", params![cluster,destination,provider.token(),provider.canonical()], |row| row.get(0))?;
+                        if !identical {
+                            return Err(StorageError::Conflict);
+                        }
+                        tx.execute(
+                            "INSERT INTO smtp_provider_bindings VALUES (?1,?2,?3,?4)",
+                            params![event.id, destination, cluster, provider.token()],
                         )?;
                     }
                 }
@@ -1742,7 +1837,7 @@ pub(super) mod tests {
     fn future_version_is_not_reset() {
         let directory = Directory::new();
         let store = open(&directory);
-        store.db.pragma_update(None, "user_version", 4).unwrap();
+        store.db.pragma_update(None, "user_version", 5).unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
@@ -1752,7 +1847,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            4
+            5
         );
     }
 
@@ -1816,6 +1911,510 @@ pub(super) mod tests {
             smtp_destinations: &["smtp"],
             messages,
         }
+    }
+
+    fn provider(name: &str, relay: &str) -> super::super::smtp_provider_revision::Descriptor {
+        use super::super::smtp_provider_revision::{Descriptor, Profile, TlsMode};
+        Descriptor::new(&Profile {
+            destination: name,
+            relay,
+            port: 587,
+            tls: TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: &"a".repeat(64),
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        })
+        .unwrap()
+    }
+    fn provider_rendering() -> super::super::smtp_revision::Descriptor {
+        let routes = [super::super::smtp_routes::Route {
+            name: "smtp",
+            visibility: super::super::smtp_render::JobVisibility::Hidden,
+            metadata: super::super::smtp_routes::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                namespace: "fixture",
+            },
+        }];
+        let plan = super::super::smtp_routes::Plan::new(&["smtp"], &routes, 10).unwrap();
+        super::super::smtp_revision::Descriptor::from_revision_plan(&plan, "smtp").unwrap()
+    }
+    fn provider_messages(
+        events: &[super::super::lifecycle::Event],
+        descriptor: &super::super::smtp_revision::Descriptor,
+    ) -> Vec<super::super::smtp_message::Prepared> {
+        events
+            .iter()
+            .map(|event| {
+                let selected = super::super::smtp_metadata::select_revision(
+                    event,
+                    "smtp",
+                    "fixture",
+                    10,
+                    descriptor.token(),
+                )
+                .unwrap();
+                super::super::smtp_render::prepare(
+                    event,
+                    &super::super::smtp_render::Metadata {
+                        sender: "s@fixture.invalid",
+                        recipient: "r@fixture.invalid",
+                        identity: &selected.identity,
+                        timestamp: selected.timestamp,
+                    },
+                    super::super::smtp_render::JobVisibility::Hidden,
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+    #[test]
+    fn atomic_provider_profiles_reopen_and_changes_apply_only_to_new_events() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (mut candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let providers = [provider("smtp", "relay.fixture.invalid")];
+        let owned = provider_messages(&events, &rendering[0]);
+        let messages: Vec<_> = events
+            .iter()
+            .zip(&owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers,
+                },
+                "cluster",
+                "window-1",
+                10,
+            )
+            .unwrap();
+        assert_eq!(count(&store, "smtp_provider_revisions"), 1);
+        assert_eq!(count(&store, "smtp_provider_bindings"), 2);
+        assert!(store
+            .bound_smtp_provider(&event_id(&events[0]), "plain")
+            .unwrap()
+            .is_none());
+        drop(store);
+        let mut store = open(&directory);
+        for event in &events {
+            let provider = store
+                .bound_smtp_provider(&event_id(event), "smtp")
+                .unwrap()
+                .unwrap();
+            assert_eq!(provider.token(), providers[0].token());
+            assert!(provider.matches(&providers[0].profile()).unwrap());
+        }
+        let added = candidate
+            .observe_snapshot(
+                "",
+                "cluster|3|alice|s|actual|FAILED|1:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        assert_eq!(added.len(), 1);
+        let changed = [provider("smtp", "changed.fixture.invalid")];
+        let new_owned = provider_messages(&added, &rendering[0]);
+        let messages: Vec<_> = added
+            .iter()
+            .zip(&new_owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &added, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &changed,
+                },
+                "cluster",
+                "window-2",
+                20,
+            )
+            .unwrap();
+        assert_eq!(count(&store, "smtp_provider_revisions"), 2);
+        assert_eq!(count(&store, "smtp_provider_bindings"), 3);
+        assert_eq!(
+            store
+                .bound_smtp_provider(&event_id(&added[0]), "smtp")
+                .unwrap()
+                .unwrap()
+                .token(),
+            changed[0].token()
+        );
+        for (event, message) in events.iter().zip(&owned) {
+            assert_eq!(
+                store
+                    .bound_smtp_provider(&event_id(event), "smtp")
+                    .unwrap()
+                    .unwrap()
+                    .token(),
+                providers[0].token()
+            );
+            assert_eq!(
+                store
+                    .frozen_smtp(&event_id(event), "smtp")
+                    .unwrap()
+                    .unwrap()
+                    .data(),
+                message.data()
+            );
+        }
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &[], &[]),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &changed,
+                },
+                "cluster",
+                "window-3",
+                30,
+            )
+            .unwrap();
+        assert_eq!(count(&store, "smtp_provider_revisions"), 2);
+    }
+    #[test]
+    fn provider_preparation_requires_complete_unique_matching_routes() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let owned = provider_messages(&events, &rendering[0]);
+        let messages: Vec<_> = events
+            .iter()
+            .zip(&owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        for providers in [
+            vec![],
+            vec![provider("other", "relay.fixture.invalid")],
+            vec![
+                provider("smtp", "relay.fixture.invalid"),
+                provider("smtp", "relay.fixture.invalid"),
+            ],
+        ] {
+            assert!(matches!(
+                store.persist_prepared_profiles(
+                    atomic_plan(&candidate, &events, &messages),
+                    SmtpRevisions {
+                        rendering: &rendering,
+                        providers: &providers
+                    },
+                    "cluster",
+                    "window",
+                    10
+                ),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        assert_eq!(count(&store, "jobs"), 0);
+        assert_eq!(count(&store, "smtp_provider_revisions"), 0);
+    }
+    #[test]
+    fn provider_binding_and_checkpoint_failures_roll_back_entire_preparation() {
+        for table in ["smtp_provider_bindings", "checkpoints"] {
+            let directory = Directory::new();
+            let mut store = open(&directory);
+            let (candidate, events) = atomic_candidate();
+            let rendering = [provider_rendering()];
+            let providers = [provider("smtp", "relay.fixture.invalid")];
+            let owned = provider_messages(&events, &rendering[0]);
+            let messages: Vec<_> = events
+                .iter()
+                .zip(&owned)
+                .map(|(event, message)| SmtpPreparation {
+                    event,
+                    destination: "smtp",
+                    message,
+                })
+                .collect();
+            store.db.execute_batch(&format!("CREATE TRIGGER reject_provider BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture'); END;")).unwrap();
+            assert!(matches!(
+                store.persist_prepared_profiles(
+                    atomic_plan(&candidate, &events, &messages),
+                    SmtpRevisions {
+                        rendering: &rendering,
+                        providers: &providers
+                    },
+                    "cluster",
+                    "window",
+                    10
+                ),
+                Err(StorageError::Database(_))
+            ));
+            for table in [
+                "jobs",
+                "events",
+                "outbox",
+                "smtp_messages",
+                "smtp_render_revisions",
+                "smtp_revision_bindings",
+                "smtp_provider_revisions",
+                "smtp_provider_bindings",
+                "checkpoints",
+            ] {
+                assert_eq!(count(&store, table), 0);
+            }
+            drop(store);
+            let mut store = open(&directory);
+            assert!(store.restore("cluster", 10).unwrap().1.is_none());
+            store
+                .db
+                .execute_batch("DROP TRIGGER reject_provider;")
+                .unwrap();
+            store
+                .persist_prepared_profiles(
+                    atomic_plan(&candidate, &events, &messages),
+                    SmtpRevisions {
+                        rendering: &rendering,
+                        providers: &providers,
+                    },
+                    "cluster",
+                    "window",
+                    20,
+                )
+                .unwrap();
+            assert_eq!(count(&store, "smtp_provider_bindings"), 2);
+        }
+    }
+    #[test]
+    fn provider_conflicts_and_malformed_or_missing_references_fail_closed() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let providers = [provider("smtp", "relay.fixture.invalid")];
+        let owned = provider_messages(&events, &rendering[0]);
+        let messages: Vec<_> = events
+            .iter()
+            .zip(&owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        store
+            .db
+            .execute(
+                "INSERT INTO smtp_provider_revisions VALUES ('cluster','smtp',?1,?2)",
+                params![providers[0].token(), b"conflict".as_slice()],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.persist_prepared_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers
+                },
+                "cluster",
+                "window",
+                10
+            ),
+            Err(StorageError::Conflict)
+        ));
+        assert_eq!(count(&store, "events"), 0);
+        assert_eq!(count(&store, "smtp_revision_bindings"), 0);
+        store
+            .db
+            .execute("DELETE FROM smtp_provider_revisions", [])
+            .unwrap();
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers,
+                },
+                "cluster",
+                "window",
+                10,
+            )
+            .unwrap();
+        store
+            .db
+            .execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        for bytes in [
+            vec![0; 4097],
+            b"corrupt".to_vec(),
+            provider("smtp", "other.fixture.invalid")
+                .canonical()
+                .to_vec(),
+        ] {
+            store
+                .db
+                .execute("UPDATE smtp_provider_revisions SET descriptor=?1", [bytes])
+                .unwrap();
+            assert!(matches!(
+                store.bound_smtp_provider(&event_id(&events[0]), "smtp"),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        store
+            .db
+            .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM smtp_provider_revisions;")
+            .unwrap();
+        assert!(matches!(
+            store.bound_smtp_provider(&event_id(&events[0]), "smtp"),
+            Err(StorageError::InvalidInput)
+        ));
+    }
+    #[test]
+    fn provider_foreign_keys_enforce_cluster_scope_and_completed_cleanup_cascades() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let providers = [provider("smtp", "relay.fixture.invalid")];
+        let owned = provider_messages(&events, &rendering[0]);
+        let messages: Vec<_> = events
+            .iter()
+            .zip(&owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers,
+                },
+                "cluster",
+                "window",
+                10,
+            )
+            .unwrap();
+        assert!(store
+            .db
+            .execute("DELETE FROM smtp_provider_revisions", [])
+            .is_err());
+        assert!(store
+            .db
+            .execute("UPDATE smtp_provider_bindings SET cluster='other'", [])
+            .is_err());
+        assert!(store
+            .db
+            .execute(
+                "UPDATE smtp_provider_bindings SET revision=?1",
+                ["a".repeat(64)]
+            )
+            .is_err());
+        for item in store.due_deliveries("cluster", 10, 10).unwrap() {
+            store
+                .record_delivery(&item, DeliveryOutcome::Success, 10, None)
+                .unwrap();
+        }
+        let cleanup = store.retention_plan("cluster", 30, 5, 10).unwrap();
+        store
+            .apply_retention("cluster", 30, 5, 10, &cleanup)
+            .unwrap();
+        assert_eq!(count(&store, "smtp_provider_bindings"), 0);
+        assert_eq!(count(&store, "smtp_revision_bindings"), 0);
+        assert_eq!(count(&store, "smtp_messages"), 0);
+        assert_eq!(count(&store, "smtp_provider_revisions"), 1);
+        assert_eq!(count(&store, "events"), 2);
+    }
+    #[test]
+    fn provider_upgrade_preserves_legacy_and_render_only_snapshots_without_backfill() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let rendering = revision("fixture");
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &smtp_message("legacy"), &rendering)
+            .unwrap();
+        store.db.execute_batch("DROP TABLE smtp_provider_bindings; DROP TABLE smtp_provider_revisions; DROP INDEX smtp_render_binding_scope; PRAGMA user_version=3; CREATE TABLE smtp_provider_bindings(blocker INTEGER);").unwrap();
+        drop(store);
+        assert!(matches!(
+            Store::open(&directory.path(), Duration::from_millis(50)),
+            Err(StorageError::Database(_))
+        ));
+        let db = Connection::open(directory.path()).unwrap();
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('smtp_provider_revisions','smtp_render_binding_scope')",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+        db.execute_batch("DROP TABLE smtp_provider_bindings;")
+            .unwrap();
+        drop(db);
+        let mut store = open(&directory);
+        assert_eq!(
+            store
+                .db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        assert!(store
+            .bound_smtp_provider(&item.event_id, "smtp")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .data(),
+            smtp_message("legacy").data()
+        );
+        let (candidate, _) = store.restore("cluster", 10).unwrap();
+        let rendering = [provider_rendering()];
+        let providers = [provider("smtp", "relay.fixture.invalid")];
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &[], &[]),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers,
+                },
+                "cluster",
+                "zz-window",
+                20,
+            )
+            .unwrap();
+        assert!(store
+            .bound_smtp_provider(&item.event_id, "smtp")
+            .unwrap()
+            .is_none());
+        assert_eq!(count(&store, "smtp_provider_revisions"), 0);
+        store
+            .db
+            .execute("DELETE FROM smtp_revision_bindings", [])
+            .unwrap();
+        assert!(store
+            .bound_smtp_provider(&item.event_id, "smtp")
+            .unwrap()
+            .is_none());
+        assert_eq!(count(&store, "smtp_messages"), 1);
     }
 
     #[test]
@@ -2320,7 +2919,7 @@ pub(super) mod tests {
         store
             .freeze_smtp(&item.event_id, "smtp", &smtp_message("legacy"))
             .unwrap();
-        store.db.execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; PRAGMA user_version=2; CREATE TABLE smtp_revision_bindings(blocker INTEGER);").unwrap();
+        store.db.execute_batch("DROP TABLE smtp_provider_bindings; DROP TABLE smtp_provider_revisions; DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; PRAGMA user_version=2; CREATE TABLE smtp_revision_bindings(blocker INTEGER);").unwrap();
         drop(store);
         assert!(Store::open(&directory.path(), Duration::from_millis(50)).is_err());
         let db = Connection::open(directory.path()).unwrap();
@@ -2558,7 +3157,7 @@ pub(super) mod tests {
             .unwrap();
         store
             .db
-            .execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1;")
+            .execute_batch("DROP TABLE smtp_provider_bindings; DROP TABLE smtp_provider_revisions; DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1;")
             .unwrap();
         drop(store);
         let mut store = open(&directory);
@@ -2569,7 +3168,7 @@ pub(super) mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            3
+            4
         );
         assert!(store
             .frozen_smtp(&item.event_id, &item.destination)
@@ -2588,7 +3187,7 @@ pub(super) mod tests {
         let directory = Directory::new();
         let mut store = open(&directory);
         let item = smtp_seed(&mut store);
-        store.db.execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1; CREATE TABLE smtp_messages(blocker INTEGER);").unwrap();
+        store.db.execute_batch("DROP TABLE smtp_provider_bindings; DROP TABLE smtp_provider_revisions; DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1; CREATE TABLE smtp_messages(blocker INTEGER);").unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
