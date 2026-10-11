@@ -31,7 +31,7 @@ rcgen = "=0.12.1"
 time = "=0.3.47"
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 # Explicit formatting dependency version for reproducible private TLS fixtures.
-powerfmt = { version = "=0.2.0", default-features = false }
+powerfmt = { version = "=0.2.1", default-features = false }
 
 # Private process-boundary acceptance harness; not an installed helper binary.
 [[test]]
