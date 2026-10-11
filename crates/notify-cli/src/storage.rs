@@ -85,6 +85,26 @@ impl FrozenMessage {
     }
 }
 
+// No Debug/Clone: this batch borrows validated private message buffers.
+pub(super) struct SmtpPreparation<'a> {
+    pub(super) event: &'a super::lifecycle::Event,
+    pub(super) destination: &'a str,
+    pub(super) message: &'a super::smtp_message::Prepared,
+}
+
+pub(super) struct PollPreparation<'a> {
+    pub(super) candidate: &'a super::lifecycle::Reconciler,
+    pub(super) deliverable: &'a [super::lifecycle::Event],
+    pub(super) destinations: &'a [&'a str],
+    pub(super) smtp_destinations: &'a [&'a str],
+    pub(super) messages: &'a [SmtpPreparation<'a>],
+}
+
+struct SmtpPlan<'a> {
+    destinations: &'a [&'a str],
+    messages: std::collections::HashMap<(String, &'a str), &'a super::smtp_message::Prepared>,
+}
+
 pub(super) struct Store {
     db: Connection,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -606,6 +626,90 @@ impl Store {
         through: &str,
         observed_at: i64,
     ) -> Result<(), StorageError> {
+        self.persist_candidate(
+            PollPreparation {
+                candidate,
+                deliverable,
+                destinations,
+                smtp_destinations: &[],
+                messages: &[],
+            },
+            cluster,
+            through,
+            observed_at,
+            SmtpPlan {
+                destinations: &[],
+                messages: std::collections::HashMap::new(),
+            },
+        )
+    }
+
+    // Rendering occurs before this call; all eligible new pairs commit together.
+    // Historical events retain their routes and never consume new preparations.
+    pub(super) fn persist_prepared_reconciler(
+        &mut self,
+        preparation: PollPreparation<'_>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+    ) -> Result<(), StorageError> {
+        let PollPreparation {
+            candidate,
+            deliverable,
+            destinations,
+            smtp_destinations,
+            messages,
+        } = preparation;
+        let mut routes = std::collections::HashSet::new();
+        let mut smtp_routes = std::collections::HashSet::new();
+        let mut deliveries = std::collections::HashSet::new();
+        if destinations
+            .iter()
+            .any(|name| name.is_empty() || !routes.insert(*name))
+            || smtp_destinations
+                .iter()
+                .any(|name| !routes.contains(name) || !smtp_routes.insert(*name))
+            || deliverable
+                .iter()
+                .any(|event| !candidate.emitted.contains(event) || !deliveries.insert(event))
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        let mut smtp = SmtpPlan {
+            destinations: smtp_destinations,
+            messages: std::collections::HashMap::new(),
+        };
+        for message in messages {
+            if !deliveries.contains(message.event)
+                || !smtp_routes.contains(message.destination)
+                || smtp
+                    .messages
+                    .insert(
+                        (event_id(message.event), message.destination),
+                        message.message,
+                    )
+                    .is_some()
+            {
+                return Err(StorageError::InvalidInput);
+            }
+        }
+        self.persist_candidate(preparation, cluster, through, observed_at, smtp)
+    }
+
+    fn persist_candidate(
+        &mut self,
+        preparation: PollPreparation<'_>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+        smtp: SmtpPlan<'_>,
+    ) -> Result<(), StorageError> {
+        let PollPreparation {
+            candidate,
+            deliverable,
+            destinations,
+            ..
+        } = preparation;
         let jobs: Vec<_> = candidate
             .latest
             .iter()
@@ -639,7 +743,7 @@ impl Store {
                 },
             })
             .collect();
-        self.record_poll(&jobs, &events, cluster, through, observed_at)
+        self.record_poll_with_smtp(&jobs, &events, cluster, through, observed_at, smtp)
     }
 
     // A read transaction gives jobs/events/checkpoint one consistent snapshot.
@@ -732,6 +836,7 @@ impl Store {
 
     // observed_at is Unix seconds in this private experiment. Network delivery
     // is outside this transaction. Replay does not silently change frozen routes.
+    #[cfg(test)]
     fn record_poll(
         &mut self,
         jobs: &[Job<'_>],
@@ -739,6 +844,28 @@ impl Store {
         cluster: &str,
         through: &str,
         observed_at: i64,
+    ) -> Result<(), StorageError> {
+        self.record_poll_with_smtp(
+            jobs,
+            events,
+            cluster,
+            through,
+            observed_at,
+            SmtpPlan {
+                destinations: &[],
+                messages: std::collections::HashMap::new(),
+            },
+        )
+    }
+
+    fn record_poll_with_smtp<'a>(
+        &mut self,
+        jobs: &[Job<'_>],
+        events: &[Event<'a>],
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+        mut smtp: SmtpPlan<'a>,
     ) -> Result<(), StorageError> {
         if observed_at < 0
             || cluster.is_empty()
@@ -822,7 +949,22 @@ impl Store {
                     "INSERT INTO outbox VALUES (?1,?2,'pending',?3)",
                     params![event.id, destination, observed_at],
                 )?;
+                if smtp.destinations.contains(destination) {
+                    let message = smtp
+                        .messages
+                        .remove(&(event.id.to_owned(), *destination))
+                        .ok_or(StorageError::InvalidInput)?;
+                    let (sender, recipient) = message.envelope();
+                    tx.execute(
+                        "INSERT INTO smtp_messages VALUES (?1,?2,?3,?4,?5)",
+                        params![event.id, destination, sender, recipient, message.data()],
+                    )?;
+                }
             }
+        }
+        // Extra/historical preparations must not silently overwrite stored bytes.
+        if !smtp.messages.is_empty() {
+            return Err(StorageError::InvalidInput);
         }
         tx.execute(
             "INSERT INTO checkpoints VALUES (?1,?2) ON CONFLICT(cluster)
@@ -1473,6 +1615,366 @@ pub(super) mod tests {
         assert_eq!(count(&store, "events"), 0);
         assert_eq!(count(&store, "checkpoints"), 0);
     }
+
+    fn atomic_candidate() -> (
+        super::super::lifecycle::Reconciler,
+        Vec<super::super::lifecycle::Event>,
+    ) {
+        let mut candidate = super::super::lifecycle::Reconciler::with_capacity(10);
+        let events = candidate
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0\ncluster|2|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        (candidate, events)
+    }
+    fn atomic_plan<'a>(
+        candidate: &'a super::super::lifecycle::Reconciler,
+        events: &'a [super::super::lifecycle::Event],
+        messages: &'a [SmtpPreparation<'a>],
+    ) -> PollPreparation<'a> {
+        PollPreparation {
+            candidate,
+            deliverable: events,
+            destinations: &["plain", "smtp"],
+            smtp_destinations: &["smtp"],
+            messages,
+        }
+    }
+
+    #[test]
+    fn atomic_smtp_poll_commits_mixed_routes_and_preserves_replay_after_reopen() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let first = smtp_message("first\n.\n.original");
+        let second = smtp_message("second");
+        let other = super::super::smtp_message::prepare(
+            "s@fixture.invalid",
+            "other@fixture.invalid",
+            "other",
+            "alternate",
+            "other route",
+            0,
+        )
+        .unwrap();
+        let messages = [
+            SmtpPreparation {
+                event: &events[0],
+                destination: "smtp",
+                message: &first,
+            },
+            SmtpPreparation {
+                event: &events[1],
+                destination: "smtp",
+                message: &second,
+            },
+            SmtpPreparation {
+                event: &events[0],
+                destination: "smtp-two",
+                message: &other,
+            },
+            SmtpPreparation {
+                event: &events[1],
+                destination: "smtp-two",
+                message: &other,
+            },
+        ];
+        let mut initial = atomic_plan(&candidate, &events, &messages);
+        initial.destinations = &["plain", "smtp", "smtp-two"];
+        initial.smtp_destinations = &["smtp", "smtp-two"];
+        store
+            .persist_prepared_reconciler(initial, "cluster", "window-1", 10)
+            .unwrap();
+        for (table, expected) in [
+            ("jobs", 2),
+            ("events", 2),
+            ("outbox", 6),
+            ("smtp_messages", 4),
+            ("checkpoints", 1),
+        ] {
+            assert_eq!(count(&store, table), expected);
+        }
+        let item = store
+            .due_deliveries("cluster", 10, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "smtp" && item.event == events[0])
+            .unwrap();
+        store
+            .record_delivery(&item, DeliveryOutcome::TransientFailure, 20, Some(25))
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        for (event, expected) in [(&events[0], &first), (&events[1], &second)] {
+            let frozen = store
+                .frozen_smtp(&event_id(event), "smtp")
+                .unwrap()
+                .unwrap();
+            assert!(frozen.data() == expected.data());
+            assert!(frozen.envelope() == ("s@fixture.invalid", "r@fixture.invalid"));
+            let alternate = store
+                .frozen_smtp(&event_id(event), "smtp-two")
+                .unwrap()
+                .unwrap();
+            assert!(alternate.data() == other.data());
+            assert!(alternate.envelope() == ("s@fixture.invalid", "other@fixture.invalid"));
+            assert!(store
+                .frozen_smtp(&event_id(event), "plain")
+                .unwrap()
+                .is_none());
+        }
+        let (restored, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert_eq!(restored.emitted, candidate.emitted);
+        assert_eq!(checkpoint.as_deref(), Some("window-1"));
+        let changed = smtp_message("changed");
+        let replacements = [SmtpPreparation {
+            event: &events[0],
+            destination: "smtp",
+            message: &changed,
+        }];
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&candidate, &events, &replacements),
+                "cluster",
+                "window-2",
+                30
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        // Replaying a recorded event needs no message and never changes its routes.
+        let mut replay = atomic_plan(&candidate, &events, &[]);
+        replay.destinations = &["new-smtp"];
+        replay.smtp_destinations = &["new-smtp"];
+        store
+            .persist_prepared_reconciler(replay, "cluster", "window-2", 30)
+            .unwrap();
+        assert_eq!(count(&store, "outbox"), 6);
+        assert_eq!(count(&store, "smtp_messages"), 4);
+        let retry = store
+            .due_deliveries("cluster", 25, 10)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.event_id == item.event_id && row.destination == "smtp")
+            .unwrap();
+        assert_eq!(retry.attempt_number, 2);
+        assert!(
+            store
+                .frozen_smtp(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .data()
+                == first.data()
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT next_attempt_at FROM outbox WHERE event_id=?1 AND destination='smtp'",
+                    [&item.event_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            25
+        );
+    }
+
+    #[test]
+    fn atomic_smtp_missing_extra_duplicate_and_invalid_routes_leave_no_state() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let message = smtp_message("original");
+        let pair = |event, destination| SmtpPreparation {
+            event,
+            destination,
+            message: &message,
+        };
+        for case in 0..9 {
+            let mut messages = vec![pair(&events[0], "smtp"), pair(&events[1], "smtp")];
+            match case {
+                0 => messages.clear(),
+                1 => {
+                    messages.pop();
+                }
+                2 => messages.push(pair(&events[0], "smtp")),
+                3 => messages[0].destination = "plain",
+                _ => (),
+            }
+            let mut plan = atomic_plan(&candidate, &events, &messages);
+            match case {
+                4 => plan.destinations = &["smtp", "smtp"],
+                5 => plan.destinations = &[""],
+                6 => plan.smtp_destinations = &["absent"],
+                7 => plan.smtp_destinations = &["smtp", "smtp"],
+                8 => {
+                    plan.destinations = &["smtp", "smtp-two"];
+                    plan.smtp_destinations = &["smtp", "smtp-two"];
+                }
+                _ => (),
+            }
+            assert!(matches!(
+                store.persist_prepared_reconciler(plan, "cluster", "window", 10),
+                Err(StorageError::InvalidInput)
+            ));
+            for table in ["jobs", "events", "outbox", "smtp_messages", "checkpoints"] {
+                assert_eq!(count(&store, table), 0);
+            }
+        }
+        let empty = super::super::lifecycle::Reconciler::with_capacity(10);
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&empty, &events, &[]),
+                "cluster",
+                "window",
+                10
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        let duplicate = [events[0].clone(), events[0].clone()];
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&candidate, &duplicate, &[]),
+                "cluster",
+                "window",
+                10
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        let extra = [pair(&events[0], "smtp")];
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&candidate, &[], &extra),
+                "cluster",
+                "window",
+                10
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+    }
+
+    #[test]
+    fn atomic_smtp_late_failures_preserve_previous_poll_and_allow_restart_retry() {
+        for table in ["smtp_messages", "checkpoints"] {
+            let directory = Directory::new();
+            let mut store = open(&directory);
+            let mut baseline = super::super::lifecycle::Reconciler::with_capacity(10);
+            let suppressed = baseline
+                .observe_snapshot("1|alice|s|estimate|PENDING", "", "cluster", "alice", false)
+                .unwrap();
+            store
+                .persist_reconciler(&baseline, &suppressed, &["plain"], "cluster", "window-0", 9)
+                .unwrap();
+            let (candidate, events) = atomic_candidate();
+            let message = smtp_message("original");
+            let messages = events
+                .iter()
+                .map(|event| SmtpPreparation {
+                    event,
+                    destination: "smtp",
+                    message: &message,
+                })
+                .collect::<Vec<_>>();
+            let condition = if table == "smtp_messages" {
+                "WHEN (SELECT COUNT(*) FROM smtp_messages)>0"
+            } else {
+                ""
+            };
+            store.db.execute_batch(&format!("CREATE TRIGGER stop_preparation BEFORE INSERT ON {table} {condition} BEGIN SELECT RAISE(ABORT,'private-fixture'); END;")).unwrap();
+            assert!(matches!(
+                store.persist_prepared_reconciler(
+                    atomic_plan(&candidate, &events, &messages),
+                    "cluster",
+                    "window-1",
+                    10
+                ),
+                Err(StorageError::Database(_))
+            ));
+            drop(store);
+            let mut store = open(&directory);
+            assert_eq!(count(&store, "jobs"), 1);
+            for table in ["events", "outbox", "smtp_messages", "delivery_attempts"] {
+                assert_eq!(count(&store, table), 0);
+            }
+            let (restored, checkpoint) = store.restore("cluster", 10).unwrap();
+            assert_eq!(restored.latest, baseline.latest);
+            assert_eq!(checkpoint.as_deref(), Some("window-0"));
+            store
+                .db
+                .execute_batch("DROP TRIGGER stop_preparation")
+                .unwrap();
+            store
+                .persist_prepared_reconciler(
+                    atomic_plan(&candidate, &events, &messages),
+                    "cluster",
+                    "window-1",
+                    10,
+                )
+                .unwrap();
+            assert_eq!(count(&store, "smtp_messages"), 2);
+            assert_eq!(count(&store, "outbox"), 4);
+            assert_eq!(
+                store.restore("cluster", 10).unwrap().1.as_deref(),
+                Some("window-1")
+            );
+        }
+    }
+
+    #[test]
+    fn atomic_smtp_does_not_backfill_legacy_events_or_regress_checkpoint() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        store
+            .persist_reconciler(&candidate, &events, &["smtp"], "cluster", "window-1", 10)
+            .unwrap();
+        let message = smtp_message("original");
+        let messages = events
+            .iter()
+            .map(|event| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message: &message,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&candidate, &events, &messages),
+                "cluster",
+                "window-2",
+                20
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        assert!(matches!(
+            store.persist_prepared_reconciler(
+                atomic_plan(&candidate, &events, &[]),
+                "cluster",
+                "window-0",
+                20
+            ),
+            Err(StorageError::Conflict)
+        ));
+        store
+            .persist_prepared_reconciler(
+                atomic_plan(&candidate, &events, &[]),
+                "cluster",
+                "window-2",
+                20,
+            )
+            .unwrap();
+        assert_eq!(count(&store, "smtp_messages"), 0);
+        assert_eq!(count(&store, "outbox"), 2);
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("window-2")
+        );
+    }
+
     fn smtp_seed(store: &mut Store) -> DueDelivery {
         let mut reconciler = super::super::lifecycle::Reconciler::with_capacity(10);
         let events = reconciler

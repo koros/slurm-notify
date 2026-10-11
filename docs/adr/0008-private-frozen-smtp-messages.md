@@ -64,3 +64,13 @@ No dependencies, schema, runtime defaults or public interfaces changed in this
 increment. Next: design atomic event/outbox/snapshot preparation, then event
 rendering and route revision semantics. Public persistence review, credential
 lookup, real relay/cluster validation, licensing and activation remain pending.
+
+
+## Subsequent atomic preparation
+
+[ADR 0010](0010-private-atomic-smtp-poll-preparation.md) adds a separate private
+prepared poll path. Explicit new SMTP event/destination pairs commit their initial
+snapshot in the same transaction as jobs, ledger, outbox and checkpoint. Historical
+routes/messages and legacy missing snapshots are not backfilled by that path.
+Standalone freeze_smtp remains a private legacy/fixture operation; production
+scheduler preparation and runtime activation are still pending.

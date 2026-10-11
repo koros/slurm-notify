@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private atomic poll preparation committing jobs, lifecycle ledger, mixed outbox routes, per-destination frozen SMTP messages and checkpoint together; missing/extra preparation rejection, late-write rollback, replay/legacy preservation and owned SMTP restart acceptance.
+
 - Separate bounded private frozen SMTP child frame, exact stored envelope/DATA submission through retry/restart, lost-result replay, and missing/corrupt snapshot blocking before connection.
 
 - Private version-2 frozen SMTP envelope/DATA storage with immutable preparation, bounded loads, version-1 upgrade, rollback/corruption checks and exact retry/reopen preservation.

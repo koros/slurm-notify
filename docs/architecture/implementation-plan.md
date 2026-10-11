@@ -1953,3 +1953,34 @@ fallback cleanup; earlier profiles used an incompatible LLVM format. A fresh run
 passes the unchanged 80% gate at 97.02% (8,497/8,758 Rust lines). Compiler/report
 counting changes make this denominator incomparable to earlier accumulated runs;
 no source exclusions were added. No GitHub alerts were suppressed or dismissed.
+
+
+## Subsequent increment: atomic private SMTP poll preparation
+
+ADR 0010 introduces a separate prepared storage batch with explicit SMTP route
+subset and borrowed validated per-event/destination messages. New SMTP outbox rows
+and their initial envelope/DATA snapshots commit with jobs, lifecycle ledger and
+checkpoint in one BEGIN IMMEDIATE transaction. Rendering happens before storage;
+no network/preparation callbacks execute under the transaction. Missing or unused
+preparations abort, as do invalid/duplicate routes and event/preparation keys.
+Existing private plain persistence preserves its earlier SQL failure behavior.
+
+Four tests cover mixed plain/two-SMTP routes across two events, per-route recipient
+and exact-byte preservation, retry/reopen and historical route/message immutability,
+missing/extra/duplicate/unrequested preparations, incomplete second-route messages,
+late snapshot/checkpoint failures with prior pending job and checkpoint rollback,
+restart retry, legacy missing-snapshot preservation and checkpoint regression.
+The owned TLS fixture now uses atomic preparation before temporary refusal and
+accepted-send/lost-result replay across reopen. Schema remains version 2; no
+new dependencies, public contracts or runtime defaults are introduced.
+
+Next: compose this prepared storage path with private durable scheduler polling,
+using a fallible bounded fixture preparation callback and publishing the candidate
+in memory only after commit. Event rendering/redaction, route revisions, credential
+lookup, public review, licensing, real relay/cluster validation and activation
+remain pending.
+
+Validation: shared checks pass (197 Rust tests plus one ignored helper, custom
+process acceptance, eight standalone SQLite tests and six hook tests), including
+formatting and strict Clippy. Fresh Rust line coverage passes the 80% gate at
+97.17% (8,903/9,162). No real-cluster or real-relay tests were run.

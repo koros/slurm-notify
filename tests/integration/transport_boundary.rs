@@ -1690,8 +1690,15 @@ fn owned_frozen_submission_restart() {
         let root = state_directory(&directory);
         let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
         let mut reconciler = lifecycle::Reconciler::with_capacity(10);
-        poll_fixture_with_destinations(&mut store, &mut reconciler, &["smtp"]);
-        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let events = reconciler
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
         let message = smtp_message::prepare(
             "frozen@fixture.invalid",
             "kept@fixture.invalid",
@@ -1702,8 +1709,24 @@ fn owned_frozen_submission_restart() {
         )
         .unwrap();
         store
-            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .persist_prepared_reconciler(
+                storage::PollPreparation {
+                    candidate: &reconciler,
+                    deliverable: &events,
+                    destinations: &["smtp"],
+                    smtp_destinations: &["smtp"],
+                    messages: &[storage::SmtpPreparation {
+                        event: &events[0],
+                        destination: "smtp",
+                        message: &message,
+                    }],
+                },
+                "cluster",
+                "2026-10-10T01:00:00",
+                10,
+            )
             .unwrap();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
         let snapshot = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
         let first = delivery::deliver_due_detailed(
             &mut store,
