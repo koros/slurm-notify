@@ -94,3 +94,40 @@ retry/reopen checks. Query output is synthetic; no real Slurm or relay is contac
 Next: integrate prepared polling into the private bounded polling cycle and health
 reporting/orchestration. Product event rendering/redaction, route revision semantics,
 credential lookup, public review, licensing and activation remain pending.
+
+
+## Subsequent bounded-cycle and health integration
+
+Cycles::step_prepared now wraps the prepared scheduler path with the same durable
+restoration, UTC window planning, budget accounting and health recording as plain
+cycles. Separate fixture hooks provide query/preparation callbacks, explicit SMTP
+subset and message-count limit; cycle destinations remain authoritative. Shared
+step helpers keep plain-cycle behavior unchanged. Cancellation and exhaustion
+precede restoration/query/preparation and do not consume budget; an attempted
+failure consumes one cycle.
+
+Static private health categories distinguish Preparation and PreparationLimit.
+Invalid prepared settings map to existing InvalidRequest; scheduler, storage and
+window failures retain their existing health categories. Failed preparation or
+atomic persistence preserves the durable checkpoint, so health reports age/stale
+status from the previous committed poll. A successful cycle resets the failure
+streak and refreshes the checkpoint. Restart health uses the existing durable
+checkpoint rather than assuming a recent poll succeeded.
+
+Three tests cover prior checkpoint age/staleness after preparation failure,
+reopened successful recovery without changing an earlier frozen payload, explicit
+message limits before callbacks, cancellation/exhaustion, finite budget consumption,
+invalid route/query/storage error categories, rollback and failure-streak reset.
+The owned TLS submission fixture now starts with a prepared cycle (including
+restore/window planning) before atomic commit, child send, refusal/lost-result
+retry and reopen. No production entrypoint or public status contract is activated.
+
+Synchronous fixture preparation still has count/message bounds rather than an
+interruptible renderer deadline. Cancellation is checked before starting a cycle;
+this increment does not interrupt in-flight query or preparation work. Schema,
+dependencies, runtime defaults and public interfaces are unchanged.
+
+Next: wire prepared cycle selection into private delivery/retention/health
+orchestration, retaining existing cancellation and partial-progress behavior.
+Event rendering/redaction, route revision, credentials, public review, licensing
+and real-cluster/runtime activation remain pending.

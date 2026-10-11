@@ -2018,3 +2018,35 @@ Validation: shared checks pass (201 Rust tests plus one ignored helper, custom
 process acceptance, eight standalone SQLite tests and six hook tests), including
 formatting and strict Clippy. Fresh Rust line coverage passes the unchanged 80%
 gate at 97.17% (9,217/9,485). No real-cluster or real-relay tests were run.
+
+
+## Subsequent increment: private prepared cycle and health integration
+
+Prepared SMTP cycle steps now share durable restoration, accounting-window
+planning, finite budget consumption and health bookkeeping with plain cycles.
+Separate fixture hooks select the SMTP subset and explicit maximum messages;
+cycle destinations stay authoritative. No new production routing/defaults are
+introduced. Static Preparation and PreparationLimit health categories distinguish
+local message failure from exhausted message capacity. Existing invalid request,
+query, storage and window failure mappings remain intact.
+
+Three tests verify checkpoint age/staleness after preparation failure, reopened
+success and preserved earlier frozen bytes, callback-free message-limit rejection,
+cancelled/exhausted steps, consumed failure budget, invalid route/query/storage
+categories, rollback and failure-streak reset. Owned SMTP child acceptance now
+begins with a prepared cycle before atomic storage and frozen refusal/lost-result
+retry/reopen. Shared step helpers preserve existing plain cycle behavior.
+
+No schema, dependencies, public contracts or runtime defaults changed. Preparation
+is synchronous and count/message-bounded; existing pre-cycle cancellation does not
+interrupt in-flight queries or an arbitrary blocked callback.
+
+Next: integrate prepared cycles into private delivery/retention/health orchestration
+with its existing cancellation and partial-progress policy. Event rendering/redaction,
+route revisions, credentials, public review, licensing, real relay/cluster validation
+and activation remain pending.
+
+Validation: shared checks pass (204 Rust tests plus one ignored helper, custom
+process acceptance, eight standalone SQLite tests and six hook tests), including
+formatting and strict Clippy. Fresh Rust line coverage passes the unchanged 80%
+gate at 97.12% (9,448/9,728). No real-cluster or real-relay tests were run.

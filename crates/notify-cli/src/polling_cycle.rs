@@ -25,6 +25,8 @@ pub(super) enum Error {
     Storage(StorageError),
     Window(accounting_window::Error),
     Poll(DurablePollError),
+    Preparation,
+    PreparationLimit,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -42,6 +44,8 @@ pub(super) enum Failure {
     AccountingQuery,
     Reconciliation,
     InvalidRequest,
+    Preparation,
+    PreparationLimit,
 }
 
 #[derive(Default)]
@@ -127,6 +131,14 @@ pub(super) struct TickReport {
     pub(super) delivery: Option<Result<super::delivery::BatchReport, StageError>>,
     pub(super) cleanup: Option<Result<usize, StageError>>,
     pub(super) health: Option<Result<HealthReport, StageError>>,
+}
+
+// Separate private fixture hooks: cycle destinations stay authoritative.
+pub(super) struct PreparedHooks<'a, Q, P> {
+    pub(super) smtp_destinations: &'a [&'a str],
+    pub(super) max_messages: usize,
+    pub(super) query: Q,
+    pub(super) prepare: P,
 }
 
 pub(super) struct Cycles {
@@ -442,7 +454,86 @@ impl Cycles {
         now: i64,
         query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
     ) -> Result<Outcome, Error> {
-        let result = self.step_inner(settings, store, cancelled, now, query);
+        self.step_using(
+            settings,
+            store,
+            cancelled,
+            now,
+            |request, reconciler, store| {
+                poll_durable_with(
+                    request,
+                    reconciler,
+                    store,
+                    settings.destinations,
+                    now,
+                    query,
+                )
+                .map_err(Error::Poll)
+            },
+        )
+    }
+
+    pub(super) fn step_prepared<Q, P>(
+        &mut self,
+        settings: &Settings<'_>,
+        store: &mut Store,
+        cancelled: bool,
+        now: i64,
+        hooks: PreparedHooks<'_, Q, P>,
+    ) -> Result<Outcome, Error>
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        P: FnMut(&super::lifecycle::Event, &str) -> Result<super::smtp_message::Prepared, ()>,
+    {
+        self.step_using(
+            settings,
+            store,
+            cancelled,
+            now,
+            |request, reconciler, store| {
+                super::smtp_poll::poll_with(
+                    request,
+                    reconciler,
+                    store,
+                    &super::smtp_poll::Settings {
+                        destinations: settings.destinations,
+                        smtp_destinations: hooks.smtp_destinations,
+                        max_messages: hooks.max_messages,
+                    },
+                    now,
+                    hooks.query,
+                    hooks.prepare,
+                )
+                .map_err(|error| match error {
+                    super::smtp_poll::Error::InvalidInput => Error::Poll(DurablePollError::Poll(
+                        super::scheduler::PollError::InvalidRequest,
+                    )),
+                    super::smtp_poll::Error::Poll(error) => {
+                        Error::Poll(DurablePollError::Poll(error))
+                    }
+                    super::smtp_poll::Error::Storage(error) => {
+                        Error::Poll(DurablePollError::Storage(error))
+                    }
+                    super::smtp_poll::Error::Preparation => Error::Preparation,
+                    super::smtp_poll::Error::Limit => Error::PreparationLimit,
+                })
+            },
+        )
+    }
+
+    fn step_using(
+        &mut self,
+        settings: &Settings<'_>,
+        store: &mut Store,
+        cancelled: bool,
+        now: i64,
+        poll: impl FnOnce(
+            &PollRequest<'_>,
+            &mut super::lifecycle::Reconciler,
+            &mut Store,
+        ) -> Result<Vec<super::lifecycle::Event>, Error>,
+    ) -> Result<Outcome, Error> {
+        let result = self.step_inner(settings, store, cancelled, now, poll);
         match &result {
             Ok(Outcome::Committed { .. }) => {
                 self.health.checkpoint = Some(now);
@@ -456,6 +547,8 @@ impl Cycles {
                         Failure::Storage
                     }
                     Error::Window(_) => Failure::Window,
+                    Error::Preparation => Failure::Preparation,
+                    Error::PreparationLimit => Failure::PreparationLimit,
                     Error::Poll(DurablePollError::Poll(PollError::Active(_))) => {
                         Failure::ActiveQuery
                     }
@@ -485,7 +578,11 @@ impl Cycles {
         store: &mut Store,
         cancelled: bool,
         now: i64,
-        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        poll: impl FnOnce(
+            &PollRequest<'_>,
+            &mut super::lifecycle::Reconciler,
+            &mut Store,
+        ) -> Result<Vec<super::lifecycle::Event>, Error>,
     ) -> Result<Outcome, Error> {
         if cancelled {
             return Ok(Outcome::Cancelled);
@@ -516,15 +613,7 @@ impl Cycles {
             output_limit: settings.output_limit,
             emit_discovered: settings.emit_discovered,
         };
-        let events = poll_durable_with(
-            &request,
-            &mut reconciler,
-            store,
-            settings.destinations,
-            now,
-            query,
-        )
-        .map_err(Error::Poll)?;
+        let events = poll(&request, &mut reconciler, store)?;
         Ok(Outcome::Committed {
             window,
             events: events.len(),
@@ -536,6 +625,272 @@ impl Cycles {
 mod tests {
     use super::*;
     use crate::storage::tests::Directory;
+
+    fn smtp_message(
+        _: &super::super::lifecycle::Event,
+        _: &str,
+    ) -> Result<super::super::smtp_message::Prepared, ()> {
+        super::super::smtp_message::prepare(
+            "s@fixture.invalid",
+            "r@fixture.invalid",
+            "fixture",
+            "done",
+            "original\n.\n.dot",
+            123,
+        )
+        .map_err(|_| ())
+    }
+    fn smtp_query(command: &mut Command, _: Duration, _: usize) -> Result<String, QueryError> {
+        Ok(if command.get_program() == "squeue" {
+            ""
+        } else {
+            "cluster|1|alice|s|actual|COMPLETED|0:0"
+        }
+        .into())
+    }
+    #[test]
+    fn prepared_cycles_preserve_checkpoint_health_on_failure_then_recover_after_reopen() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        assert!(matches!(
+            cycles.step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: smtp_message
+                }
+            ),
+            Ok(Outcome::Committed { events: 1, .. })
+        ));
+        let first = store.due_deliveries("cluster", 7200, 10).unwrap().remove(0);
+        let checkpoint = store.restore("cluster", 10).unwrap().1.unwrap();
+        assert!(matches!(
+            cycles.step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7260,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: |command: &mut Command, _, _| Ok(if command.get_program() == "squeue" {
+                        ""
+                    } else {
+                        "cluster|2|alice|s|actual|COMPLETED|0:0"
+                    }
+                    .into()),
+                    prepare: |_: &super::super::lifecycle::Event, _: &str| Err(()),
+                }
+            ),
+            Err(Error::Preparation)
+        ));
+        let health = cycles
+            .report(&settings(), &mut store, 7260, 60, 3600, 10)
+            .unwrap();
+        assert_eq!(health.poll.last_failure, Some(Failure::Preparation));
+        assert_eq!(health.poll.consecutive_failures, 1);
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(60));
+        assert!(health.poll.stale);
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some(checkpoint.as_str())
+        );
+        assert_eq!(store.due_deliveries("cluster", 7260, 10).unwrap().len(), 1);
+        drop(store);
+        let mut store = open(&directory);
+        let mut restarted = Cycles::new(1).unwrap();
+        assert!(matches!(
+            restarted.step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7320,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: |command: &mut Command, _, _| Ok(if command.get_program() == "squeue" {
+                        ""
+                    } else {
+                        "cluster|2|alice|s|actual|COMPLETED|0:0"
+                    }
+                    .into()),
+                    prepare: smtp_message,
+                }
+            ),
+            Ok(Outcome::Committed { events: 1, .. })
+        ));
+        let health = restarted
+            .report(&settings(), &mut store, 7320, 60, 3600, 10)
+            .unwrap();
+        assert_eq!(health.poll.last_failure, None);
+        assert_eq!(health.poll.consecutive_failures, 0);
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(0));
+        assert!(!health.poll.stale);
+        assert_eq!(store.due_deliveries("cluster", 7320, 10).unwrap().len(), 2);
+        assert!(
+            store
+                .frozen_smtp(&first.event_id, &first.destination)
+                .unwrap()
+                .unwrap()
+                .data()
+                == smtp_message(&first.event, &first.destination)
+                    .unwrap()
+                    .data()
+        );
+    }
+    #[test]
+    fn prepared_cycle_limit_consumes_budget_but_cancellation_and_exhaustion_do_not_query() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        assert_eq!(
+            cycles
+                .step_prepared(
+                    &settings(),
+                    &mut store,
+                    true,
+                    7200,
+                    PreparedHooks {
+                        smtp_destinations: &[],
+                        max_messages: 0,
+                        query: |_: &mut Command, _, _| panic!("cancelled query"),
+                        prepare: |_: &super::super::lifecycle::Event, _: &str| panic!(
+                            "cancelled preparation"
+                        )
+                    }
+                )
+                .unwrap(),
+            Outcome::Cancelled
+        );
+        assert_eq!(cycles.remaining, 1);
+        let mut settings = settings();
+        settings.destinations = &["a", "b"];
+        assert!(matches!(
+            cycles.step_prepared(
+                &settings,
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["a", "b"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: |_: &super::super::lifecycle::Event, _: &str| panic!(
+                        "limit must precede preparation"
+                    )
+                }
+            ),
+            Err(Error::PreparationLimit)
+        ));
+        assert_eq!(cycles.remaining, 0);
+        assert_eq!(cycles.health.last_failure, Some(Failure::PreparationLimit));
+        assert!(store.restore("cluster", 10).unwrap().1.is_none());
+        assert_eq!(
+            cycles
+                .step_prepared(
+                    &settings,
+                    &mut store,
+                    false,
+                    7260,
+                    PreparedHooks {
+                        smtp_destinations: &[],
+                        max_messages: 0,
+                        query: |_: &mut Command, _, _| panic!("exhausted query"),
+                        prepare: |_: &super::super::lifecycle::Event, _: &str| panic!(
+                            "exhausted preparation"
+                        )
+                    }
+                )
+                .unwrap(),
+            Outcome::Exhausted
+        );
+        assert_eq!(cycles.health.consecutive_failures, 1);
+    }
+    #[test]
+    fn prepared_cycle_classifies_invalid_routes_query_and_storage_failures() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(4).unwrap();
+        assert!(matches!(
+            cycles.step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["absent"],
+                    max_messages: 1,
+                    query: |_: &mut Command, _, _| panic!("invalid route queried"),
+                    prepare: smtp_message
+                }
+            ),
+            Err(Error::Poll(DurablePollError::Poll(
+                super::super::scheduler::PollError::InvalidRequest
+            )))
+        ));
+        assert_eq!(cycles.health.last_failure, Some(Failure::InvalidRequest));
+        assert!(cycles
+            .step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: |_: &mut Command, _, _| Err(QueryError::Io),
+                    prepare: smtp_message
+                }
+            )
+            .is_err());
+        assert_eq!(cycles.health.last_failure, Some(Failure::ActiveQuery));
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER stop_cycle BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'private-fixture'); END;").unwrap();
+        assert!(matches!(
+            cycles.step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: smtp_message
+                }
+            ),
+            Err(Error::Poll(DurablePollError::Storage(_)))
+        ));
+        assert_eq!(cycles.health.last_failure, Some(Failure::Storage));
+        assert_eq!(cycles.health.consecutive_failures, 3);
+        assert!(store.restore("cluster", 10).unwrap().1.is_none());
+        assert!(store
+            .due_deliveries("cluster", 7200, 10)
+            .unwrap()
+            .is_empty());
+        db.execute_batch("DROP TRIGGER stop_cycle").unwrap();
+        cycles
+            .step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7260,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: smtp_message,
+                },
+            )
+            .unwrap();
+        assert_eq!(cycles.health.consecutive_failures, 0);
+    }
 
     fn settings() -> Settings<'static> {
         Settings {
