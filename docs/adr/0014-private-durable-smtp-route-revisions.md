@@ -1,0 +1,130 @@
+# ADR 0014: private durable SMTP route revisions
+
+Status: accepted direction for the next private experiments; implementation pending.
+No public configuration, storage, routing or release contract is approved here.
+
+## Problem and invariant
+
+The private outbox key is (event_id, destination). Frozen SMTP messages preserve
+sender, recipient and exact DATA, including Date and Message-ID. Changed rendering
+policy does not rewrite pending snapshots, and replay does not enqueue historical
+events for new destinations. However, destination names alone do not identify the
+rendering policy that produced a snapshot, and transport is still supplied by the
+fixture caller. A changed relay/authentication profile must never silently receive
+a previously prepared delivery intended for another profile.
+
+Bind each newly prepared SMTP outbox row to an immutable revision in the same
+transaction as jobs, event ledger, outbox, frozen message and checkpoint. The
+revision must describe the policy used for that preparation. Retries use the bound
+revision and snapshot. Current configuration is used only to prepare newly emitted
+events; it must not rewrite, rerender, relocate or backfill historical deliveries.
+A failed poll leaves neither a new binding nor a new checkpoint published.
+
+## First increment: rendering descriptor and fingerprint
+
+Start with a pure private rendering descriptor, derived only from a validated
+SMTP rendering plan. Include destination name, sender, recipient, namespace,
+Hidden/Identifier policy, renderer version, identity-selection version and the
+explicit private Message-ID domain. Exclude observed Date, event identity,
+credentials, delivery attempts and operational limits such as batch size. Those
+inputs either vary per event or do not change the rendering policy.
+
+Use a versioned domain separator and typed length-prefixed fields, with stable
+ASCII tags for enum/version values. Bound the canonical descriptor to 4,096 bytes
+before hashing or persistence. Existing stricter bounds for route names, addresses
+and namespaces still apply. Hash the complete canonical bytes with the already
+locked ring SHA-256 implementation. Use 64 lowercase hexadecimal bytes as the
+revision token. Input order of routes must not change a route's token. Semantically
+changed fields must change the token; equivalent validated inputs must not depend
+on allocation order, clocks or process-local hashing seeds.
+
+Store canonical bytes as well as the token when durability is added. If an
+existing token has different bytes, reject it as a conflict; do not overwrite it
+or rely only on a digest comparison. Tokens are fingerprints, not encryption,
+anonymity or authentication of the owned database. Descriptors contain private
+addresses and must not implement Debug/Clone or appear in errors/logs. Diagnostics
+use static categories. Existing user-owned SQLite permissions remain required.
+
+This first descriptor covers rendering only. It is insufficient to select a
+production SMTP relay or credentials. Existing loopback fixtures remain private
+transport experiments and must not be presented as durable provider routing.
+
+## Durable rendering binding
+
+A later additive private migration will introduce immutable rendering revision
+records keyed by (cluster, destination, revision), containing versioned canonical
+bytes. A binding table keyed by (event_id, destination) will reference both the
+outbox row and its revision. Validate cluster/destination coherence against the
+event and descriptor inside the prepared poll transaction. Insert revision records
+idempotently, reject descriptor conflicts, then insert the outbox snapshot/binding
+and advance the checkpoint. Publish the candidate reconciler only after commit.
+Do not modify migrations 0001/0002 or the existing outbox uniqueness rule.
+
+A new revision does not add another delivery for an existing event/destination.
+Different routing may fan out newly emitted events; already emitted or suppressed
+events keep their ledger outcome, including after completed outbox cleanup. A
+failed preparation may use updated policy when retried because it never committed.
+An in-progress batch uses one immutable validated plan throughout preparation.
+
+Preserve legacy rows and snapshots without inventing descriptor provenance. The
+revision-aware dispatch path blocks a missing binding or unknown descriptor version
+before child/network work and before recording a provider attempt. It does not
+infer a revision from current configuration or silently backfill one. Existing
+legacy fixture paths can remain available for testing migration and diagnostics;
+production activation needs an explicit legacy recovery policy and public review.
+
+Completed outbox cleanup may cascade its binding and frozen message together.
+Revision cleanup must be separate, bounded and restricted to descriptors with no
+remaining bindings, revalidated transactionally. Pending references prevent
+pruning. Event/job deduplication history and checkpoints remain intact.
+
+## Identity and dispatch policy
+
+When revision-bound preparation is integrated, version the private Message-ID
+selection algorithm and include the bound rendering revision token in its hashed
+inputs for newly prepared deliveries. Keep observation time outside the ID and
+freeze Date on commit. Existing snapshots keep their original version/bytes.
+Public domain selection remains unresolved; fixture.invalid remains test-only.
+
+Before production dispatch, add a versioned provider descriptor with explicit
+relay host/port, implicit-TLS versus STARTTLS policy, TLS server name and trust
+profile/content fingerprint, authentication identity and credential reference.
+Require strict bounded validation and bind the provider descriptor durably too.
+No passwords, tokens, private keys or credential values belong in either revision.
+Resolving a reference must preserve its bound relay/TLS/auth identity; a missing or
+incompatible profile blocks dispatch with a static error. Secret rotation under
+an unchanged approved identity may resolve the current secret. Changing a relay,
+trust policy or authentication identity requires a new provider revision.
+
+Private revision-aware dispatch callers must explicitly provide the permitted
+revision set; current destination names are not permission to retarget old work.
+An old revision may drain only when it is permitted and its bound provider profile
+is resolvable. Removed/disabled/unpermitted revisions remain pending and blocked
+without fabricated attempts, cleanup or fallback to another provider. Decisions
+to abandon or reroute pending work require a separate explicit operation and
+future public contract review. No runtime default for that decision is introduced.
+Cancellation and partial delivery progress retain the current orchestration rules.
+
+## Implementation sequence and acceptance
+
+1. Implement the bounded pure rendering descriptor/fingerprint from validated
+   plans. Test a golden canonical encoding/digest, every policy-field change,
+   equivalent route order, invalid inputs, bounds and static diagnostics.
+2. Add the private additive migration and immutable revision/binding storage.
+   Test schema upgrade, legacy preservation, token/bytes conflict, late-write
+   rollback, missing references, cluster coherence and foreign-key constraints.
+3. Connect binding to atomic prepared polling and versioned identity selection.
+   Test changed policy on new events, unchanged prior snapshots, no historical
+   backfill, suppression, failed-poll recovery and checkpoint/memory atomicity.
+4. Add revision-aware controlled delivery and bounded unreferenced cleanup.
+   Verify permitted/unpermitted revisions, legacy blocks, cancellation, partial
+   progress, retry/lost-result restart and retained pending references.
+5. Implement and verify durable provider-profile binding before production
+   routing. Loopback tests must assert the exact bound profile, not merely changed
+   ephemeral fixture endpoints. Credential integration and real relay/cluster
+   validation remain separate gated work.
+
+This milestone adds design only: schema version stays 2 and executable behavior,
+dependencies, public interfaces, hooks and coverage gates are unchanged. The next
+implementation milestone is sequence item 1, not the entire persistence/dispatch
+plan. Licensing, product privacy defaults and public review remain explicit gates.

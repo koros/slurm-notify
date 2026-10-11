@@ -2299,3 +2299,28 @@ Validation: shared checks pass with 223 Rust tests plus one ignored helper,
 expanded custom process acceptance, eight SQLite tests and six hook tests. Fresh
 Rust line coverage is 97.35% (10,654/10,944), above the unchanged 80% gate.
 No real-cluster or real-relay tests were run.
+
+### Private durable SMTP route-revision design
+
+ADR 0014 defines immutable rendering revisions bound to new SMTP outbox rows in
+the prepared poll transaction. Historical snapshots/ledger outcomes remain fixed;
+new policy applies to newly emitted events. Legacy rows retain their contents
+without inferred provenance and block the future revision-aware dispatch path.
+Explicit permitted revisions govern pending delivery; transport cannot silently
+fall back to current configuration. Bounded cleanup preserves pending references.
+
+The design separates a rendering descriptor from the required later provider
+binding for relay/TLS/auth identity and credential references. Existing fixtures
+freeze envelopes/DATA but still select transport through caller hooks, so this
+milestone does not claim durable production provider routing. Secrets never enter
+revision descriptors. Public configuration/defaults remain unapproved.
+
+Next: implement only the pure bounded canonical rendering descriptor and SHA-256
+fingerprint from validated plans, with policy-change/order/boundary tests. Later
+small milestones add an additive private schema, atomic bindings, versioned message
+identity, controlled dispatch/cleanup and durable provider profiles.
+
+This milestone changes documentation only. Schema stays 2; dependencies,
+executable behavior and the 80% coverage gate are unchanged. Production domains,
+credentials, privacy defaults, licensing, public review and real-cluster/relay
+activation remain pending.
