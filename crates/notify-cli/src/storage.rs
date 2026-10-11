@@ -3,6 +3,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
+const SMTP_MIGRATION: &str = include_str!("../../notify-storage/migrations/0002.sql");
+
 const MIGRATION: &str = include_str!("../../notify-storage/migrations/0001.sql");
 
 #[derive(Debug)]
@@ -66,6 +68,21 @@ pub(super) enum DeliveryOutcome {
     Success,
     TransientFailure,
     TerminalFailure,
+}
+
+// Frozen values never implement Debug/Clone and never contain relay credentials.
+pub(super) struct FrozenMessage {
+    sender: String,
+    recipient: String,
+    data: zeroize::Zeroizing<Vec<u8>>,
+}
+impl FrozenMessage {
+    pub(super) fn envelope(&self) -> (&str, &str) {
+        (&self.sender, &self.recipient)
+    }
+    pub(super) fn data(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 pub(super) struct Store {
@@ -147,8 +164,14 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1 => {}
+            1 | 2 => {}
             _ => return Err(StorageError::UnsupportedVersion),
+        }
+        if version < 2 {
+            if let Err(error) = db.execute_batch(SMTP_MIGRATION) {
+                let _ = db.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
         }
         Ok(Self {
             db,
@@ -515,6 +538,63 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    // Separate committed preparation before first network attempt. Existing
+    // snapshots are immutable; identical repeated preparation is idempotent.
+    pub(super) fn freeze_smtp(
+        &mut self,
+        event_id: &str,
+        destination: &str,
+        message: &super::smtp_message::Prepared,
+    ) -> Result<(), StorageError> {
+        let (sender, recipient) = message.envelope();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<bool> = tx.query_row("SELECT sender=?3 AND recipient=?4 AND data=?5 FROM smtp_messages WHERE event_id=?1 AND destination=?2", params![event_id,destination,sender,recipient,message.data()], |row| row.get(0)).optional()?;
+        if let Some(identical) = existing {
+            if !identical {
+                return Err(StorageError::Conflict);
+            }
+            tx.commit()?;
+            return Ok(());
+        }
+        let eligible: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.event_id=?1 AND o.destination=?2 AND o.status='pending' AND NOT EXISTS(SELECT 1 FROM delivery_attempts a WHERE a.event_id=o.event_id AND a.destination=o.destination))", params![event_id,destination], |row| row.get(0))?;
+        if !eligible {
+            return Err(StorageError::Conflict);
+        }
+        tx.execute(
+            "INSERT INTO smtp_messages VALUES (?1,?2,?3,?4,?5)",
+            params![event_id, destination, sender, recipient, message.data()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(super) fn frozen_smtp(
+        &self,
+        event_id: &str,
+        destination: &str,
+    ) -> Result<Option<FrozenMessage>, StorageError> {
+        // SQL bounds before BLOB materialization defend against oversized owned
+        // state. A malformed existing row must fail, never masquerade as missing.
+        type FrozenRow = (Option<String>, Option<String>, Option<Vec<u8>>);
+        let value: Option<FrozenRow> = self.db.query_row("SELECT CASE WHEN length(CAST(sender AS BLOB)) BETWEEN 1 AND 254 THEN sender END, CASE WHEN length(CAST(recipient AS BLOB)) BETWEEN 1 AND 254 THEN recipient END, CASE WHEN typeof(data)='blob' AND length(data) BETWEEN 4 AND 16384 THEN data END FROM smtp_messages WHERE event_id=?1 AND destination=?2", params![event_id,destination], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+        let Some((sender, recipient, data)) = value else {
+            return Ok(None);
+        };
+        let sender = sender.ok_or(StorageError::InvalidInput)?;
+        let recipient = recipient.ok_or(StorageError::InvalidInput)?;
+        let data = zeroize::Zeroizing::new(data.ok_or(StorageError::InvalidInput)?);
+        super::smtp_message::address(&sender).map_err(|_| StorageError::InvalidInput)?;
+        super::smtp_message::address(&recipient).map_err(|_| StorageError::InvalidInput)?;
+        super::smtp_message::validate_frozen_data(&data).map_err(|_| StorageError::InvalidInput)?;
+        Ok(Some(FrozenMessage {
+            sender,
+            recipient,
+            data,
+        }))
     }
 
     pub(super) fn persist_reconciler(
@@ -1348,7 +1428,7 @@ pub(super) mod tests {
     fn future_version_is_not_reset() {
         let directory = Directory::new();
         let store = open(&directory);
-        store.db.pragma_update(None, "user_version", 2).unwrap();
+        store.db.pragma_update(None, "user_version", 3).unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
@@ -1358,7 +1438,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
     }
 
@@ -1392,5 +1472,206 @@ pub(super) mod tests {
             .is_err());
         assert_eq!(count(&store, "events"), 0);
         assert_eq!(count(&store, "checkpoints"), 0);
+    }
+    fn smtp_seed(store: &mut Store) -> DueDelivery {
+        let mut reconciler = super::super::lifecycle::Reconciler::with_capacity(10);
+        let events = reconciler
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|actual|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        store
+            .persist_reconciler(
+                &reconciler,
+                &events,
+                &["smtp"],
+                "cluster",
+                "2026-10-10T01:00:00",
+                10,
+            )
+            .unwrap();
+        store.due_deliveries("cluster", 10, 10).unwrap().remove(0)
+    }
+    fn smtp_message(body: &str) -> super::super::smtp_message::Prepared {
+        super::super::smtp_message::prepare(
+            "s@fixture.invalid",
+            "r@fixture.invalid",
+            "event_1",
+            "done",
+            body,
+            0,
+        )
+        .unwrap()
+    }
+    #[test]
+    fn frozen_smtp_is_immutable_and_exact_across_retry_and_reopen() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        assert!(store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .is_none());
+        let message = smtp_message("done\n.\n.dot");
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .unwrap();
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .unwrap();
+        assert!(matches!(
+            store.freeze_smtp(&item.event_id, &item.destination, &smtp_message("changed")),
+            Err(StorageError::Conflict)
+        ));
+        assert!(matches!(
+            store.freeze_smtp(&item.event_id, "missing", &message),
+            Err(StorageError::Conflict)
+        ));
+        store
+            .record_delivery(&item, DeliveryOutcome::TransientFailure, 20, Some(25))
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        let frozen = store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .unwrap();
+        assert!(frozen.envelope() == ("s@fixture.invalid", "r@fixture.invalid"));
+        assert!(frozen.data() == message.data());
+        let retry = store.due_deliveries("cluster", 25, 10).unwrap().remove(0);
+        assert_eq!(retry.event_id, item.event_id);
+        assert_eq!(retry.attempt_number, 2);
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .unwrap();
+        assert!(matches!(
+            store.freeze_smtp(
+                &item.event_id,
+                &item.destination,
+                &smtp_message("changed after restart")
+            ),
+            Err(StorageError::Conflict)
+        ));
+        assert_eq!(count(&store, "smtp_messages"), 1);
+    }
+    #[test]
+    fn legacy_upgrade_preserves_rows_and_refuses_fabricating_attempted_messages() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        store
+            .record_delivery(&item, DeliveryOutcome::TransientFailure, 20, Some(25))
+            .unwrap();
+        store
+            .db
+            .execute_batch("DROP TABLE smtp_messages; PRAGMA user_version=1;")
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(count(&store, "outbox"), 1);
+        assert_eq!(count(&store, "delivery_attempts"), 1);
+        assert_eq!(
+            store
+                .db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert!(store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            store.freeze_smtp(&item.event_id, &item.destination, &smtp_message("new")),
+            Err(StorageError::Conflict)
+        ));
+        drop(store);
+        let store = open(&directory);
+        assert_eq!(count(&store, "smtp_messages"), 0);
+    }
+    #[test]
+    fn migration_and_freeze_failures_roll_back_without_changing_outbox() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        store.db.execute_batch("DROP TABLE smtp_messages; PRAGMA user_version=1; CREATE TABLE smtp_messages(blocker INTEGER);").unwrap();
+        drop(store);
+        assert!(matches!(
+            Store::open(&directory.path(), Duration::from_millis(50)),
+            Err(StorageError::Database(_))
+        ));
+        let db = Connection::open(directory.path()).unwrap();
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        db.execute_batch("DROP TABLE smtp_messages;").unwrap();
+        drop(db);
+        let mut store = open(&directory);
+        store.db.execute_batch("CREATE TRIGGER reject_smtp BEFORE INSERT ON smtp_messages BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        assert!(matches!(
+            store.freeze_smtp(&item.event_id, &item.destination, &smtp_message("done")),
+            Err(StorageError::Database(_))
+        ));
+        assert_eq!(count(&store, "smtp_messages"), 0);
+        assert_eq!(count(&store, "outbox"), 1);
+        assert_eq!(count(&store, "delivery_attempts"), 0);
+        store.db.execute_batch("DROP TRIGGER reject_smtp;").unwrap();
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &smtp_message("done"))
+            .unwrap();
+        store
+            .db
+            .execute(
+                "DELETE FROM outbox WHERE event_id=?1 AND destination=?2",
+                params![item.event_id, item.destination],
+            )
+            .unwrap();
+        assert_eq!(count(&store, "smtp_messages"), 0);
+    }
+    #[test]
+    fn frozen_reads_reject_corrupt_or_oversized_state_before_returning_bytes() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let message = smtp_message("done");
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .unwrap();
+        for data in [
+            b"bad\n.\r\n".as_slice(),
+            b"line\r\n.\r\nbody\r\n.\r\n",
+            b"line\r\n",
+        ] {
+            store
+                .db
+                .execute("UPDATE smtp_messages SET data=?1", params![data])
+                .unwrap();
+            assert!(matches!(
+                store.frozen_smtp(&item.event_id, &item.destination),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        store.db.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE smtp_messages SET data=zeroblob(20000);").unwrap();
+        assert!(matches!(
+            store.frozen_smtp(&item.event_id, &item.destination),
+            Err(StorageError::InvalidInput)
+        ));
+        store
+            .db
+            .execute(
+                "UPDATE smtp_messages SET data=?1,sender=?2",
+                params![message.data(), "injected\r\n"],
+            )
+            .unwrap();
+        assert!(matches!(
+            store.frozen_smtp(&item.event_id, &item.destination),
+            Err(StorageError::InvalidInput)
+        ));
     }
 }

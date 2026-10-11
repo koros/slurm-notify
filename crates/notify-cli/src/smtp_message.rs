@@ -34,12 +34,15 @@ impl Prepared {
     pub(super) fn recipient_command(&self) -> String {
         format!("RCPT TO:<{}>\r\n", self.recipient)
     }
+    pub(super) fn envelope(&self) -> (String, String) {
+        (self.sender.to_string(), self.recipient.to_string())
+    }
     pub(super) fn data(&self) -> &[u8] {
         &self.data
     }
 }
 
-fn address(value: &str) -> Result<Address, Error> {
+pub(super) fn address(value: &str) -> Result<Address, Error> {
     // Deliberately narrower than the library: ASCII addr-spec only, no display
     // names, quoted local parts, address literals, lists, or SMTPUTF8.
     if value.is_empty()
@@ -144,6 +147,29 @@ fn data_frame(message: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
     }
     bytes.extend_from_slice(b".\r\n");
     Ok(bytes)
+}
+
+// Validate stored transport bytes without invoking a renderer or generating fields.
+// This checks framing, not cryptographic integrity or arbitrary MIME semantics.
+pub(super) fn validate_frozen_data(data: &[u8]) -> Result<(), Error> {
+    if data.len() > WIRE_LIMIT || !data.ends_with(b".\r\n") {
+        return Err(Error::Encoding);
+    }
+    let mut message = Zeroizing::new(Vec::with_capacity(data.len()));
+    for line in data[..data.len() - 3].split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b".") {
+            if !line.starts_with(b"..") {
+                return Err(Error::Encoding);
+            }
+            message.extend_from_slice(&line[1..]);
+        } else {
+            message.extend_from_slice(line);
+        }
+    }
+    if *data_frame(&message)? != data {
+        return Err(Error::Encoding);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

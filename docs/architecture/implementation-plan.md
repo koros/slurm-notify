@@ -1859,3 +1859,37 @@ pending.
 Validation: shared checks pass (187 Rust tests plus one ignored helper, 68 custom
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy. Coverage passes the 80% gate at 96.23% Rust lines (9,854/10,240).
+
+## Subsequent increment: private frozen SMTP persistence
+
+ADR 0008 records a private additive version-2 table keyed to the per-destination
+outbox. Only a validated Prepared message creates immutable envelope/DATA snapshots;
+identical writes are idempotent and conflicting bytes/envelopes fail. New snapshots
+require an unattempted pending row and commit before any later network operation.
+Existing version-1 rows upgrade without fabricated messages; future-version guard
+now rejects version 3. Each migration transaction is atomic; 0001 remains unchanged.
+
+Frozen loads validate byte bounds inside SQL before materialization, address policy
+and canonical DATA transparency without rendering or sampling a clock. Snapshot
+values have no Debug/Clone and own zeroizing DATA buffers. Missing and malformed
+rows remain distinct. Outbox deletion cascades snapshots under existing retention;
+pending protection remains with existing outbox policy. No credentials or relay
+configuration are stored. Database encryption and authenticated corruption detection
+are not introduced; this private loader is not a general MIME/header parser.
+
+Four tests cover exact frozen bytes/envelope through retry/reopen, idempotent and
+conflicting preparation, missing/attempted legacy rows, version upgrade/failure,
+insert rollback, cascade, corrupt framing/address data and oversized BLOBs even
+when schema checks are bypassed. No dependencies, runtime defaults or public
+contracts changed; normal executable remains inactive. Private schema advances to
+version 2 without a released downgrade guarantee.
+Next: connect frozen reads to a separate bounded submission child frame, with
+missing/corrupt snapshots blocking before network access and exact bytes reused
+across retry/restart. Event rendering, atomic poll preparation, route revision,
+credential lookup, public review, licensing, cluster validation and activation remain
+pending.
+
+Validation: shared checks pass (191 Rust tests plus one ignored helper, 68 custom
+process scenarios, eight standalone version-1 SQLite tests, six hook tests), including
+formatting and strict Clippy. Coverage passes the 80% gate at 96.50% Rust lines
+(11,297/11,707).
