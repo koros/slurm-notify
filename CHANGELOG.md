@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private SMTP resource composition joins owned trust and injected credentials to immutable provider bindings, with profile/trust gates before lookup and five rotation/failure tests; no permission grant, delivery or installed activation.
+
 - Private injected SMTP credential resolution with preflight reference/identity checks, bounded zeroizing values, exact identity matching and four ownership/rotation/failure tests; no ambient environment lookup or installed activation.
 
 - Private owned SMTP DER trust-set loading through protected file descriptors, enforcing 32 roots and a shared 64 KiB read budget, validating content fingerprints and rejecting duplicates; three rotation/failure/budget tests, no installed loader.

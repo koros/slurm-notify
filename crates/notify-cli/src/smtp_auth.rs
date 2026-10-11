@@ -43,6 +43,11 @@ impl Credentials {
     pub(super) fn into_plain(self) -> Zeroizing<Vec<u8>> {
         self.plain
     }
+    pub(super) fn matches_identity(&self, identity: &str) -> bool {
+        let identity_end = 1 + identity.len();
+        self.plain.get(1..identity_end) == Some(identity.as_bytes())
+            && self.plain.get(identity_end) == Some(&0)
+    }
     fn command(&self) -> Zeroizing<Vec<u8>> {
         // Maximum payload 194 bytes gives a bounded 260-byte encoded value.
         let size = base64::encoded_len(self.plain.len(), true).unwrap();

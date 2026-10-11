@@ -104,6 +104,28 @@ impl Resolved {
     pub(super) fn provider(&self) -> &Descriptor {
         &self.provider
     }
+    pub(super) fn from_owned(
+        bound: &Descriptor,
+        profile: &Profile<'_>,
+        roots: &[&[u8]],
+        credentials: Credentials,
+    ) -> Result<Self, Error> {
+        if !bound.matches(profile).map_err(|_| Error::Profile)?
+            || !credentials.matches_identity(profile.authentication_identity)
+        {
+            return Err(Error::Profile);
+        }
+        if smtp_provider_revision::trust_fingerprint(roots).map_err(|_| Error::Trust)?
+            != profile.trust_fingerprint
+        {
+            return Err(Error::Trust);
+        }
+        Ok(Self {
+            provider: Descriptor::new(profile).map_err(|_| Error::Profile)?,
+            roots: roots.iter().map(|root| root.to_vec()).collect(),
+            credentials,
+        })
+    }
     pub(super) fn into_parts(self) -> (Descriptor, Vec<Vec<u8>>, Credentials) {
         (self.provider, self.roots, self.credentials)
     }

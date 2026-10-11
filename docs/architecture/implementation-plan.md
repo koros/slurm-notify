@@ -2901,3 +2901,24 @@ explicit public contract review.
 Validation: shared checks pass with 290 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.47% (15,706/16,113), above the 80% gate.
+
+### Private bound provider resource composition
+
+Added test-only provider_resolution to reject changed/invalid immutable profiles
+before file or secret lookup, load owned bounded trust and check its fingerprint
+before credential lookup, then return the existing resolved provider with owned
+credentials. The new owned-credential constructor independently rechecks binding,
+authentication identity and DER fingerprint. No permission grant or send occurs.
+
+Five tests cover successful ownership/password rotation, removal after resolution,
+profile/reference mismatch gates, missing/changed trust, credential failure and
+constructor rechecks. ADR 0019 records the sequential-resource/deadline limits.
+No dependencies, runtime defaults or public contracts change.
+
+Next: private composed resolution in permission-guarded pending delivery with
+failure/restart preservation. Installed configuration mapping and activation still
+require explicit contract review.
+
+Validation: shared checks pass with 295 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.49% (15,897/16,307), above the 80% gate.
