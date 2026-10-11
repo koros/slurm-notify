@@ -1892,38 +1892,37 @@ fn frozen_dispatch(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn orchestrated_frozen_blocked_restart() {
-    use polling_cycle::{Cycles, Hooks, PreparedHooks, StageError};
+    use polling_cycle::{Cycles, Hooks, Rendering, StageError};
     let directory = storage::tests::Directory::new();
     let root = state_directory(&directory);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
     let settings = orchestration_settings(&["a", "b", "c"]);
+    let routes: Vec<_> = ["a", "b", "c"]
+        .into_iter()
+        .map(|name| smtp_routes::Route {
+            name,
+            visibility: smtp_render::JobVisibility::Hidden,
+            metadata: smtp_render::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                identity: name,
+                timestamp: 123,
+            },
+        })
+        .collect();
     let mut cycles = Cycles::new(1).unwrap();
     let mut calls = 0;
     let mut clocks = [7200, 7200, 7210].into_iter();
-    let report = cycles.tick_prepared_fallible(
+    let report = cycles.tick_rendered_fallible(
         &settings,
         &orchestration_maintenance(),
         &mut store,
-        PreparedHooks {
-            smtp_destinations: &["a", "b", "c"],
+        Rendering {
+            routes: &routes,
             max_messages: 3,
-            query: orchestration_query,
-            prepare: |event: &lifecycle::Event, route: &str| {
-                smtp_render::prepare(
-                    event,
-                    &smtp_render::Metadata {
-                        sender: "s@fixture.invalid",
-                        recipient: "r@fixture.invalid",
-                        identity: route,
-                        timestamp: 123,
-                    },
-                    smtp_render::JobVisibility::Hidden,
-                )
-                .map_err(|_| ())
-            },
         },
         Hooks {
-            query: (),
+            query: orchestration_query,
             send: |item: &storage::DueDelivery| {
                 calls += 1;
                 if item.destination == "a" {
@@ -1982,18 +1981,16 @@ fn orchestrated_frozen_blocked_restart() {
     let mut restarted = Cycles::new(1).unwrap();
     let mut clocks = [7211, 7211, 7220, 7221, 7221, 7221].into_iter();
     let mut calls = 0;
-    let recovered = restarted.tick_prepared_fallible(
+    let recovered = restarted.tick_rendered_fallible(
         &settings,
         &orchestration_maintenance(),
         &mut store,
-        PreparedHooks {
-            smtp_destinations: &["a", "b", "c"],
+        Rendering {
+            routes: &routes,
             max_messages: 3,
-            query: orchestration_query,
-            prepare: |_: &lifecycle::Event, _: &str| panic!("duplicate event rendered on reopen"),
         },
         Hooks {
-            query: (),
+            query: orchestration_query,
             send: |item: &storage::DueDelivery| {
                 assert_eq!(item.event_id, identity);
                 assert_eq!(item.attempt_number, 1);

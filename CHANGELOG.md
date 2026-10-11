@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private orchestration using validated SMTP rendering plans after cancellation and before clocks/storage, retaining poll budgets, frozen-message maintenance after rendering failure and owned TLS blocked-dispatch restart recovery.
+
 - Private immutable SMTP rendering plans validating bounded route bindings, explicit disclosure and message metadata before scheduler polling, with event-dependent failure/reopen recovery and frozen-disclosure replay tests.
 
 - Mixed-route SMTP disclosure and late rendering-failure acceptance, preserving earlier poll state and frozen snapshots, recovering through owned TLS delivery after reopen and suppressing duplicate preparation/sends.

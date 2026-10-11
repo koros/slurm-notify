@@ -2200,3 +2200,38 @@ Validation: shared checks pass with 217 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.29% (10,265/10,551), above the unchanged 80% gate. No real-cluster
 or real-relay tests were run.
+
+### Validated rendering plans in private orchestration
+
+A separate tick_rendered_fallible entrypoint selects immutable rendering plans
+from explicit route inputs and the cycle's authoritative destination list. The
+shared tick engine now accepts a deferred validation context: cancellation runs
+first, general policy and plan validation precede clock/storage/query work, and
+the validated plan feeds the existing prepared poll and health/error mapping.
+Plain and arbitrary-preparation fixture entrypoints retain their shared behavior.
+Invalid plan inputs report a static Policy preflight failure without consuming a
+poll budget, including when polling is exhausted. Event-dependent rendering
+failures retain the existing preparation-failure health and maintenance policy.
+
+Two tests verify cancellation before invalid metadata validation, invalid policy
+before side effects even when exhausted, frozen commit followed by cancellation,
+reopen with changed disclosure and an oversized new event, continued delivery of
+the earlier hidden snapshot, unchanged durable checkpoint/ledger and exhausted
+maintenance without duplicate sends. The owned TLS three-route blocked-helper
+fixture now runs validated rendering ticks, preserving first-route completion,
+static spawn diagnostics, partial progress and original snapshots on recovery.
+
+No schema, dependencies, public interfaces or executable defaults changed.
+Validation probes and rendering are synchronous and bounded; cancellation does
+not interrupt in-flight callback work. Static caller-selected fixture metadata
+remains experimental.
+
+Next: private per-event Message-ID and frozen timestamp selection design and
+implementation, replacing reused fixture metadata before production routing.
+Credential integration, route revisions, privacy defaults, public review,
+licensing and real-cluster/relay activation remain pending.
+
+Validation: shared checks pass with 219 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.31% (10,444/10,733), above the unchanged 80% gate. No real-cluster
+or real-relay tests were run.

@@ -141,6 +141,24 @@ pub(super) struct PreparedHooks<'a, Q, P> {
     pub(super) prepare: P,
 }
 
+// Route inputs are validated after cancellation and before clocks/storage/query.
+pub(super) struct Rendering<'a> {
+    pub(super) routes: &'a [super::smtp_routes::Route<'a>],
+    pub(super) max_messages: usize,
+}
+
+fn prepared_error(error: super::smtp_poll::Error) -> Error {
+    match error {
+        super::smtp_poll::Error::InvalidInput => Error::Poll(DurablePollError::Poll(
+            super::scheduler::PollError::InvalidRequest,
+        )),
+        super::smtp_poll::Error::Poll(error) => Error::Poll(DurablePollError::Poll(error)),
+        super::smtp_poll::Error::Storage(error) => Error::Poll(DurablePollError::Storage(error)),
+        super::smtp_poll::Error::Preparation => Error::Preparation,
+        super::smtp_poll::Error::Limit => Error::PreparationLimit,
+    }
+}
+
 pub(super) struct Cycles {
     remaining: usize,
     health: PollHealth,
@@ -256,8 +274,8 @@ impl Cycles {
                 clock,
                 cancelled,
             },
-            true,
-            |cycles, store, now| cycles.step(settings, store, false, now, &mut query),
+            || Some(()),
+            |cycles, store, now, _| cycles.step(settings, store, false, now, &mut query),
         )
     }
 
@@ -297,8 +315,8 @@ impl Cycles {
             maintenance,
             store,
             hooks,
-            valid,
-            |cycles, store, now| {
+            || valid.then_some(()),
+            |cycles, store, now, _| {
                 cycles.step_prepared(
                     settings,
                     store,
@@ -315,14 +333,66 @@ impl Cycles {
         )
     }
 
-    fn tick_using<S, C, X>(
+    pub(super) fn tick_rendered_fallible<Q, S, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        rendering: Rendering<'_>,
+        hooks: Hooks<Q, S, C, X>,
+    ) -> TickReport
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        S: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let Hooks {
+            mut query,
+            send,
+            clock,
+            cancelled,
+        } = hooks;
+        self.tick_using(
+            settings,
+            maintenance,
+            store,
+            Hooks {
+                query: (),
+                send,
+                clock,
+                cancelled,
+            },
+            || {
+                super::smtp_routes::Plan::new(
+                    settings.destinations,
+                    rendering.routes,
+                    rendering.max_messages,
+                )
+                .ok()
+            },
+            |cycles, store, now, plan| {
+                cycles.step_using(settings, store, false, now, |request, reconciler, store| {
+                    plan.poll_with(request, reconciler, store, now, &mut query)
+                        .map_err(prepared_error)
+                })
+            },
+        )
+    }
+
+    fn tick_using<V, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
         maintenance: &Maintenance,
         store: &mut Store,
         mut hooks: Hooks<(), S, C, X>,
-        valid_poll: bool,
-        mut poll: impl FnMut(&mut Self, &mut Store, i64) -> Result<Outcome, Error>,
+        validate_poll: impl FnOnce() -> Option<V>,
+        mut poll: impl FnMut(&mut Self, &mut Store, i64, &V) -> Result<Outcome, Error>,
     ) -> TickReport
     where
         S: FnMut(
@@ -340,10 +410,14 @@ impl Cycles {
             report.cancelled = true;
             return report;
         }
-        if !valid_poll || !valid_settings(settings, maintenance) {
+        if !valid_settings(settings, maintenance) {
             report.preflight = Some(Err(StageError::Policy));
             return report;
         }
+        let Some(context) = validate_poll() else {
+            report.preflight = Some(Err(StageError::Policy));
+            return report;
+        };
         let Some(now) = (hooks.clock)().filter(|time| *time >= 0) else {
             report.preflight = Some(Err(StageError::Time));
             return report;
@@ -388,7 +462,7 @@ impl Cycles {
             return report;
         }
         report.preflight = Some(Ok(()));
-        let poll = poll(self, store, now);
+        let poll = poll(self, store, now, &context);
         let stop = matches!(
             &poll,
             Err(Error::Storage(_) | Error::Window(_) | Error::Poll(DurablePollError::Storage(_)))
@@ -598,19 +672,7 @@ impl Cycles {
                     hooks.query,
                     hooks.prepare,
                 )
-                .map_err(|error| match error {
-                    super::smtp_poll::Error::InvalidInput => Error::Poll(DurablePollError::Poll(
-                        super::scheduler::PollError::InvalidRequest,
-                    )),
-                    super::smtp_poll::Error::Poll(error) => {
-                        Error::Poll(DurablePollError::Poll(error))
-                    }
-                    super::smtp_poll::Error::Storage(error) => {
-                        Error::Poll(DurablePollError::Storage(error))
-                    }
-                    super::smtp_poll::Error::Preparation => Error::Preparation,
-                    super::smtp_poll::Error::Limit => Error::PreparationLimit,
-                })
+                .map_err(prepared_error)
             },
         )
     }
@@ -1250,6 +1312,173 @@ mod tests {
             stale_after: 60,
             health_sample_limit: 10,
         }
+    }
+
+    fn render_route(
+        visibility: super::super::smtp_render::JobVisibility,
+    ) -> super::super::smtp_routes::Route<'static> {
+        super::super::smtp_routes::Route {
+            name: "primary",
+            visibility,
+            metadata: super::super::smtp_render::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                identity: "primary",
+                timestamp: 123,
+            },
+        }
+    }
+
+    #[test]
+    fn rendered_tick_cancels_before_validation_and_rejects_policy_even_when_exhausted() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        let mut routes = [render_route(
+            super::super::smtp_render::JobVisibility::Hidden,
+        )];
+        routes[0].metadata.recipient = "private-invalid-fixture";
+        for (cancelled, remaining) in [(true, 1), (false, 1), (false, 0)] {
+            cycles.remaining = remaining;
+            let report = cycles.tick_rendered_fallible(
+                &settings(),
+                &maintenance(),
+                &mut store,
+                Rendering {
+                    routes: &routes,
+                    max_messages: 1,
+                },
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("invalid policy queried scheduler"),
+                    send: |_: &super::super::storage::DueDelivery| {
+                        panic!("invalid policy delivered")
+                    },
+                    clock: || panic!("invalid policy sampled clock"),
+                    cancelled: || cancelled,
+                },
+            );
+            assert_eq!(report.cancelled, cancelled);
+            assert_eq!(
+                report.preflight,
+                if cancelled {
+                    None
+                } else {
+                    Some(Err(StageError::Policy))
+                }
+            );
+            assert!(report.poll.is_none() && report.cleanup.is_none() && report.health.is_none());
+            assert_eq!(cycles.remaining, remaining);
+            assert_eq!(cycles.health.consecutive_failures, 0);
+        }
+        assert!(store.restore("cluster", 10).unwrap().1.is_none());
+    }
+
+    #[test]
+    fn rendered_tick_restart_failure_keeps_frozen_disclosure_and_delivers_prior_work() {
+        use super::super::smtp_render::JobVisibility;
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        let hidden = [render_route(JobVisibility::Hidden)];
+        let mut cancellations = 0;
+        let first = cycles.tick_rendered_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Rendering {
+                routes: &hidden,
+                max_messages: 1,
+            },
+            Hooks {
+                query: smtp_query,
+                send: |_: &super::super::storage::DueDelivery| panic!("cancelled before send"),
+                clock: || Some(7200),
+                cancelled: || {
+                    cancellations += 1;
+                    cancellations > 1
+                },
+            },
+        );
+        assert!(first.cancelled);
+        assert!(matches!(
+            first.poll,
+            Some(Ok(Outcome::Committed { events: 1, .. }))
+        ));
+        let item = store.due_deliveries("cluster", 7200, 10).unwrap().remove(0);
+        let snapshot = store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        let disclosed = [render_route(JobVisibility::Identifier)];
+        let oversized = "1".repeat(33);
+        let mut sent = 0;
+        let second = cycles.tick_rendered_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Rendering {
+                routes: &disclosed,
+                max_messages: 1,
+            },
+            Hooks {
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        String::new()
+                    } else {
+                        format!("cluster|{oversized}|alice|s|actual|COMPLETED|0:0")
+                    })
+                },
+                send: |due: &super::super::storage::DueDelivery| {
+                    sent += 1;
+                    assert_eq!(due.event_id, item.event_id);
+                    let reader = open(&directory);
+                    let kept = reader
+                        .frozen_smtp(&due.event_id, &due.destination)
+                        .unwrap()
+                        .unwrap();
+                    assert!(kept.data() == snapshot.data());
+                    assert!(std::str::from_utf8(kept.data())
+                        .unwrap()
+                        .contains("Job: [redacted]"));
+                    Ok(super::super::delivery::ProviderOutcome::Delivered)
+                },
+                clock: || Some(7260),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(sent, 1);
+        assert_eq!(second.poll.unwrap().unwrap_err(), StageError::Poll);
+        assert_eq!(second.delivery.unwrap().unwrap().delivered, 1);
+        let health = second.health.unwrap().unwrap();
+        assert_eq!(health.poll.last_failure, Some(Failure::Preparation));
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(60));
+        assert_eq!(cycles.remaining, 0);
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 1);
+        let exhausted = cycles.tick_rendered_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            Rendering {
+                routes: &disclosed,
+                max_messages: 1,
+            },
+            Hooks {
+                query: |_: &mut Command, _, _| panic!("exhausted query"),
+                send: |_: &super::super::storage::DueDelivery| panic!("duplicate send"),
+                clock: || Some(7261),
+                cancelled: || false,
+            },
+        );
+        assert!(matches!(exhausted.poll, Some(Ok(Outcome::Exhausted))));
+        assert_eq!(
+            exhausted.delivery.unwrap().unwrap(),
+            super::super::delivery::BatchReport::default()
+        );
+        assert!(exhausted.health.unwrap().is_ok());
     }
 
     #[test]
