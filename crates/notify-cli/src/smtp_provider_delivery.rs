@@ -1,4 +1,4 @@
-//! Private pair permission and resolution guard; concrete transport integration pending.
+//! Private pair permission and resolution guard for caller-selected bound transport.
 use super::{
     delivery::{self, BatchFailure, BatchReport, ProviderOutcome, RetryPolicy},
     smtp_auth::Credentials,

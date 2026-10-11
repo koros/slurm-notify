@@ -2641,3 +2641,37 @@ CLI/config contracts still require their separate review and acceptance gates.
 Validation: shared checks pass with 271 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.51% (14,436/14,804), above the unchanged 80% gate.
+
+### Private bound SMTP orchestration
+
+Cycles::tick_bound_smtp composes provider-aware atomic polling with rendering/provider
+pair permissions, validated caller-owned resolution and concrete supervised bound
+STARTTLS submission. The existing stage engine now accepts a private delivery
+policy; legacy ticks retain their delivery adapter. Poll validation follows initial
+cancellation and precedes clocks/storage/queries, including exhausted cycles.
+Profiles must cover all destinations: this increment deliberately supports only
+SMTP routes. Timeout preflight requires whole milliseconds within 1..=30,000.
+
+Existing stage ordering preserves durable poll state before sending, cancellation
+between stages, monotonic completion clocks, partial delivery failures, retention
+and health reporting. A blocked dispatch stops maintenance without inventing a
+successful attempt. Helper command selection and secret/trust resolution stay
+caller-owned; no environment lookup, installed helper, scheduling or cleanup default
+is added. Provider revision pruning remains an explicit caller operation.
+
+A network-free process fixture tests cancellation before validation and after poll
+commit, invalid deadline preflight, denied pairs after reopen, exhausted polling
+with pending delivery, temporary retry and final acceptance with unchanged frozen
+bytes. Its synthetic acknowledgments exercise bookkeeping only. Owned TLS
+acceptance now runs temporary/lost-result submission and reopened secret-rotation
+recovery through the orchestration method, verifying the original endpoint, TLS
+identity, AUTH identity and exact DATA. Changed profiles still fail before a decoy
+connection. No schema, dependency or public contract changes occur.
+
+Next: mixed-route dispatch policy and acceptance, preserving bound SMTP checks
+alongside ordinary destinations. Public contract review, real-cluster policy
+validation, installed monitoring and release gates remain outstanding.
+
+Validation: shared checks pass with 272 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.52% (14,676/15,049), above the unchanged 80% gate.

@@ -2518,8 +2518,8 @@ fn owned_bound_transport_restart() {
             accounting_program: std::path::Path::new("sacct"),
             cluster: "cluster",
             user: "alice",
-            history_start: "2026-10-10T00:00:00",
-            history_end: "2026-10-11T00:00:00",
+            history_start: "1970-01-01T00:00:00",
+            history_end: "1970-01-01T00:00:10",
             timeout: Duration::from_secs(1),
             output_limit: 4096,
             emit_discovered: true,
@@ -2625,39 +2625,70 @@ fn owned_bound_transport_restart() {
             provider: provider.token(),
         }];
         let permissions = Permissions::new(&entries).unwrap();
-        let report = smtp_provider_delivery::deliver_due(
+        let cycle_settings = polling_cycle::Settings {
+            active_program: request.active_program,
+            accounting_program: request.accounting_program,
+            cluster: "cluster",
+            user: "alice",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+            capacity: 10,
+            destinations: &["smtp"],
+            window: accounting_window::Policy {
+                lookback_seconds: 10,
+                overlap_seconds: 1,
+            },
+        };
+        let maintenance = polling_cycle::Maintenance {
+            delivery_limit: 10,
+            retry: retry_policy(),
+            retain_seconds: 100,
+            cleanup_limit: 10,
+            stale_after: 60,
+            health_sample_limit: 10,
+        };
+        let profiles = [provider.profile()];
+        let mut cycles = polling_cycle::Cycles::new(1).unwrap();
+        let mut times = [10, 10, 12, 12, 12].into_iter();
+        let tick = cycles.tick_bound_smtp(
+            &cycle_settings,
+            &maintenance,
             &mut store,
-            "cluster",
-            10,
-            10,
-            retry_policy(),
-            Hooks {
+            polling_cycle::BoundSmtp {
+                rendering: polling_cycle::Rendering {
+                    routes: &routes,
+                    max_messages: 1,
+                },
+                profiles: &profiles,
                 permissions: &permissions,
-                resolve: |bound: &smtp_provider_revision::Descriptor| {
-                    Resolved::new(bound, &profile, &[&root], "fixture-user", "first-fixture")
-                },
-                send: |_: &storage::DueDelivery,
-                       _: &smtp_revision::Descriptor,
-                       frozen: &storage::FrozenMessage,
-                       resolved: Resolved| {
-                    let mut command = Command::new(std::env::current_exe().unwrap());
-                    command.arg(if mode == 10 {
-                        "--smtp-bound-lost-result"
-                    } else {
-                        "--smtp-bound-fixture"
-                    });
-                    smtp_bound_transport::dispatch(
-                        &mut command,
-                        resolved,
-                        frozen,
-                        Duration::from_secs(3),
-                    )
-                },
-                clock: || Some(12),
+                timeout: Duration::from_secs(3),
+            },
+            polling_cycle::Hooks {
+                query,
+                send: (
+                    |bound: &smtp_provider_revision::Descriptor| {
+                        Resolved::new(bound, &profile, &[&root], "fixture-user", "first-fixture")
+                    },
+                    |_: &storage::DueDelivery| {
+                        let mut command = Command::new(std::env::current_exe().unwrap());
+                        command.arg(if mode == 10 {
+                            "--smtp-bound-lost-result"
+                        } else {
+                            "--smtp-bound-fixture"
+                        });
+                        command
+                    },
+                ),
+                clock: || times.next(),
                 cancelled: || false,
             },
-        )
-        .unwrap();
+        );
+        assert!(matches!(
+            tick.poll,
+            Some(Ok(polling_cycle::Outcome::Committed { events: 0, .. }))
+        ));
+        let report = tick.delivery.unwrap().unwrap();
         assert_eq!(report.retrying, 1);
         drop(store);
         let mut store =
@@ -2713,37 +2744,47 @@ fn owned_bound_transport_restart() {
             2
         );
         assert!(decoy.accept().is_err());
-        let report = smtp_provider_delivery::deliver_due(
+        let mut cycles = polling_cycle::Cycles::new(1).unwrap();
+        let mut times = [17, 17, 18, 18, 18].into_iter();
+        let tick = cycles.tick_bound_smtp(
+            &cycle_settings,
+            &maintenance,
             &mut store,
-            "cluster",
-            17,
-            10,
-            retry_policy(),
-            Hooks {
+            polling_cycle::BoundSmtp {
+                rendering: polling_cycle::Rendering {
+                    routes: &routes,
+                    max_messages: 1,
+                },
+                profiles: &profiles,
                 permissions: &permissions,
-                resolve: |bound: &smtp_provider_revision::Descriptor| {
-                    Resolved::new(bound, &profile, &[&root], "fixture-user", "rotated-fixture")
-                },
-                send: |item: &storage::DueDelivery,
-                       _: &smtp_revision::Descriptor,
-                       frozen: &storage::FrozenMessage,
-                       resolved: Resolved| {
-                    assert_eq!(item.attempt_number, 2);
-                    assert!(frozen.data() == saved.data());
-                    let mut command = Command::new(std::env::current_exe().unwrap());
-                    command.arg("--smtp-bound-fixture");
-                    smtp_bound_transport::dispatch(
-                        &mut command,
-                        resolved,
-                        frozen,
-                        Duration::from_secs(3),
-                    )
-                },
-                clock: || Some(18),
+                timeout: Duration::from_secs(3),
+            },
+            polling_cycle::Hooks {
+                query,
+                send: (
+                    |bound: &smtp_provider_revision::Descriptor| {
+                        Resolved::new(bound, &profile, &[&root], "fixture-user", "rotated-fixture")
+                    },
+                    |item: &storage::DueDelivery| {
+                        assert_eq!(item.attempt_number, 2);
+                        let mut command = Command::new(std::env::current_exe().unwrap());
+                        command.arg("--smtp-bound-fixture");
+                        command
+                    },
+                ),
+                clock: || times.next(),
                 cancelled: || false,
             },
-        )
-        .unwrap();
+        );
+        let report = tick.delivery.unwrap().unwrap();
+        assert!(
+            store
+                .frozen_smtp(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .data()
+                == saved.data()
+        );
         assert_eq!(report.delivered, 1);
         assert!(store.due_deliveries("cluster", 18, 10).unwrap().is_empty());
         assert!(decoy.accept().is_err());
