@@ -6,6 +6,9 @@ mod config_snapshot;
 mod trust_snapshot;
 
 #[cfg(test)]
+mod credential_resolution;
+
+#[cfg(test)]
 mod smtp_frozen_frame;
 
 #[cfg(test)]

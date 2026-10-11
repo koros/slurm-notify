@@ -2881,3 +2881,23 @@ mapping and activation remain gated by explicit public contract review.
 Validation: shared checks pass with 286 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.52% (15,589/15,986), above the 80% gate.
+
+### Private injected SMTP credential resolution
+
+Added test-only credential_resolution with name/identity preflight, requested
+64/128-byte source ceilings, exact authentication identity matching and existing
+AUTH validation. Owned zeroizing temporary values become owned zeroizing credentials
+only on success. Username failures block password lookup; diagnostics stay static.
+No ambient environment lookup, dependencies, defaults or installed contracts change.
+
+Four tests cover exact ownership/rotation, accepted limits, rejected references and
+identities without lookup, mismatch/source failure, invalid UTF-8, empty/oversized
+passwords and controls. ADR 0018 records callback allocation/deadline limitations.
+
+Next: private provider resolution combining trust and credentials with immutable
+provider binding. Installed configuration mapping and activation still require
+explicit public contract review.
+
+Validation: shared checks pass with 290 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.47% (15,706/16,113), above the 80% gate.

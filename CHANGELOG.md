@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private injected SMTP credential resolution with preflight reference/identity checks, bounded zeroizing values, exact identity matching and four ownership/rotation/failure tests; no ambient environment lookup or installed activation.
+
 - Private owned SMTP DER trust-set loading through protected file descriptors, enforcing 32 roots and a shared 64 KiB read budget, validating content fingerprints and rejecting duplicates; three rotation/failure/budget tests, no installed loader.
 
 - Three private configuration mutation acceptance tests for atomic file replacement, symlink substitution, same-size rewrites and permission changes; reopen behavior and static failures are verified without activating a loader.
