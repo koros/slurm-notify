@@ -65,7 +65,9 @@ fn negotiate(mut input: impl Read) -> Result<(), Ack> {
         super::smtp_tls::Error::HandshakeIo | super::smtp_tls::Error::Io => Ack::Io,
         super::smtp_tls::Error::TlsProtocol => Ack::Protocol,
         super::smtp_tls::Error::Reply => Ack::Reply,
-        super::smtp_tls::Error::Upgrade => Ack::Upgrade,
+        super::smtp_tls::Error::UpgradeMissing => Ack::UpgradeMissing,
+        super::smtp_tls::Error::UpgradeTemporary => Ack::UpgradeTemporary,
+        super::smtp_tls::Error::UpgradePermanent => Ack::UpgradePermanent,
     })
 }
 
@@ -149,50 +151,44 @@ pub(super) fn acceptance() {
             assert!(writes >= 2);
         }
     }
-    // A complete refusal returns promptly as child failure, never relay acceptance.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let port = listener.local_addr().unwrap().port().to_string();
-    let server = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let mut socket = loop {
-            match listener.accept() {
-                Ok((socket, _)) => break socket,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline);
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(_) => panic!("SMTP fixture accept failed"),
-            }
-        };
-        socket.set_nonblocking(false).unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        socket
-            .set_write_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        socket.write_all(b"220 ready\r\n").unwrap();
-        command(&mut socket, b"EHLO fixture.invalid\r\n");
-        socket.write_all(b"250-relay\r\n250 STARTTLS\r\n").unwrap();
-        command(&mut socket, b"STARTTLS\r\n");
-        socket.write_all(b"454 unavailable\r\n").unwrap();
-        assert!(matches!(socket.read(&mut [0]), Ok(0)));
-    });
-    let mut child = Command::new(std::env::current_exe().unwrap());
-    child.arg("--smtp-negotiation");
-    assert_eq!(
-        transport::supervise_with(
-            &mut child,
-            transport::frame(&[port.as_bytes()], 9).unwrap(),
-            Duration::from_secs(2),
-            9,
-            32,
-            super::smtp_ack::decode
+    for (capabilities, refusal, expected) in [
+        (
+            &b"250-relay\r\n250 STARTTLS\r\n"[..],
+            Some(&b"454 unavailable\r\n"[..]),
+            Ack::UpgradeTemporary,
         ),
-        Ok(Ack::Upgrade)
-    );
-    server.join().unwrap();
+        (
+            b"250-relay\r\n250 STARTTLS\r\n",
+            Some(&b"550 refused\r\n"[..]),
+            Ack::UpgradePermanent,
+        ),
+        (
+            b"250-relay\r\n250 STARTTLS\r\n",
+            Some(&b"250 unexpected\r\n"[..]),
+            Ack::Reply,
+        ),
+        (
+            b"250-relay\r\n250 AUTH PLAIN\r\n",
+            None,
+            Ack::UpgradeMissing,
+        ),
+    ] {
+        let (port, server) = refusal_fixture(capabilities, refusal);
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        child.arg("--smtp-negotiation");
+        assert_eq!(
+            transport::supervise_with(
+                &mut child,
+                transport::frame(&[port.as_bytes()], 9).unwrap(),
+                Duration::from_secs(2),
+                9,
+                32,
+                super::smtp_ack::decode
+            ),
+            Ok(expected)
+        );
+        server.join().unwrap();
+    }
     let mut child = Command::new(std::env::current_exe().unwrap());
     child.arg("--smtp-negotiation");
     assert_eq!(
@@ -358,4 +354,49 @@ pub(super) fn acknowledgment_acceptance() {
             Err(expected)
         );
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn refusal_fixture(
+    capabilities: &'static [u8],
+    refusal: Option<&'static [u8]>,
+) -> (String, std::thread::JoinHandle<()>) {
+    use std::{net::TcpListener, thread, time::Instant};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => panic!("SMTP fixture accept failed"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        socket
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        fn command(socket: &mut TcpStream, expected: &[u8]) {
+            let mut bytes = vec![0; expected.len()];
+            socket.read_exact(&mut bytes).unwrap();
+            assert!(bytes == expected);
+        }
+        socket.write_all(b"220 ready\r\n").unwrap();
+        command(&mut socket, b"EHLO fixture.invalid\r\n");
+        socket.write_all(capabilities).unwrap();
+        if let Some(reply) = refusal {
+            command(&mut socket, b"STARTTLS\r\n");
+            socket.write_all(reply).unwrap();
+        }
+        assert!(matches!(socket.read(&mut [0]), Ok(0)));
+    });
+    (port, server)
 }

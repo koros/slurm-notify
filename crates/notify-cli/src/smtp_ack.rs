@@ -10,7 +10,9 @@ pub(super) enum Ack {
     Io,
     Protocol,
     Reply,
-    Upgrade,
+    UpgradeMissing,
+    UpgradeTemporary,
+    UpgradePermanent,
 }
 
 impl Ack {
@@ -23,7 +25,9 @@ impl Ack {
             Self::Io => b"SMTP_NEGOTIATION IO\n",
             Self::Protocol => b"SMTP_NEGOTIATION PROTOCOL\n",
             Self::Reply => b"SMTP_NEGOTIATION REPLY\n",
-            Self::Upgrade => b"SMTP_NEGOTIATION UPGRADE\n",
+            Self::UpgradeMissing => b"SMTP_NEGOTIATION TLS_MISSING\n",
+            Self::UpgradeTemporary => b"SMTP_NEGOTIATION TLS_TEMP\n",
+            Self::UpgradePermanent => b"SMTP_NEGOTIATION TLS_PERM\n",
         }
     }
 }
@@ -37,7 +41,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Ack, transport::Error> {
         Ack::Io,
         Ack::Protocol,
         Ack::Reply,
-        Ack::Upgrade,
+        Ack::UpgradeMissing,
+        Ack::UpgradeTemporary,
+        Ack::UpgradePermanent,
     ]
     .into_iter()
     .find(|ack| ack.bytes() == bytes)
@@ -58,7 +64,9 @@ mod tests {
             Ack::Io,
             Ack::Protocol,
             Ack::Reply,
-            Ack::Upgrade,
+            Ack::UpgradeMissing,
+            Ack::UpgradeTemporary,
+            Ack::UpgradePermanent,
         ] {
             assert_eq!(decode(ack.bytes()), Ok(ack));
             assert!(ack.bytes().len() <= 32);
@@ -69,6 +77,7 @@ mod tests {
         for bytes in [
             &b"OK\n"[..],
             b"RETRY\n",
+            b"SMTP_NEGOTIATION UPGRADE\n",
             b"REJECT\n",
             b"SMTP_NEGOTIATION READY",
             b"SMTP_NEGOTIATION READY\r\n",

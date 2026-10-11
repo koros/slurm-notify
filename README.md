@@ -286,3 +286,8 @@ Owned-storage acceptance now composes real SMTP child I/O/timeout results with a
 later certificate block. Reopen preserves the earlier retry deadline and attempt,
 leaves blocked/untouched destinations unchanged, and retains state ownership.
 These negotiation scenarios send no authenticated message.
+
+STARTTLS diagnostics now distinguish a missing extension, temporary refusal, and
+permanent refusal. Temporary refusals schedule durable retries; missing/permanent
+cases stay pending for correction. Owned reopen fixtures verify the distinction,
+and no refusal path writes TLS, credentials, or message commands.

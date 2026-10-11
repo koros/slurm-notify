@@ -1512,3 +1512,35 @@ precision through private acknowledgments and policy before AUTH, so a temporary
 upgrade refusal does not remain a configuration block. Then assess bounded
 credential framing and verified-TLS authentication fixtures. Message construction,
 public review, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: precise required-STARTTLS refusal policy
+
+Missing EHLO extension, temporary 4xx upgrade refusal, and permanent 5xx refusal
+now produce distinct private errors, acknowledgments, and parent diagnostics.
+Only upgrade 220 starts TLS. Unexpected upgrade replies return reply failure;
+non-250 EHLO is also reply failure rather than missing-extension evidence.
+Temporary refusal retries through existing completion-based backoff; missing and
+permanent refusal block without recording an attempt or failing the pending row.
+All acknowledged results still carry NotSubmitted evidence. READY remains blocked.
+
+The ambiguous UPGRADE token is removed and explicitly rejected. Replacement
+TLS_MISSING/TLS_TEMP/TLS_PERM tokens fit the existing 32-byte output bound and carry
+no server text. Existing TLS, codec, policy, pending-row, and retry-budget matrices
+now cover the precise categories. Process refusal fixtures verify temporary,
+permanent, unexpected, and missing-extension replies, including closure before TLS
+or subsequent commands. Three owned-store scenarios verify actual child results
+produce one completion-clock retry/attempt for temporary refusal and zero attempts
+or completion-clock samples for missing/permanent cases. Reopen preserves identity,
+the temporary retry deadline and attempt two, and attempt one for blocks; none
+marks delivery success.
+
+The full suite passes: 163 Rust tests plus one ignored helper, thirty-seven custom
+process scenarios, eight SQLite tests, and six hook tests. No dependency, schema,
+runtime defaults, or public interface changed. Broad greeting/EHLO reply precision
+and full authenticated transaction policy remain unfinished.
+
+Next: bounded private credential inputs and verified-TLS AUTH PLAIN fixtures,
+ensuring missing/invalid credentials block before connection, unsupported secure
+capabilities never trigger fallback, and secrets stay out of diagnostics. Message
+construction/submission, public review, licensing, cluster validation, and activation
+remain pending.

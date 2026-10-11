@@ -181,7 +181,8 @@ fn acceptance() {
     smtp_negotiation_boundary::handshake_acceptance();
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart passed");
+    owned_smtp_upgrade_policy_restart();
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1221,5 +1222,113 @@ fn owned_smtp_progress_restart() {
             .iter()
             .filter(|item| item.destination != "a")
             .all(|item| item.attempt_number == 1));
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_smtp_upgrade_policy_restart() {
+    for (capabilities, refusal, expected, retry) in [
+        (
+            &b"250-relay\r\n250 STARTTLS\r\n"[..],
+            Some(&b"454 unavailable\r\n"[..]),
+            smtp_ack::Ack::UpgradeTemporary,
+            true,
+        ),
+        (
+            b"250-relay\r\n250 STARTTLS\r\n",
+            Some(&b"550 refused\r\n"[..]),
+            smtp_ack::Ack::UpgradePermanent,
+            false,
+        ),
+        (
+            b"250-relay\r\n250 AUTH PLAIN\r\n",
+            None,
+            smtp_ack::Ack::UpgradeMissing,
+            false,
+        ),
+    ] {
+        let directory = storage::tests::Directory::new();
+        let root = state_directory(&directory);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        poll_fixture(&mut store, &mut reconciler);
+        let identity = store
+            .due_deliveries("cluster", 10, 10)
+            .unwrap()
+            .remove(0)
+            .event_id;
+        let (port, server) = smtp_negotiation_boundary::refusal_fixture(capabilities, refusal);
+        let mut clocks = 0;
+        let result = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            |item| {
+                assert_eq!(item.event_id, identity);
+                let mut child = Command::new(std::env::current_exe().unwrap());
+                child.arg("--smtp-negotiation");
+                let ack = transport::supervise_with(
+                    &mut child,
+                    transport::frame(&[port.as_bytes()], 9).unwrap(),
+                    Duration::from_secs(2),
+                    9,
+                    32,
+                    smtp_ack::decode,
+                );
+                assert_eq!(ack, Ok(expected));
+                smtp_dispatch::classify(ack).into_dispatch()
+            },
+            || {
+                clocks += 1;
+                Some(20)
+            },
+        );
+        server.join().unwrap();
+        if retry {
+            let report = result.unwrap();
+            assert_eq!(report.retrying, 1);
+            assert_eq!(report.delivered, 0);
+            assert_eq!(clocks, 1);
+        } else {
+            let failure = result.unwrap_err();
+            assert_eq!(failure.kind, delivery::FailureKind::DispatchBlocked);
+            assert_eq!(
+                failure.diagnostic,
+                Some(smtp_dispatch::classify(Ok(expected)).diagnostic)
+            );
+            assert_eq!(failure.committed, delivery::BatchReport::default());
+            assert!(!failure.acceptance_uncertain);
+            assert_eq!(clocks, 0);
+        }
+        drop(store);
+        let store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let due = if retry {
+            assert!(store.due_deliveries("cluster", 24, 10).unwrap().is_empty());
+            store.due_deliveries("cluster", 25, 10).unwrap()
+        } else {
+            store.due_deliveries("cluster", 10, 10).unwrap()
+        };
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].event_id, identity);
+        assert_eq!(due[0].attempt_number, if retry { 2 } else { 1 });
+        drop(store);
+        let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            i64::from(retry)
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'delivered'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
     }
 }

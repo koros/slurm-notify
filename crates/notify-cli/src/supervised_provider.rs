@@ -11,7 +11,9 @@ pub(super) enum Diagnostic {
     SmtpIo,
     SmtpProtocol,
     SmtpReply,
-    SmtpUpgrade,
+    SmtpUpgradeMissing,
+    SmtpUpgradeTemporary,
+    SmtpUpgradePermanent,
     InvalidInput,
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     UnsupportedPlatform,

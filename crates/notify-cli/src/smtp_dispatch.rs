@@ -18,8 +18,13 @@ pub(super) fn classify(result: Result<Ack, transport::Error>) -> Report {
         Ack::Input => (None, Diagnostic::SmtpInput),
         Ack::Certificate => (None, Diagnostic::SmtpCertificate),
         Ack::Configuration => (None, Diagnostic::SmtpConfiguration),
-        // This token lacks refusal code/phase: require correction conservatively.
-        Ack::Upgrade => (None, Diagnostic::SmtpUpgrade),
+        // Required TLS absence/permanent refusal blocks without message submission.
+        Ack::UpgradeMissing => (None, Diagnostic::SmtpUpgradeMissing),
+        Ack::UpgradePermanent => (None, Diagnostic::SmtpUpgradePermanent),
+        Ack::UpgradeTemporary => (
+            Some(ProviderOutcome::Retry),
+            Diagnostic::SmtpUpgradeTemporary,
+        ),
         Ack::Io => (Some(ProviderOutcome::Retry), Diagnostic::SmtpIo),
         Ack::Protocol => (Some(ProviderOutcome::Retry), Diagnostic::SmtpProtocol),
         Ack::Reply => (Some(ProviderOutcome::Retry), Diagnostic::SmtpReply),
@@ -42,7 +47,8 @@ mod tests {
             (Ack::Input, Diagnostic::SmtpInput),
             (Ack::Certificate, Diagnostic::SmtpCertificate),
             (Ack::Configuration, Diagnostic::SmtpConfiguration),
-            (Ack::Upgrade, Diagnostic::SmtpUpgrade),
+            (Ack::UpgradeMissing, Diagnostic::SmtpUpgradeMissing),
+            (Ack::UpgradePermanent, Diagnostic::SmtpUpgradePermanent),
         ] {
             let report = classify(Ok(ack));
             assert_eq!(report.acceptance, Acceptance::NotSubmitted);
@@ -51,7 +57,7 @@ mod tests {
     }
     #[test]
     fn transient_negotiation_errors_retry_without_submission_claim() {
-        for ack in [Ack::Io, Ack::Protocol, Ack::Reply] {
+        for ack in [Ack::Io, Ack::Protocol, Ack::Reply, Ack::UpgradeTemporary] {
             let report = classify(Ok(ack));
             assert_eq!(report.acceptance, Acceptance::NotSubmitted);
             assert_eq!(report.into_dispatch(), Ok(ProviderOutcome::Retry));

@@ -10,7 +10,9 @@ pub(super) enum Error {
     HandshakeIo,
     Io,
     Reply,
-    Upgrade,
+    UpgradeMissing,
+    UpgradeTemporary,
+    UpgradePermanent,
 }
 
 // Inspect typed causes only; never retain or stringify remote diagnostics.
@@ -100,16 +102,21 @@ pub(super) fn required_starttls(
         }
     })
     .map_err(|_| Error::Reply)?;
-    if reply.code != 250 || !advertised {
-        return Err(Error::Upgrade);
+    if reply.code != 250 {
+        return Err(Error::Reply);
+    }
+    if !advertised {
+        return Err(Error::UpgradeMissing);
     }
     socket.write_all(b"STARTTLS\r\n").map_err(|_| Error::Io)?;
-    if read_reply(&mut socket, limits())
+    match read_reply(&mut socket, limits())
         .map_err(|_| Error::Reply)?
         .code
-        != 220
     {
-        return Err(Error::Upgrade);
+        220 => {}
+        400..=499 => return Err(Error::UpgradeTemporary),
+        500..=599 => return Err(Error::UpgradePermanent),
+        _ => return Err(Error::Reply),
     }
     let mut connection =
         rustls::ClientConnection::new(config, name).map_err(|_| Error::TlsConfiguration)?;
@@ -420,10 +427,13 @@ mod tests {
                     true,
                     b"250 ready\r\n"
                 ),
-                (Err(Error::Upgrade), 1, 0)
+                (Err(Error::UpgradeMissing), 1, 0)
             );
         }
-        for refusal in [&b"454 unavailable\r\n"[..], &b"550 refused\r\n"[..]] {
+        for (refusal, expected) in [
+            (&b"454 unavailable\r\n"[..], Error::UpgradeTemporary),
+            (&b"550 refused\r\n"[..], Error::UpgradePermanent),
+        ] {
             assert_eq!(
                 starttls_fixture(
                     b"250-relay\r\n250 STARTTLS\r\n",
@@ -433,7 +443,7 @@ mod tests {
                     true,
                     b"250 ready\r\n"
                 ),
-                (Err(Error::Upgrade), 2, 0)
+                (Err(expected), 2, 0)
             );
         }
     }

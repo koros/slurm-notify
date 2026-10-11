@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Precise private STARTTLS missing/temporary/permanent refusal diagnostics, retry-versus-block policy, strict replacement tokens, and real child/owned-storage reopen acceptance.
+
 - Owned SMTP negotiation acceptance composing real child I/O/timeout retries, later certificate blocks, retained partial progress, ownership, and repeated-block reopen checks.
 
 - Private SMTP negotiation dispatch policy with explicit not-submitted evidence, pending-row preservation for blocks/READY, and completion-based retry/reopen/attempt-budget bookkeeping tests.

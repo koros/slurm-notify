@@ -1486,7 +1486,8 @@ mod tests {
             Ack::Input,
             Ack::Certificate,
             Ack::Configuration,
-            Ack::Upgrade,
+            Ack::UpgradeMissing,
+            Ack::UpgradePermanent,
         ] {
             let directory = Directory::new();
             let mut store = seeded(&directory, &["primary"]);
@@ -1525,7 +1526,7 @@ mod tests {
     #[test]
     fn smtp_transient_retries_survive_restart_and_stop_at_attempt_budget() {
         use crate::{smtp_ack::Ack, smtp_dispatch};
-        for ack in [Ack::Io, Ack::Protocol, Ack::Reply] {
+        for ack in [Ack::Io, Ack::Protocol, Ack::Reply, Ack::UpgradeTemporary] {
             let directory = Directory::new();
             let mut store = seeded(&directory, &["primary"]);
             let identity = store
