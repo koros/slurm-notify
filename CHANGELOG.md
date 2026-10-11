@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Owned prepared SMTP tick acceptance for temporary refusal and lost-result retries, frozen-byte replay after reopen, deduplicated polling, and partial delivery recovery after helper spawn failure.
+
 - Private prepared SMTP orchestration sharing delivery, retention, health and cancellation handling; route preflight before side effects, frozen-message restart recovery and continued pending delivery after preparation failure.
 
 - Private prepared SMTP cycle steps sharing durable restoration, accounting windows, finite poll budgets and health tracking, with distinct preparation/limit failures, checkpoint-preserving restart recovery and owned SMTP cycle-to-delivery acceptance.

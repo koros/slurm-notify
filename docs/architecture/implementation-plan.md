@@ -2077,3 +2077,35 @@ Validation: shared checks pass with 207 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.11% (9,632/9,919), above the unchanged 80% gate. No real-cluster or
 real-relay tests were run.
+
+### Owned prepared SMTP tick acceptance
+
+The owned frozen-submission fixtures now run the complete private prepared tick,
+including atomic polling, delivery, retention and health. Temporary final refusal
+and relay acceptance with a lost child result both produce a completion-based retry
+at 25 after completion at 20. Reopening the owned store preserves the exact frozen
+DATA and envelope, rejects changed content and suppresses duplicate preparation;
+the retry succeeds through the verified loopback TLS child boundary.
+
+A new three-destination prepared tick delivers the first route, then stops on a
+missing helper for the second route. It preserves the first committed attempt,
+reports a static spawn diagnostic without acceptance uncertainty and skips cleanup
+and health. Reopen recovers the two pending routes with their original snapshots
+and first attempt numbers, without resending the completed route. Final SQL state
+contains exactly three delivery attempts.
+
+Fixture-only secondary SQLite connections read committed snapshots while the
+parent retains its owned-store guard. They close before child network calls. This
+is acceptance plumbing, not a production storage/dispatch interface. Schema,
+dependencies, runtime defaults and public contracts remain unchanged. Existing
+missing/corrupt-snapshot rejection fixtures are retained.
+
+Next: private SMTP event rendering/redaction design and bounded synthetic message
+fixtures. Route revision, credential integration, licensing, public review and
+real-cluster/relay activation remain pending.
+
+Validation: shared checks pass (207 Rust tests plus one ignored helper, expanded
+custom process acceptance, eight SQLite tests and six hook tests), including fmt
+and strict Clippy. Fresh Rust line coverage is 97.11% (9,632/9,919), above the
+unchanged 80% gate. Tests use synthetic scheduler replies and ephemeral verified
+loopback TLS; no real cluster, relay or credentials were used.

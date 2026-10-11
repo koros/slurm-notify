@@ -239,6 +239,7 @@ fn acceptance() {
     accepted_send_commit_failure_replays();
     owned_smtp_auth_progress_restart();
     owned_frozen_submission_restart();
+    orchestrated_frozen_blocked_restart();
     owned_smtp_submission_restart();
     owned_smtp_lost_result_replay();
     smtp_submit_boundary::acceptance();
@@ -248,7 +249,7 @@ fn acceptance() {
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
     owned_smtp_upgrade_policy_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1685,6 +1686,166 @@ fn owned_smtp_lost_result_replay() {
     );
 }
 
+// Fixture-only reader: the parent keeps the owned store guard for the entire tick.
+// Opening a second connection here proves the snapshot committed before child I/O.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn frozen_dispatch(
+    root: &std::path::Path,
+    item: &storage::DueDelivery,
+    mode: u8,
+) -> Result<delivery::ProviderOutcome, supervised_provider::Diagnostic> {
+    let reader =
+        storage::Store::open(&root.join("state.sqlite3"), Duration::from_millis(50)).unwrap();
+    let snapshot = smtp_frozen_frame::load(&reader, &item.event_id, &item.destination).unwrap();
+    drop(reader);
+    smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(mode, &snapshot))
+        .into_dispatch()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_frozen_blocked_restart() {
+    use polling_cycle::{Cycles, Hooks, PreparedHooks, StageError};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = orchestration_settings(&["a", "b", "c"]);
+    let mut cycles = Cycles::new(1).unwrap();
+    let mut calls = 0;
+    let mut clocks = [7200, 7200, 7210].into_iter();
+    let report = cycles.tick_prepared_fallible(
+        &settings,
+        &orchestration_maintenance(),
+        &mut store,
+        PreparedHooks {
+            smtp_destinations: &["a", "b", "c"],
+            max_messages: 3,
+            query: orchestration_query,
+            prepare: |_: &lifecycle::Event, route: &str| {
+                smtp_message::prepare(
+                    "s@fixture.invalid",
+                    "r@fixture.invalid",
+                    route,
+                    "original",
+                    "original\n.\n.frozen",
+                    123,
+                )
+                .map_err(|_| ())
+            },
+        },
+        Hooks {
+            query: (),
+            send: |item: &storage::DueDelivery| {
+                calls += 1;
+                if item.destination == "a" {
+                    frozen_dispatch(&root, item, 0)
+                } else {
+                    assert_eq!(item.destination, "b");
+                    let mut missing = Command::new(root.join("nonexistent-smtp-helper"));
+                    smtp_submit_dispatch::classify(transport::supervise_with(
+                        &mut missing,
+                        Vec::new(),
+                        Duration::from_secs(1),
+                        4096,
+                        64,
+                        smtp_submit_frame::decode_ack,
+                    ))
+                    .into_dispatch()
+                }
+            },
+            clock: || clocks.next(),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(calls, 2);
+    assert!(clocks.next().is_none());
+    assert!(matches!(
+        report.poll,
+        Some(Ok(polling_cycle::Outcome::Committed { events: 1, .. }))
+    ));
+    assert_eq!(
+        report.delivery.unwrap().unwrap_err(),
+        StageError::DispatchBlocked
+    );
+    let failure = report.delivery_failure.unwrap();
+    assert_eq!(failure.committed.delivered, 1);
+    assert_eq!(
+        failure.diagnostic,
+        Some(supervised_provider::Diagnostic::Spawn)
+    );
+    assert!(!failure.acceptance_uncertain);
+    assert!(report.cleanup.is_none() && report.health.is_none());
+    let pending = store.due_deliveries("cluster", 7210, 10).unwrap();
+    assert_eq!(
+        pending
+            .iter()
+            .map(|item| item.destination.as_str())
+            .collect::<Vec<_>>(),
+        vec!["b", "c"]
+    );
+    let identity = pending[0].event_id.clone();
+    let snapshots: Vec<_> = pending
+        .iter()
+        .map(|item| smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap())
+        .collect();
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut restarted = Cycles::new(1).unwrap();
+    let mut clocks = [7211, 7211, 7220, 7221, 7221, 7221].into_iter();
+    let mut calls = 0;
+    let recovered = restarted.tick_prepared_fallible(
+        &settings,
+        &orchestration_maintenance(),
+        &mut store,
+        PreparedHooks {
+            smtp_destinations: &["a", "b", "c"],
+            max_messages: 3,
+            query: orchestration_query,
+            prepare: |_: &lifecycle::Event, _: &str| panic!("duplicate event rendered on reopen"),
+        },
+        Hooks {
+            query: (),
+            send: |item: &storage::DueDelivery| {
+                assert_eq!(item.event_id, identity);
+                assert_eq!(item.attempt_number, 1);
+                assert_eq!(item.destination, if calls == 0 { "b" } else { "c" });
+                let reader =
+                    storage::Store::open(&root.join("state.sqlite3"), Duration::from_millis(50))
+                        .unwrap();
+                let loaded =
+                    smtp_frozen_frame::load(&reader, &item.event_id, &item.destination).unwrap();
+                assert!(loaded.data() == snapshots[calls].data());
+                assert!(loaded.envelope() == snapshots[calls].envelope());
+                drop(reader);
+                calls += 1;
+                frozen_dispatch(&root, item, 0)
+            },
+            clock: || clocks.next(),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(calls, 2);
+    assert!(clocks.next().is_none());
+    assert!(matches!(
+        recovered.poll,
+        Some(Ok(polling_cycle::Outcome::Committed { events: 0, .. }))
+    ));
+    assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 2);
+    assert_eq!(recovered.cleanup.unwrap().unwrap(), 0);
+    assert!(recovered.health.unwrap().is_ok());
+    assert!(store
+        .due_deliveries("cluster", 7300, 10)
+        .unwrap()
+        .is_empty());
+    drop(store);
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn owned_frozen_submission_restart() {
     for first_mode in [1, 10] {
@@ -1718,45 +1879,43 @@ fn owned_frozen_submission_restart() {
         };
         let mut frozen_message = Some(message);
         let mut cycles = polling_cycle::Cycles::new(1).unwrap();
-        cycles
-            .step_prepared(
-                &settings,
-                &mut store,
-                false,
-                10,
-                polling_cycle::PreparedHooks {
-                    smtp_destinations: &["smtp"],
-                    max_messages: 1,
-                    query: |command: &mut Command, _, _| {
-                        Ok(if command.get_program() == "squeue" {
-                            ""
-                        } else {
-                            "cluster|1|alice|s|actual|COMPLETED|0:0"
-                        }
-                        .into())
-                    },
-                    prepare: |_: &lifecycle::Event, _: &str| Ok(frozen_message.take().unwrap()),
-                },
-            )
-            .unwrap();
-        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
-        let snapshot = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
-        let first = delivery::deliver_due_detailed(
+        let mut clocks = [10, 10, 20, 20, 20].into_iter();
+        let first = cycles.tick_prepared_fallible(
+            &settings,
+            &orchestration_maintenance(),
             &mut store,
-            "cluster",
-            10,
-            10,
-            retry_policy(),
-            |_| {
-                smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(
-                    first_mode, &snapshot,
-                ))
-                .into_dispatch()
+            polling_cycle::PreparedHooks {
+                smtp_destinations: &["smtp"],
+                max_messages: 1,
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        ""
+                    } else {
+                        "cluster|1|alice|s|actual|COMPLETED|0:0"
+                    }
+                    .into())
+                },
+                prepare: |_: &lifecycle::Event, _: &str| Ok(frozen_message.take().unwrap()),
             },
-            || Some(20),
-        )
-        .unwrap();
-        assert_eq!(first.retrying, 1);
+            polling_cycle::Hooks {
+                query: (),
+                send: |item: &storage::DueDelivery| frozen_dispatch(&root, item, first_mode),
+                clock: || clocks.next(),
+                cancelled: || false,
+            },
+        );
+        assert!(matches!(
+            first.poll,
+            Some(Ok(polling_cycle::Outcome::Committed { events: 1, .. }))
+        ));
+        assert_eq!(first.delivery.unwrap().unwrap().retrying, 1);
+        assert_eq!(first.cleanup.unwrap().unwrap(), 0);
+        assert!(first.health.unwrap().is_ok());
+        assert!(clocks.next().is_none());
+        assert!(store.due_deliveries("cluster", 24, 10).unwrap().is_empty());
+        let item = store.due_deliveries("cluster", 25, 10).unwrap().remove(0);
+        assert_eq!(item.attempt_number, 2);
+        let snapshot = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
         drop(store);
         let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
         let reloaded = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
@@ -1774,20 +1933,44 @@ fn owned_frozen_submission_restart() {
         assert!(store
             .freeze_smtp(&item.event_id, &item.destination, &changed)
             .is_err());
-        let second = delivery::deliver_due_detailed(
+        let identity = item.event_id.clone();
+        let mut clocks = [25, 25, 30, 30, 30].into_iter();
+        let mut restarted = polling_cycle::Cycles::new(1).unwrap();
+        let second = restarted.tick_prepared_fallible(
+            &settings,
+            &orchestration_maintenance(),
             &mut store,
-            "cluster",
-            25,
-            10,
-            retry_policy(),
-            |_| {
-                smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(0, &reloaded))
-                    .into_dispatch()
+            polling_cycle::PreparedHooks {
+                smtp_destinations: &["smtp"],
+                max_messages: 1,
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        ""
+                    } else {
+                        "cluster|1|alice|s|actual|COMPLETED|0:0"
+                    }
+                    .into())
+                },
+                prepare: |_: &lifecycle::Event, _: &str| panic!("restart replay must not render"),
             },
-            || Some(30),
-        )
-        .unwrap();
-        assert_eq!(second.delivered, 1);
+            polling_cycle::Hooks {
+                query: (),
+                send: |item: &storage::DueDelivery| {
+                    assert_eq!(item.event_id, identity);
+                    frozen_dispatch(&root, item, 0)
+                },
+                clock: || clocks.next(),
+                cancelled: || false,
+            },
+        );
+        assert!(matches!(
+            second.poll,
+            Some(Ok(polling_cycle::Outcome::Committed { events: 0, .. }))
+        ));
+        assert_eq!(second.delivery.unwrap().unwrap().delivered, 1);
+        assert_eq!(second.cleanup.unwrap().unwrap(), 0);
+        assert!(second.health.unwrap().is_ok());
+        assert!(clocks.next().is_none());
         assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
     }
     // Use a fresh pending event to verify local rejection without a network call.

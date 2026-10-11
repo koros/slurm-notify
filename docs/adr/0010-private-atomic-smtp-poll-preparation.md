@@ -153,3 +153,29 @@ Next: owned SMTP child acceptance through the complete prepared tick, including
 retry/reopen and blocked-dispatch partial progress. Rendering/redaction, route
 revision, credentials, licensing, public review and real-cluster activation remain
 pending.
+
+### Owned prepared SMTP tick acceptance
+
+The owned frozen-submission fixtures now run the complete private prepared tick,
+including atomic polling, delivery, retention and health. Temporary final refusal
+and relay acceptance with a lost child result both produce a completion-based retry
+at 25 after completion at 20. Reopening the owned store preserves the exact frozen
+DATA and envelope, rejects changed content and suppresses duplicate preparation;
+the retry succeeds through the verified loopback TLS child boundary.
+
+A new three-destination prepared tick delivers the first route, then stops on a
+missing helper for the second route. It preserves the first committed attempt,
+reports a static spawn diagnostic without acceptance uncertainty and skips cleanup
+and health. Reopen recovers the two pending routes with their original snapshots
+and first attempt numbers, without resending the completed route. Final SQL state
+contains exactly three delivery attempts.
+
+Fixture-only secondary SQLite connections read committed snapshots while the
+parent retains its owned-store guard. They close before child network calls. This
+is acceptance plumbing, not a production storage/dispatch interface. Schema,
+dependencies, runtime defaults and public contracts remain unchanged. Existing
+missing/corrupt-snapshot rejection fixtures are retained.
+
+Next: private SMTP event rendering/redaction design and bounded synthetic message
+fixtures. Route revision, credential integration, licensing, public review and
+real-cluster/relay activation remain pending.
