@@ -2791,3 +2791,30 @@ helper, custom process acceptance, eight SQLite tests and six hook tests. Both
 configuration examples pass draft range, structural, cross-field and reference
 consistency checks; all proposal JSON parses without duplicate keys. No Rust changes;
 the last measured Rust line coverage remains 97.47% (15,163/15,557).
+
+### Private draft-configuration fixture validation
+
+Added a Python standard-library fixture-only validator and 11 tests to the shared
+local/CI/staged/pre-push suite. Config reads are supplied bytes bounded to 65,536;
+a lexical depth scan precedes JSON parsing, decoded duplicate keys reject, strict
+integer tokens fit u64 and fractional/exponent/nonfinite values reject. Decoded
+object/array counts, known fields, draft ranges, policies, references and cross-field
+relationships are checked with static diagnostics. Unicode surrogate text errors
+also become static categories; rejected input is not echoed through exception chains.
+
+Tests exercise min/max/out-of-range numeric values, byte/depth/member/array budgets,
+escaped duplicate keys, unknown/missing keys, schema versions, route/permission
+references, SMTP trust path lists, invalid environment names and empty deny/suppress
+configurations. Validating examples opens no referenced resource. The harness does
+not implement file/env lookup, DER/URL/SMTP semantic validation or installed parsing.
+No Rust dependency, public contract, schema or runtime default changes are made.
+
+Next: extend private installed-loader preparation only within reviewed scope; the
+complete CLI/config/event package still needs explicit review before public contract
+baselines or runtime activation. The Python harness is review evidence, not approval.
+
+Validation: shared checks pass with 275 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. The additional count-ceiling fixtures pass. No Rust changes; the last
+measured Rust line coverage remains 97.47% (15,163/15,557); Python fixture code is
+explicitly outside the Rust coverage metric.

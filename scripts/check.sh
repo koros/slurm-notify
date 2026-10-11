@@ -6,6 +6,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 python3 -m unittest discover -s tests/integration/hooks -p 'test_*.py' -v
+python3 -m unittest discover -s tests/integration/config_drafts -p 'test_*.py' -v
 cargo build --workspace --locked
 set +e
 output=$("${CARGO_TARGET_DIR:-target}/debug/slurm-notify" 2>&1)

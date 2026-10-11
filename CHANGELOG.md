@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded Python draft-configuration fixture validation with strict key/integer/count checks, static diagnostics and 11 failure/edge tests included in shared CI/hooks; no installed parser or approved contracts.
+
 - Draft configuration resource ceilings, strict integer/cross-field rules, explicit maintenance fields and a machine-readable review manifest with updated synthetic examples; no runtime or approved schema changes.
 
 - Draft local CLI/config/event contract review package, SMTP configuration extension and synthetic mixed-provider example; no approved contracts or runtime activation.

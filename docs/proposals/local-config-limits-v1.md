@@ -120,3 +120,17 @@ behavior separately; a JSON example syntax check is not a schema or runtime test
 
 Job-ID width, source timezone and occurrence-time truth remain open pending the
 Slurm support baseline. This proposal does not set those limits or invent metadata.
+
+## Private fixture validation evidence
+
+The shared check suite now runs `tests/integration/config_drafts`, a private Python
+standard-library harness for these draft examples and bounds. It prechecks byte,
+UTF-8/BOM and container depth limits, rejects decoded duplicate keys and non-integer
+numeric tokens, then checks bounded shape, required/unknown fields, references and
+cross-field rules. Eleven tests cover failure/edge behavior and static categories.
+
+This is review tooling, not an installed Rust configuration loader, accepted JSON
+Schema or complete resource/SMTP/URL validator. File/env resolution, DER contents,
+DNS/address semantics, secret handling and runtime activation are not exercised.
+The range manifest is trusted repository review data, not user-supplied policy.
+Do not substitute this harness for later reviewed schemas or installed acceptance.
