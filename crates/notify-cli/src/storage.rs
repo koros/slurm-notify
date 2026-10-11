@@ -3,6 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
+const REVISION_MIGRATION: &str = include_str!("../../notify-storage/migrations/0003.sql");
 const SMTP_MIGRATION: &str = include_str!("../../notify-storage/migrations/0002.sql");
 
 const MIGRATION: &str = include_str!("../../notify-storage/migrations/0001.sql");
@@ -184,11 +185,17 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1 | 2 => {}
+            1..=3 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
             if let Err(error) = db.execute_batch(SMTP_MIGRATION) {
+                let _ = db.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+        }
+        if version < 3 {
+            if let Err(error) = db.execute_batch(REVISION_MIGRATION) {
                 let _ = db.execute_batch("ROLLBACK");
                 return Err(error.into());
             }
@@ -590,6 +597,90 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    // Explicit preparation of new snapshots only; never infer legacy provenance.
+    pub(super) fn freeze_smtp_revision(
+        &mut self,
+        event_id: &str,
+        destination: &str,
+        message: &super::smtp_message::Prepared,
+        revision: &super::smtp_revision::Descriptor,
+    ) -> Result<(), StorageError> {
+        let envelope = message.envelope();
+        if revision.destination() != destination
+            || revision.envelope() != (envelope.0.as_str(), envelope.1.as_str())
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cluster: String = tx
+            .query_row(
+                "SELECT cluster FROM events WHERE event_id=?1",
+                [event_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StorageError::Conflict)?;
+        tx.execute(
+            "INSERT INTO smtp_render_revisions VALUES (?1,?2,?3,?4) ON CONFLICT DO NOTHING",
+            params![cluster, destination, revision.token(), revision.canonical()],
+        )?;
+        let identical: bool = tx.query_row("SELECT descriptor=?4 FROM smtp_render_revisions WHERE cluster=?1 AND destination=?2 AND revision=?3", params![cluster,destination,revision.token(),revision.canonical()], |row| row.get(0))?;
+        if !identical {
+            return Err(StorageError::Conflict);
+        }
+        let (sender, recipient) = message.envelope();
+        let existing: Option<bool> = tx.query_row("SELECT s.sender=?3 AND s.recipient=?4 AND s.data=?5 AND EXISTS(SELECT 1 FROM smtp_revision_bindings b WHERE b.event_id=s.event_id AND b.destination=s.destination AND b.cluster=?6 AND b.revision=?7) FROM smtp_messages s WHERE s.event_id=?1 AND s.destination=?2", params![event_id,destination,sender,recipient,message.data(),cluster,revision.token()], |row| row.get(0)).optional()?;
+        if let Some(identical) = existing {
+            if !identical {
+                return Err(StorageError::Conflict);
+            }
+        } else {
+            let eligible: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.event_id=?1 AND o.destination=?2 AND o.status='pending' AND NOT EXISTS(SELECT 1 FROM delivery_attempts a WHERE a.event_id=o.event_id AND a.destination=o.destination))", params![event_id,destination], |row| row.get(0))?;
+            if !eligible {
+                return Err(StorageError::Conflict);
+            }
+            tx.execute(
+                "INSERT INTO smtp_messages VALUES (?1,?2,?3,?4,?5)",
+                params![event_id, destination, sender, recipient, message.data()],
+            )?;
+            tx.execute(
+                "INSERT INTO smtp_revision_bindings VALUES (?1,?2,?3,?4)",
+                params![event_id, destination, cluster, revision.token()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(super) fn bound_smtp_revision(
+        &self,
+        event_id: &str,
+        destination: &str,
+    ) -> Result<Option<super::smtp_revision::Descriptor>, StorageError> {
+        type Row = (Option<String>, Option<Vec<u8>>, bool);
+        let row: Option<Row> = self.db.query_row("SELECT CASE WHEN length(r.revision)=64 THEN r.revision END, CASE WHEN typeof(r.descriptor)='blob' AND length(r.descriptor) BETWEEN 1 AND 4096 THEN r.descriptor END, b.cluster=e.cluster FROM smtp_revision_bindings b LEFT JOIN smtp_render_revisions r ON r.cluster=b.cluster AND r.destination=b.destination AND r.revision=b.revision LEFT JOIN events e ON e.event_id=b.event_id WHERE b.event_id=?1 AND b.destination=?2", params![event_id,destination], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+        let Some((token, bytes, coherent)) = row else {
+            return Ok(None);
+        };
+        if !coherent {
+            return Err(StorageError::InvalidInput);
+        }
+        let descriptor = super::smtp_revision::Descriptor::from_stored(
+            &token.ok_or(StorageError::InvalidInput)?,
+            zeroize::Zeroizing::new(bytes.ok_or(StorageError::InvalidInput)?),
+        )
+        .map_err(|_| StorageError::InvalidInput)?;
+        let snapshot = self
+            .frozen_smtp(event_id, destination)?
+            .ok_or(StorageError::InvalidInput)?;
+        if descriptor.destination() != destination || descriptor.envelope() != snapshot.envelope() {
+            return Err(StorageError::InvalidInput);
+        }
+        Ok(Some(descriptor))
     }
 
     pub(super) fn frozen_smtp(
@@ -1570,7 +1661,7 @@ pub(super) mod tests {
     fn future_version_is_not_reset() {
         let directory = Directory::new();
         let store = open(&directory);
-        store.db.pragma_update(None, "user_version", 3).unwrap();
+        store.db.pragma_update(None, "user_version", 4).unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
@@ -1580,7 +1671,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            4
         );
     }
 
@@ -2009,6 +2100,235 @@ pub(super) mod tests {
         )
         .unwrap()
     }
+    fn revision(namespace: &str) -> super::super::smtp_revision::Descriptor {
+        let routes = [super::super::smtp_routes::Route {
+            name: "smtp",
+            visibility: super::super::smtp_render::JobVisibility::Hidden,
+            metadata: super::super::smtp_routes::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                namespace,
+            },
+        }];
+        let plan = super::super::smtp_routes::Plan::new(&["smtp"], &routes, 1).unwrap();
+        super::super::smtp_revision::Descriptor::from_plan(&plan, "smtp").unwrap()
+    }
+    #[test]
+    fn revisions_reopen_immutable_and_reject_legacy_backfill() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let original = revision("original");
+        let message = smtp_message("done");
+        assert!(matches!(
+            store.freeze_smtp_revision(&item.event_id, "other", &message, &original),
+            Err(StorageError::InvalidInput)
+        ));
+        assert!(matches!(
+            store.freeze_smtp_revision("missing", "smtp", &message, &original),
+            Err(StorageError::Conflict)
+        ));
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &message, &original)
+            .unwrap();
+        store
+            .record_delivery(&item, DeliveryOutcome::TransientFailure, 20, Some(25))
+            .unwrap();
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(
+            store
+                .bound_smtp_revision(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .token(),
+            original.token()
+        );
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &message, &original)
+            .unwrap();
+        for (message, revision) in [
+            (smtp_message("changed"), revision("original")),
+            (smtp_message("done"), revision("changed")),
+        ] {
+            assert!(matches!(
+                store.freeze_smtp_revision(&item.event_id, "smtp", &message, &revision),
+                Err(StorageError::Conflict)
+            ));
+        }
+        assert_eq!(count(&store, "smtp_render_revisions"), 1);
+        assert_eq!(count(&store, "smtp_revision_bindings"), 1);
+        store
+            .db
+            .execute("DELETE FROM smtp_revision_bindings", [])
+            .unwrap();
+        assert!(store
+            .bound_smtp_revision(&item.event_id, "smtp")
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            store.freeze_smtp_revision(&item.event_id, "smtp", &message, &original),
+            Err(StorageError::Conflict)
+        ));
+    }
+    #[test]
+    fn revision_late_failure_rolls_back_and_foreign_keys_protect_pending_work() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let descriptor = revision("fixture");
+        store.db.execute_batch("CREATE TRIGGER reject_binding BEFORE INSERT ON smtp_revision_bindings BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        assert!(matches!(
+            store.freeze_smtp_revision(&item.event_id, "smtp", &smtp_message("done"), &descriptor),
+            Err(StorageError::Database(_))
+        ));
+        for table in [
+            "smtp_messages",
+            "smtp_render_revisions",
+            "smtp_revision_bindings",
+        ] {
+            assert_eq!(count(&store, table), 0);
+        }
+        assert_eq!(count(&store, "outbox"), 1);
+        store
+            .db
+            .execute_batch("DROP TRIGGER reject_binding;")
+            .unwrap();
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &smtp_message("done"), &descriptor)
+            .unwrap();
+        assert!(store
+            .db
+            .execute("DELETE FROM smtp_render_revisions", [])
+            .is_err());
+        store
+            .db
+            .execute("DELETE FROM smtp_revision_bindings", [])
+            .unwrap();
+        assert!(store
+            .db
+            .execute(
+                "INSERT INTO smtp_revision_bindings VALUES (?1,'smtp','wrong',?2)",
+                params![item.event_id, descriptor.token()]
+            )
+            .is_err());
+        assert!(store
+            .db
+            .execute(
+                "INSERT INTO smtp_revision_bindings VALUES (?1,'smtp','cluster',?2)",
+                params![item.event_id, "0".repeat(64)]
+            )
+            .is_err());
+        store
+            .db
+            .execute(
+                "INSERT INTO smtp_revision_bindings VALUES (?1,'smtp','cluster',?2)",
+                params![item.event_id, descriptor.token()],
+            )
+            .unwrap();
+        store.db.execute("DELETE FROM outbox", []).unwrap();
+        assert_eq!(count(&store, "smtp_revision_bindings"), 0);
+        assert_eq!(count(&store, "smtp_messages"), 0);
+        assert_eq!(count(&store, "smtp_render_revisions"), 1);
+    }
+    #[test]
+    fn revision_upgrade_preserves_legacy_and_failed_migration_recovers() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        store
+            .freeze_smtp(&item.event_id, "smtp", &smtp_message("legacy"))
+            .unwrap();
+        store.db.execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; PRAGMA user_version=2; CREATE TABLE smtp_revision_bindings(blocker INTEGER);").unwrap();
+        drop(store);
+        assert!(Store::open(&directory.path(), Duration::from_millis(50)).is_err());
+        let db = Connection::open(directory.path()).unwrap();
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='smtp_render_revisions'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        db.execute_batch("DROP TABLE smtp_revision_bindings;")
+            .unwrap();
+        drop(db);
+        let mut store = open(&directory);
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .data(),
+            smtp_message("legacy").data()
+        );
+        assert!(store
+            .bound_smtp_revision(&item.event_id, "smtp")
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            store.freeze_smtp_revision(
+                &item.event_id,
+                "smtp",
+                &smtp_message("legacy"),
+                &revision("fixture")
+            ),
+            Err(StorageError::Conflict)
+        ));
+        assert_eq!(count(&store, "smtp_render_revisions"), 0);
+    }
+    #[test]
+    fn malformed_owned_revision_state_fails_closed() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let descriptor = revision("fixture");
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &smtp_message("done"), &descriptor)
+            .unwrap();
+        store
+            .db
+            .execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        for bytes in [
+            vec![0; 4097],
+            vec![0],
+            revision("changed").canonical().to_vec(),
+        ] {
+            store
+                .db
+                .execute("UPDATE smtp_render_revisions SET descriptor=?1", [bytes])
+                .unwrap();
+            assert!(matches!(
+                store.bound_smtp_revision(&item.event_id, "smtp"),
+                Err(StorageError::InvalidInput)
+            ));
+            assert!(matches!(
+                store.freeze_smtp_revision(
+                    &item.event_id,
+                    "smtp",
+                    &smtp_message("done"),
+                    &descriptor
+                ),
+                Err(StorageError::Conflict)
+            ));
+        }
+        store
+            .db
+            .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM smtp_render_revisions;")
+            .unwrap();
+        assert!(matches!(
+            store.bound_smtp_revision(&item.event_id, "smtp"),
+            Err(StorageError::InvalidInput)
+        ));
+    }
     #[test]
     fn frozen_smtp_is_immutable_and_exact_across_retry_and_reopen() {
         let directory = Directory::new();
@@ -2095,7 +2415,7 @@ pub(super) mod tests {
             .unwrap();
         store
             .db
-            .execute_batch("DROP TABLE smtp_messages; PRAGMA user_version=1;")
+            .execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1;")
             .unwrap();
         drop(store);
         let mut store = open(&directory);
@@ -2106,7 +2426,7 @@ pub(super) mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
         assert!(store
             .frozen_smtp(&item.event_id, &item.destination)
@@ -2125,7 +2445,7 @@ pub(super) mod tests {
         let directory = Directory::new();
         let mut store = open(&directory);
         let item = smtp_seed(&mut store);
-        store.db.execute_batch("DROP TABLE smtp_messages; PRAGMA user_version=1; CREATE TABLE smtp_messages(blocker INTEGER);").unwrap();
+        store.db.execute_batch("DROP TABLE smtp_revision_bindings; DROP TABLE smtp_render_revisions; DROP TABLE smtp_messages; PRAGMA user_version=1; CREATE TABLE smtp_messages(blocker INTEGER);").unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),

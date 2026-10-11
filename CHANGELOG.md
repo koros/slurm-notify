@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private additive schema v3 for immutable SMTP rendering revisions and snapshot bindings, bounded canonical loading, legacy preservation, transactional preparation and migration/reopen/conflict/rollback tests. Atomic poll and revision-aware dispatch integration remain pending.
+
 - Private bounded canonical SMTP rendering descriptors and SHA-256 revision fingerprints from validated plans, with golden encoding/digest, policy/version changes, route-order stability, limits and invalid-policy tests. No durable binding yet.
 
 - Private durable SMTP route-revision design covering canonical rendering fingerprints, atomic outbox bindings, legacy handling, explicit pending-revision permission, cleanup and the required later relay/TLS/auth profile binding. Implementation is pending.

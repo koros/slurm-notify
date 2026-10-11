@@ -158,3 +158,27 @@ Message-IDs, provider selection, public contracts or runtime defaults are activa
 Next: additive private migration and immutable descriptor/binding storage, with
 bounded canonical validation, legacy preservation, conflicts and rollback tests.
 Atomic poll integration and durable provider profiles remain later increments.
+
+### Private revision storage implementation
+
+Additive migration 0003 advances private SQLite state to version 3. Immutable
+rendering descriptors are keyed by cluster, destination and fingerprint; bindings
+reference both the outbox/snapshot and descriptor. Insert-time cluster checks and
+foreign keys reject incoherent references. Outbox removal cascades snapshots and
+bindings; unreferenced descriptors remain for later bounded cleanup.
+
+Explicit freeze_smtp_revision preparation atomically inserts the descriptor, new
+snapshot and binding, or compares all existing values for idempotence. Conflicts
+and late binding failures roll back every write. Existing unbound snapshots are
+never assigned inferred provenance. Legacy polling/delivery remains unchanged.
+
+Stored descriptors are bounded in SQL before materialization, decoded in fixed
+field order, revalidated through Plan, and checked against the canonical SHA-256
+fingerprint. Unknown versions, malformed fields, missing references and envelope
+mismatches fail closed with static errors. Migration, reopen, immutable conflicts,
+legacy preservation, malformed state, foreign keys and rollback have fixture tests.
+
+Next: integrate these records into atomic prepared polling and versioned event
+identity selection. Revision-aware dispatch, explicit revision permission and
+durable relay/TLS/auth profiles remain subsequent work. No public contracts,
+new dependencies, runtime defaults, real-cluster tests or releases are introduced.

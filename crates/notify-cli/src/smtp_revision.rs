@@ -19,6 +19,7 @@ pub(super) struct Descriptor {
 pub(super) enum Error {
     Route,
     Limit,
+    Invalid,
 }
 
 impl Descriptor {
@@ -47,12 +48,94 @@ impl Descriptor {
         }
         Ok(Self { canonical, token })
     }
+    pub(super) fn from_stored(token: &str, canonical: Zeroizing<Vec<u8>>) -> Result<Self, Error> {
+        let fields = decode(&canonical)?;
+        let visibility = match fields[4] {
+            "hidden" => JobVisibility::Hidden,
+            "identifier" => JobVisibility::Identifier,
+            _ => return Err(Error::Invalid),
+        };
+        if fields[5..]
+            != [
+                smtp_render::VERSION,
+                smtp_metadata::VERSION,
+                smtp_message::ID_DOMAIN,
+            ]
+        {
+            return Err(Error::Invalid);
+        }
+        let routes = [super::smtp_routes::Route {
+            name: fields[0],
+            visibility,
+            metadata: super::smtp_routes::Metadata {
+                sender: fields[1],
+                recipient: fields[2],
+                namespace: fields[3],
+            },
+        }];
+        let names = [fields[0]];
+        let plan = Plan::new(&names, &routes, 1).map_err(|_| Error::Invalid)?;
+        let validated = Self::from_plan(&plan, fields[0])?;
+        if validated.token() != token || validated.canonical() != canonical.as_slice() {
+            return Err(Error::Invalid);
+        }
+        Ok(Self {
+            canonical,
+            token: token.to_owned(),
+        })
+    }
+    pub(super) fn destination(&self) -> &str {
+        decode(&self.canonical).expect("validated revision")[0]
+    }
+    pub(super) fn envelope(&self) -> (&str, &str) {
+        let fields = decode(&self.canonical).expect("validated revision");
+        (fields[1], fields[2])
+    }
     pub(super) fn canonical(&self) -> &[u8] {
         &self.canonical
     }
     pub(super) fn token(&self) -> &str {
         &self.token
     }
+}
+
+fn decode(bytes: &[u8]) -> Result<[&str; 8], Error> {
+    if bytes.len() > LIMIT {
+        return Err(Error::Limit);
+    }
+    let mut rest = bytes.strip_prefix(PREFIX).ok_or(Error::Invalid)?;
+    let mut fields = [""; 8];
+    for (index, tag) in [
+        "destination",
+        "sender",
+        "recipient",
+        "namespace",
+        "disclosure",
+        "renderer",
+        "identity",
+        "domain",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let size = rest.get(..2).ok_or(Error::Invalid)?;
+        let length = u16::from_be_bytes([size[0], size[1]]) as usize;
+        rest = &rest[2..];
+        if rest.get(..length) != Some(tag.as_bytes()) {
+            return Err(Error::Invalid);
+        }
+        rest = &rest[length..];
+        let size = rest.get(..4).ok_or(Error::Invalid)?;
+        let length = u32::from_be_bytes(size.try_into().map_err(|_| Error::Invalid)?) as usize;
+        rest = &rest[4..];
+        fields[index] = std::str::from_utf8(rest.get(..length).ok_or(Error::Invalid)?)
+            .map_err(|_| Error::Invalid)?;
+        rest = &rest[length..];
+    }
+    if !rest.is_empty() {
+        return Err(Error::Invalid);
+    }
+    Ok(fields)
 }
 
 // Fixed field order; unsigned big-endian u16 tag/u32 value byte lengths.
@@ -102,6 +185,55 @@ mod tests {
         let names = [route.name];
         let plan = Plan::new(&names, std::slice::from_ref(route), 1).unwrap();
         Descriptor::from_plan(&plan, route.name).unwrap()
+    }
+    #[test]
+    fn stored_decoder_rejects_truncation_trailing_unknown_and_invalid_policy() {
+        let original = descriptor(&route("smtp"));
+        assert_eq!(
+            Descriptor::from_stored(
+                original.token(),
+                Zeroizing::new(original.canonical().to_vec())
+            )
+            .unwrap()
+            .token(),
+            original.token()
+        );
+        for length in 0..original.canonical().len() {
+            assert!(Descriptor::from_stored(
+                original.token(),
+                Zeroizing::new(original.canonical()[..length].to_vec())
+            )
+            .is_err());
+        }
+        for bytes in [vec![0; 4097], [original.canonical(), b"x"].concat()] {
+            assert!(Descriptor::from_stored(original.token(), Zeroizing::new(bytes)).is_err());
+        }
+        assert!(Descriptor::from_stored(
+            &original.token().to_uppercase(),
+            Zeroizing::new(original.canonical().to_vec())
+        )
+        .is_err());
+        let base = [
+            ("destination", "smtp"),
+            ("sender", "s@fixture.invalid"),
+            ("recipient", "r@fixture.invalid"),
+            ("namespace", "fixture"),
+            ("disclosure", "hidden"),
+            ("renderer", smtp_render::VERSION),
+            ("identity", smtp_metadata::VERSION),
+            ("domain", smtp_message::ID_DOMAIN),
+        ];
+        for index in 0..8 {
+            let mut fields = base;
+            fields[index].1 = "invalid\r\n";
+            assert!(Descriptor::from_stored(original.token(), encode(&fields).unwrap()).is_err());
+            fields = base;
+            fields[index].0 = "unknown";
+            assert!(Descriptor::from_stored(original.token(), encode(&fields).unwrap()).is_err());
+        }
+        let mut invalid_utf8 = original.canonical().to_vec();
+        *invalid_utf8.last_mut().unwrap() = 255;
+        assert!(Descriptor::from_stored(original.token(), Zeroizing::new(invalid_utf8)).is_err());
     }
     #[test]
     fn canonical_encoding_and_fingerprint_match_independent_golden_vectors() {
