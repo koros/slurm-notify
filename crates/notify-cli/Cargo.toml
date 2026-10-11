@@ -20,7 +20,7 @@ zeroize = "=1.8.1"
 # Reuse locked TLS crypto for bounded deterministic private SMTP identities.
 ring = "=0.17.14"
 # Reuse the locked codec for private AUTH PLAIN fixtures; no new package version.
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 # Message builder only: SMTP transport, TLS, pooling and async features stay disabled.
 lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
 # Retain unrelated builder transitive versions during the security update.
