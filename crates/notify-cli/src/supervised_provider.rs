@@ -4,6 +4,14 @@ use super::{delivery::ProviderOutcome, transport};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Diagnostic {
     Acknowledged,
+    SmtpReady,
+    SmtpInput,
+    SmtpCertificate,
+    SmtpConfiguration,
+    SmtpIo,
+    SmtpProtocol,
+    SmtpReply,
+    SmtpUpgrade,
     InvalidInput,
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     UnsupportedPlatform,
@@ -22,6 +30,7 @@ pub(super) enum Acceptance {
     Rejected,
     Unknown,
     NotAttempted,
+    NotSubmitted,
 }
 
 #[derive(Debug, PartialEq, Eq)]

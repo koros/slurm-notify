@@ -1478,4 +1478,109 @@ mod tests {
             .unwrap()
             .is_empty());
     }
+    #[test]
+    fn smtp_blocks_preserve_pending_identity_and_attempts_after_restart() {
+        use crate::{smtp_ack::Ack, smtp_dispatch};
+        for ack in [
+            Ack::Ready,
+            Ack::Input,
+            Ack::Certificate,
+            Ack::Configuration,
+            Ack::Upgrade,
+        ] {
+            let directory = Directory::new();
+            let mut store = seeded(&directory, &["primary"]);
+            let before = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+            let diagnostic = smtp_dispatch::classify(Ok(ack)).diagnostic;
+            let failure = deliver_due_detailed(
+                &mut store,
+                "cluster",
+                10,
+                10,
+                policy(),
+                |_| smtp_dispatch::classify(Ok(ack)).into_dispatch(),
+                || panic!("blocked negotiation must not sample completion clock"),
+            )
+            .unwrap_err();
+            assert_eq!(failure.kind, FailureKind::DispatchBlocked);
+            assert_eq!(failure.diagnostic, Some(diagnostic));
+            assert_eq!(failure.committed, BatchReport::default());
+            assert!(!failure.acceptance_uncertain);
+            drop(store);
+            let store = open(&directory);
+            let after = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+            assert_eq!(after.event_id, before.event_id);
+            assert_eq!(after.destination, before.destination);
+            assert_eq!(after.attempt_number, 1);
+            assert_eq!(
+                db(&directory)
+                    .query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn smtp_transient_retries_survive_restart_and_stop_at_attempt_budget() {
+        use crate::{smtp_ack::Ack, smtp_dispatch};
+        for ack in [Ack::Io, Ack::Protocol, Ack::Reply] {
+            let directory = Directory::new();
+            let mut store = seeded(&directory, &["primary"]);
+            let identity = store
+                .due_deliveries("cluster", 10, 10)
+                .unwrap()
+                .remove(0)
+                .event_id;
+            for (attempt, now, completion, next) in
+                [(1, 10, 20, 25), (2, 25, 30, 40), (3, 40, 50, 70)]
+            {
+                let item = store.due_deliveries("cluster", now, 10).unwrap().remove(0);
+                assert_eq!(item.event_id, identity);
+                assert_eq!(item.attempt_number, attempt);
+                let report = deliver_due_fallible(
+                    &mut store,
+                    "cluster",
+                    now,
+                    10,
+                    policy(),
+                    |_| smtp_dispatch::classify(Ok(ack)).into_dispatch(),
+                    || Some(completion),
+                )
+                .unwrap();
+                assert_eq!(report.delivered, 0);
+                assert_eq!(report.retrying, usize::from(attempt < 3));
+                assert_eq!(report.failed, usize::from(attempt == 3));
+                drop(store);
+                store = open(&directory);
+                assert!(store
+                    .due_deliveries("cluster", next - 1, 10)
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(
+                    store.due_deliveries("cluster", next, 10).unwrap().len(),
+                    usize::from(attempt < 3)
+                );
+            }
+            assert_eq!(
+                db(&directory)
+                    .query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                3
+            );
+            let report = deliver_due_fallible(
+                &mut store,
+                "cluster",
+                100,
+                10,
+                policy(),
+                |_| panic!("exhausted SMTP row must not dispatch"),
+                || panic!("no completion clock"),
+            )
+            .unwrap();
+            assert_eq!(report, BatchReport::default());
+        }
+    }
 }

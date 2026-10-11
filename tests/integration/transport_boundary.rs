@@ -26,6 +26,8 @@ mod supervised_provider;
 
 #[path = "../../crates/notify-cli/src/smtp_ack.rs"]
 mod smtp_ack;
+#[path = "../../crates/notify-cli/src/smtp_dispatch.rs"]
+mod smtp_dispatch;
 mod smtp_negotiation_boundary;
 #[path = "../../crates/notify-cli/src/smtp_reply.rs"]
 mod smtp_reply;

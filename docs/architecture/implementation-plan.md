@@ -1450,3 +1450,36 @@ negotiation evidence, proving pending rows survive certificate/input blocks whil
 transient errors schedule bounded retries. READY must remain excluded from delivery
 success. AUTH, message construction/submission, public review, licensing, cluster
 validation, and activation remain pending.
+
+## Subsequent increment: SMTP negotiation dispatch and durable retry policy
+
+A private classifier maps acknowledged negotiation evidence into the existing
+fallible worker. INPUT, CERTIFICATE, CONFIGURATION, and UPGRADE block dispatch;
+READY also blocks because successful negotiation is not completed delivery.
+Acknowledged IO, PROTOCOL, and REPLY produce bounded retry. Every acknowledged
+negotiation result carries explicit NotSubmitted evidence, distinct from the
+existing NotAttempted and Unknown categories. Parent supervisor errors retain
+existing conservative local-block/transient-retry behavior; lost acknowledgment
+cannot prove child phase. No path produces Delivered or permanent rejection.
+
+UPGRADE remains a conservative block because its current token conflates missing
+extension and temporary/permanent refusal. REPLY retries without reply-code/phase
+precision. These provisional policies must be refined before real submission;
+they are not claims about authenticated SMTP transaction acceptance.
+
+Three policy tests cover all acknowledged categories, READY exclusion, and parent
+spawn/timeout/failed-child/invalid-result/cleanup behavior. Two injected durable
+tests verify every block preserves pending event/destination/attempt after reopen,
+with zero attempt rows and no completion-clock sampling, and each transient
+category persists completion-based deadlines, advances attempt numbers, preserves
+identity after reopen, and stops dispatch after the three-attempt fixture budget.
+
+The full suite passes: 163 Rust tests plus one ignored helper, twenty-nine custom
+process scenarios, eight SQLite tests, and six hook tests. No schema, dependency,
+runtime default, or public contract changed. These injected tests compose policy
+with storage; process acknowledgment acceptance is covered separately.
+
+Next: compose actual supervised SMTP certificate blocks and transient failures
+with owned storage and reopen, including prior-destination progress, before adding
+credential or message paths. Refusal code/phase precision, AUTH, message construction,
+public review, licensing, cluster validation, and activation remain pending.

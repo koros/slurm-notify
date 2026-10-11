@@ -276,3 +276,8 @@ Private SMTP negotiation diagnostics now cross the supervised boundary through
 strict, bounded acknowledgments. Certificate, configuration, I/O, protocol, reply,
 and upgrade categories survive; READY means negotiation only. No token means relay
 acceptance, and worker retry/block bookkeeping remains pending.
+
+Private negotiation policy now keeps certificate/input/configuration/upgrade blocks
+and negotiation-only READY pending without fabricated attempts. Transient errors
+use existing completion-based retries and attempt limits, with reopen tests. This
+is injected diagnostic bookkeeping; authenticated SMTP delivery remains pending.
