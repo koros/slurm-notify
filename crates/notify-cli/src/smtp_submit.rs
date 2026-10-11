@@ -8,14 +8,14 @@ use super::{
 use std::io::{Read, Write};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase {
+pub(super) enum Phase {
     Mail,
     Recipient,
     Data,
     FinalData,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Diagnostic {
+pub(super) enum Diagnostic {
     RelayAccepted,
     Temporary,
     Permanent,
@@ -23,18 +23,18 @@ enum Diagnostic {
     Protocol,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Acceptance {
+pub(super) enum Acceptance {
     RelayAccepted,
     NotSubmitted,
     NotAccepted,
     Unknown,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Report {
     pub(super) outcome: ProviderOutcome,
-    phase: Phase,
-    diagnostic: Diagnostic,
-    acceptance: Acceptance,
+    pub(super) phase: Phase,
+    pub(super) diagnostic: Diagnostic,
+    pub(super) acceptance: Acceptance,
 }
 
 // Callers can only supply a stream obtained after verified STARTTLS and AUTH.
@@ -125,8 +125,11 @@ fn transaction(stream: &mut (impl Read + Write), message: &Prepared) -> Report {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::super::{smtp_auth, smtp_message};
+    #[allow(unused_imports)]
     use super::*;
+    #[allow(unused_imports)] // Custom process harness does not run these unit fixtures.
     use std::{
         io::Cursor,
         net::{TcpListener, TcpStream},

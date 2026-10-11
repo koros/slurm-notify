@@ -148,6 +148,7 @@ fn data_frame(message: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
     fn sample(body: &str) -> Result<Prepared, Error> {
         prepare(

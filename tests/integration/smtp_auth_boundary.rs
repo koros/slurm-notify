@@ -50,7 +50,7 @@ pub(super) fn serve(mut input: impl Read, mut output: impl Write) -> std::io::Re
     output.flush()
 }
 
-fn classify(error: smtp_auth::Error) -> Ack {
+pub(super) fn classify(error: smtp_auth::Error) -> Ack {
     match error {
         smtp_auth::Error::Credentials => Ack::Credentials,
         smtp_auth::Error::Unsupported => Ack::Unsupported,

@@ -1780,3 +1780,45 @@ licensing, cluster validation and activation remain pending.
 Validation: shared checks pass (181 Rust tests plus one ignored helper, 51 custom
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy. Coverage passes the 80% gate at 96.15% Rust lines (9,361/9,736).
+
+## Subsequent increment: supervised submission child boundary
+
+A separate test-harness submission child consumes ten length-prefixed fields:
+ephemeral fixture DER root, loopback port, username/password, single sender and
+recipient, stable identity, subject, body, and frozen timestamp. Per-field ceilings
+match the private builders (root 4,096; port 5; credentials 64/128; addresses
+254 each; identity 64; subject 128; body 4,096; timestamp 10), totaling 9,139 bytes
+including prefixes. Lengths are checked before allocation, exact EOF is required,
+and credentials/message/trust are validated before connection. Empty body alone
+is allowed. Owned field and writer buffers preserve zeroization; fixture trust is
+explicit and certificate/hostname verification remains enabled.
+
+The new SMTP_SUBMIT results distinguish pre-authentication blocks/failures from
+MAIL/RCPT/DATA/final DATA reports. Only thirty canonical combinations can be encoded
+or decoded; authentication success, delivery evidence at earlier phases, inconsistent
+final acceptance, cross-mode tokens, raw text and trailing bytes are rejected.
+All output fits 48 bytes. Final explicit refusal retains not-accepted evidence;
+final reply I/O/protocol failures retain unknown acceptance. Parent timeout/failed
+child/wrong token remains a transport error, conservatively unknown under the
+existing parent policy; worker integration follows separately.
+
+Three unit tests cover maximum-size input, every truncation, every oversized/empty
+field, structured injection, date/port/UTF-8 rejection, and all canonical result
+roundtrips/invalid combinations. Fifteen new custom process scenarios observe real
+verified TLS/AUTH and exact single envelope/DATA bytes: acceptance, temporary and
+permanent final refusal, malformed/unexpected final reply, abrupt EOF, stalled and
+drip-fed final reply, early MAIL/RCPT refusal, invalid body/trust/trailing input
+with no connection, wrong acknowledgment and valid acknowledgment from failed exit.
+Stall/drip cases enforce a 500 ms request deadline, observe socket closure, and
+return with cleanup within 1.5 seconds; drip confirms continuing traffic. Finite
+socket waits remain independent of the parent deadline.
+
+No dependencies, schema, runtime defaults or public interfaces changed.
+Next: parent submission dispatch policy and owned outbox retry/rejection/acceptance
+restart tests, including uncertainty when a child result is lost. Durable frozen
+message storage, credential lookup, licensing, public review, cluster validation,
+and activation remain pending.
+
+Validation: shared checks pass (184 Rust tests plus one ignored helper, 66 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy. The 80% coverage gate passes at 96.21% Rust lines (9,625/10,004).
