@@ -59,6 +59,9 @@ mod smtp_auth_dispatch;
 mod smtp_message;
 
 #[cfg(test)]
+mod smtp_render;
+
+#[cfg(test)]
 mod smtp_submit;
 
 #[cfg(test)]

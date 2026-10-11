@@ -10,6 +10,8 @@ mod scheduler;
 mod smtp_frozen_frame;
 #[path = "../../crates/notify-cli/src/smtp_poll.rs"]
 mod smtp_poll;
+#[path = "../../crates/notify-cli/src/smtp_render.rs"]
+mod smtp_render;
 #[path = "../../crates/notify-cli/src/storage.rs"]
 mod storage;
 #[path = "../../crates/notify-cli/src/transport.rs"]
@@ -1720,14 +1722,16 @@ fn orchestrated_frozen_blocked_restart() {
             smtp_destinations: &["a", "b", "c"],
             max_messages: 3,
             query: orchestration_query,
-            prepare: |_: &lifecycle::Event, route: &str| {
-                smtp_message::prepare(
-                    "s@fixture.invalid",
-                    "r@fixture.invalid",
-                    route,
-                    "original",
-                    "original\n.\n.frozen",
-                    123,
+            prepare: |event: &lifecycle::Event, route: &str| {
+                smtp_render::prepare(
+                    event,
+                    &smtp_render::Metadata {
+                        sender: "s@fixture.invalid",
+                        recipient: "r@fixture.invalid",
+                        identity: route,
+                        timestamp: 123,
+                    },
+                    smtp_render::JobVisibility::Hidden,
                 )
                 .map_err(|_| ())
             },

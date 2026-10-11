@@ -2109,3 +2109,33 @@ custom process acceptance, eight SQLite tests and six hook tests), including fmt
 and strict Clippy. Fresh Rust line coverage is 97.11% (9,632/9,919), above the
 unchanged 80% gate. Tests use synthetic scheduler replies and ephemeral verified
 loopback TLS; no real cluster, relay or credentials were used.
+
+### Private bounded SMTP lifecycle rendering
+
+ADR 0011 records a test-only allowlist renderer with explicit Hidden/Identifier
+job disclosure, fixed labels for emitted lifecycle states and strict 32-byte
+numeric/array ID validation. Cluster and attempt context are always omitted;
+unknown states, unsafe disclosed IDs and invalid message metadata fail with static
+categories. Timestamp/envelope/identity are explicit caller inputs and use the
+existing builder; no runtime defaults or production email format are activated.
+
+Four renderer tests cover all emitted states, both disclosure choices, hostile
+hidden fields, deterministic output, ID boundary/injection/Unicode failures and
+metadata errors. A prepared-cycle rollback/reopen/recovery test verifies failed
+rendering leaves no durable poll state and successful redacted bytes survive
+reopen. Prepared cycle fixtures and the owned TLS partial-progress acceptance
+now use this renderer before atomic commit, preserving duplicate suppression.
+
+No dependencies, schema or public contracts changed. This minimal policy omits
+unapproved free text rather than attempting general secret detection; production
+identity/domain, credentials, route revisions, public review and activation remain
+pending.
+
+Next: mixed SMTP-route disclosure selection and later-route renderer-failure
+rollback/restart acceptance. Licensing and real-cluster/relay validation remain
+explicit unresolved gates.
+
+Validation: shared checks pass with 212 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage passes the unchanged 80% gate at 97.23% (9,882/10,164). No real-cluster
+or real-relay tests were run.

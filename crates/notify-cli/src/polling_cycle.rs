@@ -721,19 +721,94 @@ mod tests {
     use crate::storage::tests::Directory;
 
     fn smtp_message(
-        _: &super::super::lifecycle::Event,
+        event: &super::super::lifecycle::Event,
         _: &str,
     ) -> Result<super::super::smtp_message::Prepared, ()> {
-        super::super::smtp_message::prepare(
-            "s@fixture.invalid",
-            "r@fixture.invalid",
-            "fixture",
-            "done",
-            "original\n.\n.dot",
-            123,
+        super::super::smtp_render::prepare(
+            event,
+            &super::super::smtp_render::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                identity: "fixture",
+                timestamp: 123,
+            },
+            super::super::smtp_render::JobVisibility::Hidden,
         )
         .map_err(|_| ())
     }
+
+    #[test]
+    fn renderer_failure_rolls_back_poll_and_reopen_can_prepare_redacted_snapshot() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        let result = cycles.step_prepared(
+            &settings(),
+            &mut store,
+            false,
+            7200,
+            PreparedHooks {
+                smtp_destinations: &["primary"],
+                max_messages: 1,
+                query: smtp_query,
+                prepare: |event: &super::super::lifecycle::Event, _: &str| {
+                    super::super::smtp_render::prepare(
+                        event,
+                        &super::super::smtp_render::Metadata {
+                            sender: "s@fixture.invalid",
+                            recipient: "r@fixture.invalid",
+                            identity: "invalid\r\nfixture",
+                            timestamp: 123,
+                        },
+                        super::super::smtp_render::JobVisibility::Hidden,
+                    )
+                    .map_err(|_| ())
+                },
+            },
+        );
+        assert!(matches!(result, Err(Error::Preparation)));
+        assert_eq!(cycles.health.last_failure, Some(Failure::Preparation));
+        drop(store);
+        let mut store = open(&directory);
+        let restored = store.restore("cluster", 10).unwrap();
+        assert!(restored.0.emitted.is_empty());
+        assert!(restored.1.is_none());
+        assert!(store
+            .due_deliveries("cluster", 7200, 10)
+            .unwrap()
+            .is_empty());
+        cycles
+            .step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7260,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: smtp_message,
+                },
+            )
+            .unwrap();
+        let item = store.due_deliveries("cluster", 7260, 10).unwrap().remove(0);
+        let frozen = store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .unwrap();
+        let text = std::str::from_utf8(frozen.data()).unwrap();
+        assert!(text.contains("State: COMPLETED") && text.contains("Job: [redacted]"));
+        assert!(!text.contains("cluster") && !text.contains("actual"));
+        assert_eq!(cycles.health.last_failure, None);
+        drop(store);
+        let store = open(&directory);
+        let reopened = store
+            .frozen_smtp(&item.event_id, &item.destination)
+            .unwrap()
+            .unwrap();
+        assert!(reopened.data() == frozen.data());
+    }
+
     fn smtp_query(command: &mut Command, _: Duration, _: usize) -> Result<String, QueryError> {
         Ok(if command.get_program() == "squeue" {
             ""
