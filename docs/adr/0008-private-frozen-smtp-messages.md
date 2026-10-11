@@ -41,8 +41,26 @@ Four Rust tests cover exact byte/envelope preservation through retry/reopen,
 immutable/idempotent writes, missing destination and attempted legacy conflicts,
 version-1 upgrade/future-version guard, migration/insertion rollback, foreign-key
 cascade, malformed DATA, address injection, and bypassed-check oversized BLOBs.
-No dependencies or public interfaces changed. Next: compose frozen reads with the
-submission child under a separate bounded frame; preserve bytes rather than
-rebuilding from current configuration/templates. Event rendering, missing-snapshot
-worker policy, route revision semantics, public persistence review, real relay/cluster
-validation, licensing and activation remain pending.
+The subsequent private child experiment uses a separate seven-field frame: fixture
+trust root, loopback port, username/password, saved sender/recipient and exact saved
+DATA. The total input cap is 21,213 bytes, with per-field caps checked before
+allocation and strict EOF. Credentials and DATA own zeroizing buffers. The original
+ten-field renderer fixture remains separate. Child restoration validates addresses
+and canonical DATA without rendering, adding headers, sampling a clock or restuffing
+wire bytes; verified TLS/AUTH and existing bounded submission/acknowledgment policy
+remain shared. This is private owned-snapshot transport, not a general raw email API.
+
+A private load preflight maps missing, malformed or unreadable snapshots to blocked
+local input before child construction. The worker records no attempt or completion
+clock for this block. The caller resolves the snapshot before borrowing the store
+for delivery; automatic production batch snapshot selection remains future work.
+Owned-store fixtures prove temporary refusal and relay-accepted/lost-child-result
+replay through reopen preserve the exact envelope, Date, Message-ID and DATA, even
+when a conflicting newly rendered candidate exists. Real TLS fixtures compare every
+observed DATA byte; malformed frozen child frames leave a listener unconnected.
+Relay acceptance still permits duplicate delivery when the parent loses the result.
+
+No dependencies, schema, runtime defaults or public interfaces changed in this
+increment. Next: design atomic event/outbox/snapshot preparation, then event
+rendering and route revision semantics. Public persistence review, credential
+lookup, real relay/cluster validation, licensing and activation remain pending.

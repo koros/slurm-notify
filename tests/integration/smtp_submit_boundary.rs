@@ -10,10 +10,18 @@ use std::{
     time::Duration,
 };
 
-pub(super) fn serve(input: impl Read, mut output: impl Write) -> std::io::Result<()> {
+pub(super) fn serve(input: impl Read, output: impl Write) -> std::io::Result<()> {
+    serve_request(smtp_submit_frame::decode_request(input), output)
+}
+pub(super) fn serve_frozen(input: impl Read, output: impl Write) -> std::io::Result<()> {
+    serve_request(super::smtp_frozen_frame::decode_request(input), output)
+}
+fn serve_request(
+    request: Result<smtp_submit_frame::Request, super::transport::Error>,
+    mut output: impl Write,
+) -> std::io::Result<()> {
     let result = (|| {
-        let request =
-            smtp_submit_frame::decode_request(input).map_err(|_| smtp_auth_frame::Ack::Input)?;
+        let request = request.map_err(|_| smtp_auth_frame::Ack::Input)?;
         let mut roots = rustls::RootCertStore::empty();
         roots
             .add(rustls::pki_types::CertificateDer::from(request.root))
@@ -117,6 +125,28 @@ pub(super) fn acceptance() {
         );
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     }
+    for bad in [b"raw\n.\r\n".as_slice(), b"early\r\n.\r\nextra\r\n.\r\n"] {
+        let input = Zeroizing::new(
+            transport::frame(
+                &[
+                    &root,
+                    port.as_bytes(),
+                    b"u",
+                    b"p",
+                    b"s@fixture.invalid",
+                    b"r@fixture.invalid",
+                    bad,
+                ],
+                super::smtp_frozen_frame::INPUT_LIMIT,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            run(input, "--smtp-frozen-fixture"),
+            Ok(Ack::Auth(smtp_auth_frame::Ack::Input))
+        );
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+    }
     let mut extra = request(&root, port.as_bytes(), b"done");
     extra.push(0);
     assert_eq!(
@@ -134,6 +164,18 @@ pub(super) fn acceptance() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::Error> {
+    fixture_result_inner(request_mode, None)
+}
+pub(super) fn frozen_result(
+    request_mode: u8,
+    frozen: &super::storage::FrozenMessage,
+) -> Result<Ack, super::transport::Error> {
+    fixture_result_inner(request_mode, Some(frozen))
+}
+fn fixture_result_inner(
+    request_mode: u8,
+    frozen: Option<&super::storage::FrozenMessage>,
+) -> Result<Ack, super::transport::Error> {
     assert!(request_mode <= 10);
     let mode = if request_mode == 10 { 0 } else { request_mode };
     use super::{
@@ -176,14 +218,18 @@ pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::
             .unwrap(),
         )
     }
-    fn run(input: Zeroizing<Vec<u8>>, mode: &str) -> Result<Ack, transport::Error> {
+    fn run(
+        input: Zeroizing<Vec<u8>>,
+        mode: &str,
+        input_limit: usize,
+    ) -> Result<Ack, transport::Error> {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command.arg(mode);
         transport::supervise_with(
             &mut command,
             input,
             Duration::from_millis(500),
-            smtp_submit_frame::INPUT_LIMIT,
+            input_limit,
             smtp_submit_frame::OUTPUT_LIMIT,
             smtp_submit_frame::decode_ack,
         )
@@ -203,6 +249,27 @@ pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port().to_string();
+    let expected = if let Some(frozen) = frozen {
+        let (sender, recipient) = frozen.envelope();
+        super::smtp_message::Prepared::from_frozen(
+            sender,
+            recipient,
+            Zeroizing::new(frozen.data().to_vec()),
+        )
+        .unwrap()
+    } else {
+        smtp_message::prepare(
+            "s@fixture.invalid",
+            "r@fixture.invalid",
+            "event_1",
+            "done",
+            "done\n.\n.dot",
+            0,
+        )
+        .unwrap()
+    };
+    let mail = expected.mail_command();
+    let recipient = expected.recipient_command();
     let server = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut socket = loop {
@@ -237,8 +304,8 @@ pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::
                 b"250-secure\r\n250 AUTH PLAIN\r\n".as_slice(),
             ),
             (b"AUTH PLAIN AHUAcA==\r\n", b"235 ready\r\n"),
-            (b"MAIL FROM:<s@fixture.invalid>\r\n", b"250 sender\r\n"),
-            (b"RCPT TO:<r@fixture.invalid>\r\n", b"250 recipient\r\n"),
+            (mail.as_bytes(), b"250 sender\r\n"),
+            (recipient.as_bytes(), b"250 recipient\r\n"),
             (b"DATA\r\n", b"354 go\r\n"),
         ] {
             assert!(*line(&mut stream) == expected);
@@ -272,16 +339,7 @@ pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::
                 break;
             }
         }
-        let message = smtp_message::prepare(
-            "s@fixture.invalid",
-            "r@fixture.invalid",
-            "event_1",
-            "done",
-            "done\n.\n.dot",
-            0,
-        )
-        .unwrap();
-        assert!(*observed == message.data());
+        assert!(*observed == expected.data());
         if mode == 4 {
             return 0;
         }
@@ -337,14 +395,29 @@ pub(super) fn fixture_result(request_mode: u8) -> Result<Ack, super::transport::
         writes
     });
     let start = Instant::now();
-    let result = run(
-        request(&root, port.as_bytes(), b"done\n.\n.dot"),
-        if request_mode == 10 {
-            "--smtp-submit-lost-result"
-        } else {
-            "--smtp-submit-fixture"
-        },
-    );
+    let (input, child_mode, input_limit) = if let Some(frozen) = frozen {
+        (
+            super::smtp_frozen_frame::encode(&root, port.parse().unwrap(), "u", "p", frozen)
+                .unwrap(),
+            if request_mode == 10 {
+                "--smtp-frozen-lost-result"
+            } else {
+                "--smtp-frozen-fixture"
+            },
+            super::smtp_frozen_frame::INPUT_LIMIT,
+        )
+    } else {
+        (
+            request(&root, port.as_bytes(), b"done\n.\n.dot"),
+            if request_mode == 10 {
+                "--smtp-submit-lost-result"
+            } else {
+                "--smtp-submit-fixture"
+            },
+            smtp_submit_frame::INPUT_LIMIT,
+        )
+    };
+    let result = run(input, child_mode, input_limit);
     if request_mode == 10 {
         assert_eq!(result, Err(transport::Error::ChildExit));
     } else if matches!(mode, 5 | 6) {

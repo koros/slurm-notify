@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Separate bounded private frozen SMTP child frame, exact stored envelope/DATA submission through retry/restart, lost-result replay, and missing/corrupt snapshot blocking before connection.
+
 - Private version-2 frozen SMTP envelope/DATA storage with immutable preparation, bounded loads, version-1 upgrade, rollback/corruption checks and exact retry/reopen preservation.
 
 - Private SMTP submission outbox policy preserving phase/acceptance evidence, durable accepted/rejected/retry/block partial progress, retry exhaustion and relay-accepted/lost-child-result replay fixtures.

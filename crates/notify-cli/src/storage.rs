@@ -1542,6 +1542,31 @@ pub(super) mod tests {
             .unwrap();
         assert!(frozen.envelope() == ("s@fixture.invalid", "r@fixture.invalid"));
         assert!(frozen.data() == message.data());
+        let loaded =
+            super::super::smtp_frozen_frame::load(&store, &item.event_id, &item.destination)
+                .unwrap();
+        let encoded =
+            super::super::smtp_frozen_frame::encode(b"root", 25, "u", "p", &loaded).unwrap();
+        let decoded = super::super::smtp_frozen_frame::decode_request(encoded.as_slice()).unwrap();
+        assert!(decoded.message.data() == frozen.data());
+        assert!(decoded.message.envelope() == message.envelope());
+        assert!(super::super::smtp_frozen_frame::load(&store, &item.event_id, "missing").is_err());
+        for (root, port, username, password) in [
+            (b"".as_slice(), 25, "u", "p"),
+            (b"root", 0, "u", "p"),
+            (b"root", 25, "bad\0", "p"),
+            (b"root", 25, "", "p"),
+            (b"root", 25, "u", ""),
+        ] {
+            assert!(super::super::smtp_frozen_frame::encode(
+                root, port, username, password, &loaded
+            )
+            .is_err());
+        }
+        assert!(
+            super::super::smtp_frozen_frame::encode(&vec![0; 4097], 25, "u", "p", &loaded).is_err()
+        );
+
         let retry = store.due_deliveries("cluster", 25, 10).unwrap().remove(0);
         assert_eq!(retry.event_id, item.event_id);
         assert_eq!(retry.attempt_number, 2);

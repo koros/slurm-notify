@@ -28,6 +28,22 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    // Owned private snapshot transport only; do not render or sample a clock.
+    pub(super) fn from_frozen(
+        sender: &str,
+        recipient: &str,
+        data: Zeroizing<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let sender = address(sender)?;
+        let recipient = address(recipient)?;
+        validate_frozen_data(&data)?;
+        Ok(Self {
+            sender,
+            recipient,
+            data,
+        })
+    }
+
     pub(super) fn mail_command(&self) -> String {
         format!("MAIL FROM:<{}>\r\n", self.sender)
     }

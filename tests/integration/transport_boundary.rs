@@ -6,6 +6,8 @@ mod delivery;
 mod lifecycle;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
+#[path = "../../crates/notify-cli/src/smtp_frozen_frame.rs"]
+mod smtp_frozen_frame;
 #[path = "../../crates/notify-cli/src/storage.rs"]
 mod storage;
 #[path = "../../crates/notify-cli/src/transport.rs"]
@@ -56,6 +58,19 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn main() {
+    if matches!(
+        std::env::args().nth(1).as_deref(),
+        Some("--smtp-frozen-fixture" | "--smtp-frozen-lost-result")
+    ) {
+        let lost = std::env::args().nth(1).as_deref() == Some("--smtp-frozen-lost-result");
+        let result = if lost {
+            smtp_submit_boundary::serve_frozen(std::io::stdin(), std::io::sink())
+        } else {
+            smtp_submit_boundary::serve_frozen(std::io::stdin(), std::io::stdout())
+        };
+        std::process::exit(if result.is_ok() && !lost { 0 } else { 1 });
+    }
+
     let mode = std::env::args().nth(1);
     if matches!(
         mode.as_deref(),
@@ -221,6 +236,7 @@ fn acceptance() {
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
     owned_smtp_auth_progress_restart();
+    owned_frozen_submission_restart();
     owned_smtp_submission_restart();
     owned_smtp_lost_result_replay();
     smtp_submit_boundary::acceptance();
@@ -1664,5 +1680,137 @@ fn owned_smtp_lost_result_replay() {
             .get::<_, i64>(0))
             .unwrap(),
         2
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_frozen_submission_restart() {
+    for first_mode in [1, 10] {
+        let directory = storage::tests::Directory::new();
+        let root = state_directory(&directory);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        poll_fixture_with_destinations(&mut store, &mut reconciler, &["smtp"]);
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let message = smtp_message::prepare(
+            "frozen@fixture.invalid",
+            "kept@fixture.invalid",
+            "stored_42",
+            "original",
+            "original\n.\n.frozen",
+            123,
+        )
+        .unwrap();
+        store
+            .freeze_smtp(&item.event_id, &item.destination, &message)
+            .unwrap();
+        let snapshot = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
+        let first = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            |_| {
+                smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(
+                    first_mode, &snapshot,
+                ))
+                .into_dispatch()
+            },
+            || Some(20),
+        )
+        .unwrap();
+        assert_eq!(first.retrying, 1);
+        drop(store);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let reloaded = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
+        assert!(reloaded.data() == snapshot.data());
+        assert!(reloaded.envelope() == snapshot.envelope());
+        let changed = smtp_message::prepare(
+            "changed@fixture.invalid",
+            "kept@fixture.invalid",
+            "stored_42",
+            "changed",
+            "changed",
+            456,
+        )
+        .unwrap();
+        assert!(store
+            .freeze_smtp(&item.event_id, &item.destination, &changed)
+            .is_err());
+        let second = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            25,
+            10,
+            retry_policy(),
+            |_| {
+                smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(0, &reloaded))
+                    .into_dispatch()
+            },
+            || Some(30),
+        )
+        .unwrap();
+        assert_eq!(second.delivered, 1);
+        assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+    }
+    // Use a fresh pending event to verify local rejection without a network call.
+    let other = storage::tests::Directory::new();
+    let root = state_directory(&other);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+    poll_fixture_with_destinations(&mut store, &mut reconciler, &["smtp"]);
+    let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+    let message = smtp_message::prepare(
+        "s@fixture.invalid",
+        "r@fixture.invalid",
+        "id",
+        "original",
+        "original",
+        123,
+    )
+    .unwrap();
+    for corrupt in [false, true] {
+        if corrupt {
+            store
+                .freeze_smtp(&item.event_id, &item.destination, &message)
+                .unwrap();
+            let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+            db.execute(
+                "UPDATE smtp_messages SET data=?1",
+                [b"bad\n.\r\n".as_slice()],
+            )
+            .unwrap();
+        }
+        let loaded = smtp_frozen_frame::load(&store, &item.event_id, &item.destination);
+        let failure = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            |_| {
+                let error = match &loaded {
+                    Err(_) => transport::Error::InvalidInput,
+                    Ok(_) => panic!("invalid snapshot reached sender"),
+                };
+                smtp_submit_dispatch::classify(Err(error)).into_dispatch()
+            },
+            || panic!("blocked snapshot sampled completion clock"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.kind, delivery::FailureKind::DispatchBlocked);
+        assert_eq!(
+            store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+            1
+        );
+    }
+    drop(store);
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
     );
 }

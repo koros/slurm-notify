@@ -1893,3 +1893,34 @@ Validation: shared checks pass (191 Rust tests plus one ignored helper, 68 custo
 process scenarios, eight standalone version-1 SQLite tests, six hook tests), including
 formatting and strict Clippy. Coverage passes the 80% gate at 96.50% Rust lines
 (11,297/11,707).
+
+
+## Subsequent increment: private frozen SMTP child submission
+
+A separate bounded seven-field child frame transports saved envelope/DATA with
+fixture trust/port and ephemeral credentials. Its 21,213-byte cap, per-field limits,
+strict EOF, zeroizing buffers and canonical DATA/address checks run before network
+access. The original renderer fixture stays separate; frozen restoration does not
+render, sample a clock, add metadata or restuff DATA. Existing verified TLS/AUTH,
+phase results, whole-process deadline and sanitized acknowledgments are reused.
+
+A private load preflight blocks missing/corrupt/unreadable snapshots before child
+construction. Owned-store acceptance proves no attempts/completion clocks on local
+blocks and exact saved envelope/DATA through temporary refusal and accepted-send
+lost-result retries across reopen. Conflicting new message preparation fails;
+server fixtures observe the persisted bytes, including embedded metadata. Two
+malformed frozen frame controls prove no TCP connection. Truncation, field bounds,
+invalid port/credentials/envelope/DATA and trailing bytes have unit coverage.
+Snapshot selection is explicit in this private harness; production batch wiring is
+not activated. No dependencies, schema, defaults or public contracts changed.
+
+Next: design/implement atomic private event, outbox and frozen-message preparation,
+so a committed eligible SMTP event cannot lack its initial snapshot. Event rendering,
+route revision, credential lookup, public review, licensing, real relay/cluster
+validation and activation remain pending.
+
+Validation: shared checks pass (193 Rust tests plus one ignored helper, custom
+process acceptance, eight standalone version-1 SQLite tests and six hook tests),
+including formatting and strict Clippy. Coverage passes the 80% gate at 96.54%
+Rust lines (11,510/11,922). An overlapping check run encountered an existing owned
+state lock reacquisition failure; the sequential shared-check rerun passed.
