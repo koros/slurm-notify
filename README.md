@@ -281,3 +281,8 @@ Private negotiation policy now keeps certificate/input/configuration/upgrade blo
 and negotiation-only READY pending without fabricated attempts. Transient errors
 use existing completion-based retries and attempt limits, with reopen tests. This
 is injected diagnostic bookkeeping; authenticated SMTP delivery remains pending.
+
+Owned-storage acceptance now composes real SMTP child I/O/timeout results with a
+later certificate block. Reopen preserves the earlier retry deadline and attempt,
+leaves blocked/untouched destinations unchanged, and retains state ownership.
+These negotiation scenarios send no authenticated message.

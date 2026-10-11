@@ -180,13 +180,23 @@ fn acceptance() {
     smtp_negotiation_boundary::acceptance();
     smtp_negotiation_boundary::handshake_acceptance();
     smtp_negotiation_boundary::acknowledgment_acceptance();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments passed");
+    owned_smtp_progress_restart();
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn poll_fixture(
     store: &mut storage::Store,
     reconciler: &mut lifecycle::Reconciler,
+) -> Vec<lifecycle::Event> {
+    poll_fixture_with_destinations(store, reconciler, &["primary"])
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn poll_fixture_with_destinations(
+    store: &mut storage::Store,
+    reconciler: &mut lifecycle::Reconciler,
+    destinations: &[&str],
 ) -> Vec<lifecycle::Event> {
     let request = scheduler::PollRequest {
         active_program: std::path::Path::new("/fixture/squeue"),
@@ -203,7 +213,7 @@ fn poll_fixture(
         &request,
         reconciler,
         store,
-        &["primary"],
+        destinations,
         10,
         |command, _, _| {
             if command.get_program() == "/fixture/squeue" {
@@ -1068,4 +1078,148 @@ fn cancelled_preflight_preserves_owned_store() {
     drop(store);
     let mut reopened = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
     assert_eq!(reopened.restore("cluster", 10).unwrap().1, None);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_smtp_progress_restart() {
+    use supervised_provider::Diagnostic;
+    fn negotiated(mode: u8) -> Result<smtp_ack::Ack, transport::Error> {
+        let (port, server) = smtp_negotiation_boundary::handshake_fixture(mode);
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        child.arg("--smtp-negotiation");
+        let result = transport::supervise_with(
+            &mut child,
+            transport::frame(&[port.as_bytes()], 9).unwrap(),
+            Duration::from_millis(500),
+            9,
+            32,
+            smtp_ack::decode,
+        );
+        server.join().unwrap();
+        result
+    }
+    for transient_mode in [2, 0] {
+        let directory = storage::tests::Directory::new();
+        let root = state_directory(&directory);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        poll_fixture_with_destinations(&mut store, &mut reconciler, &["a", "b", "c"]);
+        let before = store.due_deliveries("cluster", 10, 10).unwrap();
+        assert_eq!(before.len(), 3);
+        let identity = before[0].event_id.clone();
+        let mut calls = 0;
+        let mut completions = 0;
+        let failure = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            |item| {
+                calls += 1;
+                assert_eq!(item.event_id, identity);
+                let result = match item.destination.as_str() {
+                    "a" => negotiated(transient_mode),
+                    "b" => negotiated(3),
+                    _ => panic!("later destination must remain untouched"),
+                };
+                if item.destination == "a" {
+                    if transient_mode == 2 {
+                        assert_eq!(result, Ok(smtp_ack::Ack::Io));
+                    } else {
+                        assert_eq!(result, Err(transport::Error::Timeout));
+                    }
+                } else {
+                    assert_eq!(result, Ok(smtp_ack::Ack::Certificate));
+                }
+                smtp_dispatch::classify(result).into_dispatch()
+            },
+            || {
+                completions += 1;
+                Some(20)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(calls, 2);
+        assert_eq!(completions, 1);
+        assert_eq!(failure.kind, delivery::FailureKind::DispatchBlocked);
+        assert_eq!(failure.diagnostic, Some(Diagnostic::SmtpCertificate));
+        assert_eq!(failure.committed.retrying, 1);
+        assert_eq!(failure.committed.delivered, 0);
+        assert_eq!(failure.committed.failed, 0);
+        assert!(!failure.acceptance_uncertain);
+        drop(store);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        assert!(matches!(
+            storage::Store::open_private(&root, Duration::from_millis(50)),
+            Err(storage::StorageError::StatePath(
+                state_path::Error::AlreadyOwned
+            ))
+        ));
+        let pending = store.due_deliveries("cluster", 24, 10).unwrap();
+        assert_eq!(
+            pending
+                .iter()
+                .map(|item| item.destination.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+        assert!(pending
+            .iter()
+            .all(|item| item.attempt_number == 1 && item.event_id == identity));
+        let due = store.due_deliveries("cluster", 25, 10).unwrap();
+        let retry = due.iter().find(|item| item.destination == "a").unwrap();
+        assert_eq!(retry.attempt_number, 2);
+        assert_eq!(retry.event_id, identity);
+        let restored = store.restore("cluster", 10).unwrap();
+        assert_eq!(restored.0.emitted.len(), 1);
+        let blocked_again = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            24,
+            10,
+            retry_policy(),
+            |item| {
+                assert_eq!(item.destination, "b");
+                smtp_dispatch::classify(negotiated(3)).into_dispatch()
+            },
+            || panic!("certificate block must not sample completion clock"),
+        )
+        .unwrap_err();
+        assert_eq!(blocked_again.committed, delivery::BatchReport::default());
+        assert_eq!(blocked_again.diagnostic, Some(Diagnostic::SmtpCertificate));
+        drop(store);
+        let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'delivered'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        drop(db);
+        let store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let pending = store.due_deliveries("cluster", 25, 10).unwrap();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(
+            pending
+                .iter()
+                .find(|item| item.destination == "a")
+                .unwrap()
+                .attempt_number,
+            2
+        );
+        assert!(pending
+            .iter()
+            .filter(|item| item.destination != "a")
+            .all(|item| item.attempt_number == 1));
+    }
 }

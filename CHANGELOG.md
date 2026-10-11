@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Owned SMTP negotiation acceptance composing real child I/O/timeout retries, later certificate blocks, retained partial progress, ownership, and repeated-block reopen checks.
+
 - Private SMTP negotiation dispatch policy with explicit not-submitted evidence, pending-row preservation for blocks/READY, and completion-based retry/reopen/attempt-budget bookkeeping tests.
 
 - Strict private SMTP negotiation acknowledgments preserving static diagnostics across a shared supervisor decoder boundary, with real certificate/protocol, wrong-token, and failed-child process checks.

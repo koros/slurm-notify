@@ -1483,3 +1483,32 @@ Next: compose actual supervised SMTP certificate blocks and transient failures
 with owned storage and reopen, including prior-destination progress, before adding
 credential or message paths. Refusal code/phase precision, AUTH, message construction,
 public review, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: owned SMTP partial-progress restart acceptance
+
+Two custom process scenarios seed a durable synthetic poll into an owned store
+with three destinations. The first destination receives either a real supervised
+handshake-disconnect IO acknowledgment or a parent timeout; the next destination
+receives a real unknown-issuer certificate acknowledgment. The worker commits the
+first retry and stops on the certificate block before the third destination.
+Only the transient result samples completion time. Partial failure reports retain
+one retry, zero delivered/failed results, and no unrecorded-send uncertainty.
+
+Reopen preserves event identity, the first destination's attempt two and due time,
+and attempt one for blocked/untouched destinations. A competing owner remains
+rejected. Repeating the actual certificate block after reopen adds no attempts,
+preserves the prior retry, and leaves the untouched destination pending. Database
+checks require exactly one attempt and zero delivered rows; ledger restoration
+retains the original emitted event. No credential, message, or acceptance claim is
+introduced. The shared bounded handshake fixture and poll helper now serve both
+isolated and composed scenarios without changing their previous assertions.
+
+The full suite passes: 163 Rust tests plus one ignored helper, thirty-one custom
+process scenarios, eight SQLite tests, and six hook tests. No schema, dependency,
+runtime default, or public contract changed.
+
+Next: preserve STARTTLS missing-extension versus temporary/permanent refusal
+precision through private acknowledgments and policy before AUTH, so a temporary
+upgrade refusal does not remain a configuration block. Then assess bounded
+credential framing and verified-TLS authentication fixtures. Message construction,
+public review, licensing, cluster validation, and activation remain pending.
