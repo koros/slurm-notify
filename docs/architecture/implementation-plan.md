@@ -2387,3 +2387,36 @@ new dependencies, runtime defaults, real-cluster tests or releases are introduce
 Validation: shared checks pass with 233 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.46% (11,230/11,523), exceeding the unchanged 80% gate.
+
+### Atomic revision-bound polling and identity selection
+
+Plan::poll_revision_with is an explicit private path that derives one immutable
+v2-identity rendering descriptor per validated SMTP route before querying. It
+prepares bounded messages with revision-aware Message-IDs, then commits jobs,
+event ledger, outbox, snapshots, descriptors, bindings and checkpoint in the same
+transaction. Candidate memory is published only after commit. Descriptor conflicts
+and late binding/checkpoint failures roll back all new state. Plain destinations
+receive no SMTP descriptor or binding. Revisions are inserted only for newly
+prepared pairs; empty/suppressed/replayed polls leave no orphan descriptors.
+
+The v2 identity hashes the existing length-prefixed event/route/namespace inputs
+plus the exact rendering revision token under a new domain separator. Observation
+time remains outside the ID and supplies the frozen Date. Descriptors explicitly
+record sha256-event-route-revision-v2. Stored decoding accepts both known private
+identity versions; legacy preparation and existing frozen bytes remain unchanged.
+No schema migration, dependency or public contract change is needed.
+
+Tests verify changed policy for new events, original bound bytes after reopen,
+legacy and suppressed history without backfill, new destination fan-out, canonical
+token/bytes conflicts, late binding/checkpoint rollback, recovery, rendering/count
+failures and invalid revision preflight before scheduler work. An independently
+computed v2 digest anchors identity tests; Date changes do not change identity.
+
+Next: revision-aware controlled dispatch with explicit permitted revisions and
+bounded unreferenced cleanup. Durable relay/TLS/auth profile binding remains
+required before production routing. Runtime orchestration still uses the existing
+legacy fixture path; no operational executable or real-cluster activation occurs.
+
+Validation: shared checks pass with 239 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.45% (11,797/12,106), above the unchanged 80% gate.

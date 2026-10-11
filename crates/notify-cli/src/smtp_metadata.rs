@@ -2,6 +2,7 @@
 use super::lifecycle::Event;
 use ring::digest::{Context, SHA256};
 
+pub(super) const REVISION_VERSION: &str = "sha256-event-route-revision-v2";
 pub(super) const VERSION: &str = "sha256-event-route-v1";
 
 pub(super) struct Selected {
@@ -27,6 +28,33 @@ pub(super) fn select(
     namespace: &str,
     observed_at: i64,
 ) -> Result<Selected, Error> {
+    select_fields(event, route, namespace, observed_at, None)
+}
+
+pub(super) fn select_revision(
+    event: &Event,
+    route: &str,
+    namespace: &str,
+    observed_at: i64,
+    revision: &str,
+) -> Result<Selected, Error> {
+    if revision.len() != 64
+        || !revision
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::Identity);
+    }
+    select_fields(event, route, namespace, observed_at, Some(revision))
+}
+
+fn select_fields(
+    event: &Event,
+    route: &str,
+    namespace: &str,
+    observed_at: i64,
+    revision: Option<&str>,
+) -> Result<Selected, Error> {
     let timestamp = timestamp(observed_at)?;
     let fields = [
         event.identity.cluster.as_str(),
@@ -45,10 +73,18 @@ pub(super) fn select(
         return Err(Error::Identity);
     }
     let mut digest = Context::new(&SHA256);
-    digest.update(b"slurm-notify-private-smtp-id-v1\0");
+    digest.update(if revision.is_some() {
+        b"slurm-notify-private-smtp-id-v2\0"
+    } else {
+        b"slurm-notify-private-smtp-id-v1\0"
+    });
     for field in fields {
         digest.update(&(field.len() as u64).to_be_bytes());
         digest.update(field.as_bytes());
+    }
+    if let Some(revision) = revision {
+        digest.update(&(revision.len() as u64).to_be_bytes());
+        digest.update(revision.as_bytes());
     }
     let digest = digest.finish();
     let mut identity = String::with_capacity(64);
@@ -77,6 +113,48 @@ mod tests {
             },
             state: State::Completed,
         }
+    }
+    #[test]
+    fn revision_identity_is_versioned_stable_and_validates_token() {
+        let event = event();
+        let token = "a".repeat(64);
+        let selected = select_revision(&event, "smtp", "fixture", 10, &token).unwrap();
+        assert_eq!(
+            selected.identity,
+            "0c8067a7b6681928a360bd5fb8507692bf4035e881b8f20a8a253333c85d2122"
+        );
+        assert_eq!(
+            selected.identity,
+            select_revision(&event, "smtp", "fixture", 20, &token)
+                .unwrap()
+                .identity
+        );
+        assert_ne!(
+            selected.identity,
+            select(&event, "smtp", "fixture", 10).unwrap().identity
+        );
+        assert_ne!(
+            selected.identity,
+            select_revision(&event, "smtp", "fixture", 10, &"b".repeat(64))
+                .unwrap()
+                .identity
+        );
+        for invalid in [
+            "".to_owned(),
+            "A".repeat(64),
+            "a".repeat(63),
+            "a".repeat(65),
+            "g".repeat(64),
+        ] {
+            assert!(matches!(
+                select_revision(&event, "smtp", "fixture", 10, &invalid),
+                Err(Error::Identity)
+            ));
+        }
+        assert!(matches!(
+            select_revision(&event, "smtp", "fixture", -1, &token),
+            Err(Error::Date)
+        ));
     }
     #[test]
     fn identities_are_stable_and_distinguish_event_route_namespace_and_field_boundaries() {

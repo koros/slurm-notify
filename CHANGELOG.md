@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private revision-bound atomic SMTP polling and v2 Message-ID selection, preserving original/legacy snapshots and suppressed history with policy-change, rollback, conflict, reopen and preflight tests. Revision-aware dispatch and provider profiles remain pending.
+
 - Private additive schema v3 for immutable SMTP rendering revisions and snapshot bindings, bounded canonical loading, legacy preservation, transactional preparation and migration/reopen/conflict/rollback tests. Atomic poll and revision-aware dispatch integration remain pending.
 
 - Private bounded canonical SMTP rendering descriptors and SHA-256 revision fingerprints from validated plans, with golden encoding/digest, policy/version changes, route-order stability, limits and invalid-policy tests. No durable binding yet.

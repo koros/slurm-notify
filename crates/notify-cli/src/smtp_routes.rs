@@ -109,6 +109,66 @@ impl<'a> Plan<'a> {
         .map_err(Error::Render)
     }
 
+    pub(super) fn poll_revision_with(
+        &self,
+        request: &PollRequest<'_>,
+        reconciler: &mut Reconciler,
+        store: &mut Store,
+        observed_at: i64,
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    ) -> Result<Vec<Event>, smtp_poll::Error> {
+        if smtp_metadata::timestamp(observed_at).is_err() {
+            return Err(smtp_poll::Error::InvalidInput);
+        }
+        let revisions: Vec<_> = self
+            .routes
+            .iter()
+            .map(|route| super::smtp_revision::Descriptor::from_revision_plan(self, route.name))
+            .collect::<Result<_, _>>()
+            .map_err(|_| smtp_poll::Error::Preparation)?;
+        smtp_poll::poll_with_revisions(
+            request,
+            reconciler,
+            store,
+            &smtp_poll::RevisionSettings {
+                settings: smtp_poll::Settings {
+                    destinations: self.destinations,
+                    smtp_destinations: &self.smtp_destinations,
+                    max_messages: self.max_messages,
+                },
+                revisions: &revisions,
+            },
+            observed_at,
+            query,
+            |event, name| {
+                let route = self.route(name).ok_or(())?;
+                let revision = revisions
+                    .iter()
+                    .find(|revision| revision.destination() == name)
+                    .ok_or(())?;
+                let selected = smtp_metadata::select_revision(
+                    event,
+                    name,
+                    route.metadata.namespace,
+                    observed_at,
+                    revision.token(),
+                )
+                .map_err(|_| ())?;
+                smtp_render::prepare(
+                    event,
+                    &smtp_render::Metadata {
+                        sender: route.metadata.sender,
+                        recipient: route.metadata.recipient,
+                        identity: &selected.identity,
+                        timestamp: selected.timestamp,
+                    },
+                    route.visibility,
+                )
+                .map_err(|_| ())
+            },
+        )
+    }
+
     pub(super) fn poll_with(
         &self,
         request: &PollRequest<'_>,
@@ -358,6 +418,355 @@ mod tests {
             assert!(frozen.data() == saved.data());
         }
         assert_eq!(store.due_deliveries("cluster", 20, 10).unwrap().len(), 6);
+    }
+
+    fn revision_request() -> PollRequest<'static> {
+        PollRequest {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        }
+    }
+    fn revision_query(
+        records: &str,
+    ) -> impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError> + '_ {
+        move |command, _, _| {
+            Ok(if command.get_program() == "squeue" {
+                ""
+            } else {
+                records
+            }
+            .into())
+        }
+    }
+    fn table_count(directory: &crate::storage::tests::Directory, table: &str) -> i64 {
+        rusqlite::Connection::open(directory.path())
+            .unwrap()
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+    #[test]
+    fn revision_poll_changes_new_events_and_preserves_bound_and_legacy_history() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [route("a", JobVisibility::Hidden)];
+        let plan = Plan::new(&["a", "plain"], &routes, 4).unwrap();
+        let request = revision_request();
+        let first = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        plan.poll_revision_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            10,
+            revision_query(first),
+        )
+        .unwrap();
+        let item = store
+            .due_deliveries("cluster", 10, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "a")
+            .unwrap();
+        let saved = store.frozen_smtp(&item.event_id, "a").unwrap().unwrap();
+        let bound = store
+            .bound_smtp_revision(&item.event_id, "a")
+            .unwrap()
+            .unwrap();
+        let selected =
+            smtp_metadata::select_revision(&item.event, "a", "a", 10, bound.token()).unwrap();
+        let text = std::str::from_utf8(saved.data()).unwrap();
+        assert!(text.contains(&format!(
+            "Message-ID: <{}@fixture.invalid>",
+            selected.identity
+        )));
+        assert!(text.contains("Date: Thu, 01 Jan 1970 00:00:10 +0000"));
+        assert!(store
+            .bound_smtp_revision(&item.event_id, "plain")
+            .unwrap()
+            .is_none());
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut reconciler, _) = store.restore("cluster", 10).unwrap();
+        let mut changed = [
+            route("a", JobVisibility::Identifier),
+            route("b", JobVisibility::Hidden),
+        ];
+        changed[0].metadata.recipient = "changed@fixture.invalid";
+        let changed = Plan::new(&["a", "b", "plain"], &changed, 4).unwrap();
+        let records = format!("{first}\ncluster|2|alice|s|actual|FAILED|1:0");
+        assert_eq!(
+            changed
+                .poll_revision_with(
+                    &request,
+                    &mut reconciler,
+                    &mut store,
+                    20,
+                    revision_query(&records)
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .bound_smtp_revision(&item.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .token(),
+            bound.token()
+        );
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .data(),
+            saved.data()
+        );
+        assert!(store.frozen_smtp(&item.event_id, "b").unwrap().is_none());
+        let new = store
+            .due_deliveries("cluster", 20, 10)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.event.identity.job == "2" && row.destination == "a")
+            .unwrap();
+        let revision = store
+            .bound_smtp_revision(&new.event_id, "a")
+            .unwrap()
+            .unwrap();
+        assert_ne!(revision.token(), bound.token());
+        assert_eq!(
+            store
+                .frozen_smtp(&new.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .envelope()
+                .1,
+            "changed@fixture.invalid"
+        );
+        let legacy_records = format!("{records}\ncluster|3|alice|s|actual|COMPLETED|0:0");
+        plan.poll_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            30,
+            revision_query(&legacy_records),
+        )
+        .unwrap();
+        assert!(changed
+            .poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                40,
+                revision_query(&legacy_records)
+            )
+            .unwrap()
+            .is_empty());
+        let legacy = store
+            .due_deliveries("cluster", 40, 10)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.event.identity.job == "3" && row.destination == "a")
+            .unwrap();
+        assert!(store
+            .bound_smtp_revision(&legacy.event_id, "a")
+            .unwrap()
+            .is_none());
+        assert_eq!(table_count(&directory, "smtp_revision_bindings"), 3);
+        assert_eq!(table_count(&directory, "smtp_render_revisions"), 3);
+    }
+    #[test]
+    fn revision_poll_late_binding_and_checkpoint_failures_preserve_memory_and_recover() {
+        for failure in ["CREATE TRIGGER reject_revision BEFORE INSERT ON smtp_revision_bindings BEGIN SELECT RAISE(ABORT,'fixture'); END;", "CREATE TRIGGER reject_revision BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'fixture'); END;"] {
+            let directory = crate::storage::tests::Directory::new();
+            let mut store = Store::open(&directory.path(),Duration::from_millis(50)).unwrap();
+            let mut reconciler = Reconciler::with_capacity(10);
+            let routes = [route("a",JobVisibility::Hidden),route("b",JobVisibility::Hidden)];
+            let plan = Plan::new(&["a","b"],&routes,4).unwrap();
+            let db = rusqlite::Connection::open(directory.path()).unwrap();
+            db.execute_batch(failure).unwrap();
+            let request = revision_request();
+            let records = "cluster|1|alice|s|actual|COMPLETED|0:0";
+            assert!(matches!(plan.poll_revision_with(&request,&mut reconciler,&mut store,10,revision_query(records)),Err(smtp_poll::Error::Storage(_))));
+            assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+            for table in ["jobs","events","outbox","smtp_messages","smtp_render_revisions","smtp_revision_bindings","checkpoints"] { assert_eq!(table_count(&directory,table),0); }
+            drop(store);
+            db.execute_batch("DROP TRIGGER reject_revision;").unwrap();
+            let mut store = Store::open(&directory.path(),Duration::from_millis(50)).unwrap();
+            let (mut restored,checkpoint) = store.restore("cluster",10).unwrap();
+            assert!(checkpoint.is_none());
+            assert_eq!(plan.poll_revision_with(&request,&mut restored,&mut store,20,revision_query(records)).unwrap().len(),1);
+            assert_eq!(table_count(&directory,"smtp_revision_bindings"),2);
+            assert_eq!(store.restore("cluster",10).unwrap().1.as_deref(),Some(request.history_end));
+        }
+    }
+    #[test]
+    fn atomic_revision_conflict_keeps_prior_snapshot_and_checkpoint() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [route("a", JobVisibility::Hidden)];
+        let plan = Plan::new(&["a"], &routes, 4).unwrap();
+        let mut request = revision_request();
+        let first = "cluster|1|alice|s|actual|COMPLETED|0:0";
+        plan.poll_revision_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            10,
+            revision_query(first),
+        )
+        .unwrap();
+        let original = reconciler.clone();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let saved = store.frozen_smtp(&item.event_id, "a").unwrap().unwrap();
+        let descriptor =
+            super::super::smtp_revision::Descriptor::from_revision_plan(&plan, "a").unwrap();
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute(
+            "UPDATE smtp_render_revisions SET descriptor=?1",
+            [b"corrupt".as_slice()],
+        )
+        .unwrap();
+        request.history_end = "2026-10-12T00:00:00";
+        let records = format!("{first}\ncluster|2|alice|s|actual|FAILED|1:0");
+        assert!(matches!(
+            plan.poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                20,
+                revision_query(&records)
+            ),
+            Err(smtp_poll::Error::Storage(
+                crate::storage::StorageError::Conflict
+            ))
+        ));
+        assert_eq!(reconciler.latest, original.latest);
+        assert_eq!(reconciler.emitted, original.emitted);
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("2026-10-11T00:00:00")
+        );
+        assert_eq!(table_count(&directory, "smtp_revision_bindings"), 1);
+        assert_eq!(table_count(&directory, "events"), 1);
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "a")
+                .unwrap()
+                .unwrap()
+                .data(),
+            saved.data()
+        );
+        db.execute(
+            "UPDATE smtp_render_revisions SET descriptor=?1",
+            [descriptor.canonical()],
+        )
+        .unwrap();
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        assert_eq!(
+            plan.poll_revision_with(
+                &request,
+                &mut restored,
+                &mut store,
+                30,
+                revision_query(&records)
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(table_count(&directory, "smtp_render_revisions"), 1);
+        assert_eq!(table_count(&directory, "smtp_revision_bindings"), 2);
+    }
+
+    #[test]
+    fn revision_poll_suppression_limits_and_render_failure_do_not_create_provenance() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let routes = [
+            route("a", JobVisibility::Hidden),
+            route("b", JobVisibility::Identifier),
+        ];
+        let plan = Plan::new(&["a", "b"], &routes, 4).unwrap();
+        let mut request = revision_request();
+        let oversized = format!("cluster|{}|alice|s|actual|COMPLETED|0:0", "1".repeat(33));
+        assert!(matches!(
+            plan.poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query(&oversized)
+            ),
+            Err(smtp_poll::Error::Preparation)
+        ));
+        let limited = Plan::new(&["a", "b"], &routes, 1).unwrap();
+        assert!(matches!(
+            limited.poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query("cluster|1|alice|s|actual|COMPLETED|0:0")
+            ),
+            Err(smtp_poll::Error::Limit)
+        ));
+        assert!(reconciler.latest.is_empty());
+        assert_eq!(table_count(&directory, "smtp_render_revisions"), 0);
+        for observed in [-1, 4_102_444_800] {
+            assert!(matches!(
+                plan.poll_revision_with(
+                    &request,
+                    &mut reconciler,
+                    &mut store,
+                    observed,
+                    |_, _, _| panic!("invalid Date queried")
+                ),
+                Err(smtp_poll::Error::InvalidInput)
+            ));
+        }
+        request.emit_discovered = false;
+        assert!(plan
+            .poll_revision_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                revision_query("cluster|1|alice|s|actual|COMPLETED|0:0")
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(table_count(&directory, "events"), 1);
+        assert_eq!(table_count(&directory, "smtp_render_revisions"), 0);
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        request.emit_discovered = true;
+        assert!(plan
+            .poll_revision_with(
+                &request,
+                &mut restored,
+                &mut store,
+                20,
+                revision_query("cluster|1|alice|s|actual|COMPLETED|0:0")
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(table_count(&directory, "smtp_revision_bindings"), 0);
     }
 
     #[test]

@@ -46,10 +46,68 @@ pub(super) fn poll_with(
     settings: &Settings<'_>,
     observed_at: i64,
     query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
+) -> Result<Vec<Event>, Error> {
+    poll_prepared(
+        request,
+        reconciler,
+        store,
+        (settings, None),
+        observed_at,
+        query,
+        prepare,
+    )
+}
+
+pub(super) struct RevisionSettings<'a> {
+    pub(super) settings: Settings<'a>,
+    pub(super) revisions: &'a [super::smtp_revision::Descriptor],
+}
+
+pub(super) fn poll_with_revisions(
+    request: &PollRequest<'_>,
+    reconciler: &mut Reconciler,
+    store: &mut Store,
+    settings: &RevisionSettings<'_>,
+    observed_at: i64,
+    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
+) -> Result<Vec<Event>, Error> {
+    poll_prepared(
+        request,
+        reconciler,
+        store,
+        (&settings.settings, Some(settings.revisions)),
+        observed_at,
+        query,
+        prepare,
+    )
+}
+
+fn poll_prepared(
+    request: &PollRequest<'_>,
+    reconciler: &mut Reconciler,
+    store: &mut Store,
+    settings: (&Settings<'_>, Option<&[super::smtp_revision::Descriptor]>),
+    observed_at: i64,
+    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
     mut prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
 ) -> Result<Vec<Event>, Error> {
+    let (settings, revisions) = settings;
     if observed_at < 0 || !valid_settings(settings) {
         return Err(Error::InvalidInput);
+    }
+    if let Some(revisions) = revisions {
+        let mut names = std::collections::HashSet::new();
+        if revisions.len() != settings.smtp_destinations.len()
+            || revisions.iter().any(|revision| {
+                !revision.revision_identity()
+                    || !settings.smtp_destinations.contains(&revision.destination())
+                    || !names.insert(revision.destination())
+            })
+        {
+            return Err(Error::InvalidInput);
+        }
     }
     let mut candidate = reconciler.clone();
     let events = scheduler::poll_with(request, &mut candidate, query).map_err(Error::Poll)?;
@@ -73,20 +131,29 @@ pub(super) fn poll_with(
             message,
         })
         .collect();
-    store
-        .persist_prepared_reconciler(
-            PollPreparation {
-                candidate: &candidate,
-                deliverable: &events,
-                destinations: settings.destinations,
-                smtp_destinations: settings.smtp_destinations,
-                messages: &messages,
-            },
+    let preparation = PollPreparation {
+        candidate: &candidate,
+        deliverable: &events,
+        destinations: settings.destinations,
+        smtp_destinations: settings.smtp_destinations,
+        messages: &messages,
+    };
+    match revisions {
+        Some(revisions) => store.persist_prepared_revisions(
+            preparation,
+            revisions,
             request.cluster,
             request.history_end,
             observed_at,
-        )
-        .map_err(Error::Storage)?;
+        ),
+        None => store.persist_prepared_reconciler(
+            preparation,
+            request.cluster,
+            request.history_end,
+            observed_at,
+        ),
+    }
+    .map_err(Error::Storage)?;
     *reconciler = candidate;
     Ok(events)
 }
@@ -136,6 +203,65 @@ mod tests {
     }
     fn store(directory: &super::super::storage::tests::Directory) -> Store {
         Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
+    }
+    #[test]
+    fn revision_preflight_rejects_incomplete_duplicate_legacy_and_wrong_routes_before_query() {
+        use super::super::{
+            smtp_render::JobVisibility,
+            smtp_revision::Descriptor,
+            smtp_routes::{Metadata, Plan, Route},
+        };
+        let routes: Vec<_> = ["a", "b", "outside"]
+            .iter()
+            .map(|name| Route {
+                name,
+                visibility: JobVisibility::Hidden,
+                metadata: Metadata {
+                    sender: "s@fixture.invalid",
+                    recipient: "r@fixture.invalid",
+                    namespace: "fixture",
+                },
+            })
+            .collect();
+        let plan = Plan::new(&["a", "b", "outside"], &routes, 4).unwrap();
+        for case in 0..5 {
+            let revisions = match case {
+                0 => vec![],
+                1 => vec![Descriptor::from_revision_plan(&plan, "a").unwrap()],
+                2 => vec![
+                    Descriptor::from_revision_plan(&plan, "a").unwrap(),
+                    Descriptor::from_revision_plan(&plan, "a").unwrap(),
+                ],
+                3 => vec![
+                    Descriptor::from_plan(&plan, "a").unwrap(),
+                    Descriptor::from_revision_plan(&plan, "b").unwrap(),
+                ],
+                _ => vec![
+                    Descriptor::from_revision_plan(&plan, "a").unwrap(),
+                    Descriptor::from_revision_plan(&plan, "outside").unwrap(),
+                ],
+            };
+            let directory = super::super::storage::tests::Directory::new();
+            let mut store = store(&directory);
+            let mut reconciler = Reconciler::with_capacity(10);
+            assert!(matches!(
+                poll_with_revisions(
+                    &request(),
+                    &mut reconciler,
+                    &mut store,
+                    &RevisionSettings {
+                        settings: settings(),
+                        revisions: &revisions
+                    },
+                    10,
+                    |_, _, _| panic!("invalid revisions queried"),
+                    |_, _| panic!("invalid revisions rendered")
+                ),
+                Err(Error::InvalidInput)
+            ));
+            assert!(reconciler.latest.is_empty());
+            assert!(store.restore("cluster", 10).unwrap().1.is_none());
+        }
     }
     #[test]
     fn prepared_poll_freezes_routes_and_replay_never_calls_renderer() {

@@ -24,6 +24,12 @@ pub(super) enum Error {
 
 impl Descriptor {
     pub(super) fn from_plan(plan: &Plan<'_>, name: &str) -> Result<Self, Error> {
+        Self::with_identity(plan, name, smtp_metadata::VERSION)
+    }
+    pub(super) fn from_revision_plan(plan: &Plan<'_>, name: &str) -> Result<Self, Error> {
+        Self::with_identity(plan, name, smtp_metadata::REVISION_VERSION)
+    }
+    fn with_identity(plan: &Plan<'_>, name: &str, identity: &str) -> Result<Self, Error> {
         let route = plan.route(name).ok_or(Error::Route)?;
         let disclosure = match route.visibility {
             JobVisibility::Hidden => "hidden",
@@ -36,7 +42,7 @@ impl Descriptor {
             ("namespace", route.metadata.namespace),
             ("disclosure", disclosure),
             ("renderer", smtp_render::VERSION),
-            ("identity", smtp_metadata::VERSION),
+            ("identity", identity),
             ("domain", smtp_message::ID_DOMAIN),
         ])?;
         let fingerprint = digest(&SHA256, &canonical);
@@ -55,12 +61,9 @@ impl Descriptor {
             "identifier" => JobVisibility::Identifier,
             _ => return Err(Error::Invalid),
         };
-        if fields[5..]
-            != [
-                smtp_render::VERSION,
-                smtp_metadata::VERSION,
-                smtp_message::ID_DOMAIN,
-            ]
+        if fields[5] != smtp_render::VERSION
+            || ![smtp_metadata::VERSION, smtp_metadata::REVISION_VERSION].contains(&fields[6])
+            || fields[7] != smtp_message::ID_DOMAIN
         {
             return Err(Error::Invalid);
         }
@@ -75,7 +78,7 @@ impl Descriptor {
         }];
         let names = [fields[0]];
         let plan = Plan::new(&names, &routes, 1).map_err(|_| Error::Invalid)?;
-        let validated = Self::from_plan(&plan, fields[0])?;
+        let validated = Self::with_identity(&plan, fields[0], fields[6])?;
         if validated.token() != token || validated.canonical() != canonical.as_slice() {
             return Err(Error::Invalid);
         }
@@ -83,6 +86,9 @@ impl Descriptor {
             canonical,
             token: token.to_owned(),
         })
+    }
+    pub(super) fn revision_identity(&self) -> bool {
+        decode(&self.canonical).expect("validated revision")[6] == smtp_metadata::REVISION_VERSION
     }
     pub(super) fn destination(&self) -> &str {
         decode(&self.canonical).expect("validated revision")[0]

@@ -102,6 +102,7 @@ pub(super) struct PollPreparation<'a> {
 }
 
 struct SmtpPlan<'a> {
+    revisions: std::collections::HashMap<&'a str, &'a super::smtp_revision::Descriptor>,
     destinations: &'a [&'a str],
     messages: std::collections::HashMap<(String, &'a str), &'a super::smtp_message::Prepared>,
 }
@@ -729,6 +730,7 @@ impl Store {
             through,
             observed_at,
             SmtpPlan {
+                revisions: std::collections::HashMap::new(),
                 destinations: &[],
                 messages: std::collections::HashMap::new(),
             },
@@ -740,6 +742,28 @@ impl Store {
     pub(super) fn persist_prepared_reconciler(
         &mut self,
         preparation: PollPreparation<'_>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+    ) -> Result<(), StorageError> {
+        self.persist_prepared(preparation, None, cluster, through, observed_at)
+    }
+
+    pub(super) fn persist_prepared_revisions<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        revisions: &'a [super::smtp_revision::Descriptor],
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+    ) -> Result<(), StorageError> {
+        self.persist_prepared(preparation, Some(revisions), cluster, through, observed_at)
+    }
+
+    fn persist_prepared<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        revisions: Option<&'a [super::smtp_revision::Descriptor]>,
         cluster: &str,
         through: &str,
         observed_at: i64,
@@ -767,9 +791,36 @@ impl Store {
             return Err(StorageError::InvalidInput);
         }
         let mut smtp = SmtpPlan {
+            revisions: std::collections::HashMap::new(),
             destinations: smtp_destinations,
             messages: std::collections::HashMap::new(),
         };
+        if let Some(revisions) = revisions {
+            if revisions.len() != smtp_routes.len() || revisions.is_empty() {
+                return Err(StorageError::InvalidInput);
+            }
+            for revision in revisions {
+                if !revision.revision_identity()
+                    || !smtp_routes.contains(revision.destination())
+                    || smtp
+                        .revisions
+                        .insert(revision.destination(), revision)
+                        .is_some()
+                {
+                    return Err(StorageError::InvalidInput);
+                }
+            }
+            for message in messages {
+                let revision = smtp
+                    .revisions
+                    .get(message.destination)
+                    .ok_or(StorageError::InvalidInput)?;
+                let envelope = message.message.envelope();
+                if revision.envelope() != (envelope.0.as_str(), envelope.1.as_str()) {
+                    return Err(StorageError::InvalidInput);
+                }
+            }
+        }
         for message in messages {
             if !deliveries.contains(message.event)
                 || !smtp_routes.contains(message.destination)
@@ -943,6 +994,7 @@ impl Store {
             through,
             observed_at,
             SmtpPlan {
+                revisions: std::collections::HashMap::new(),
                 destinations: &[],
                 messages: std::collections::HashMap::new(),
             },
@@ -1050,6 +1102,17 @@ impl Store {
                         "INSERT INTO smtp_messages VALUES (?1,?2,?3,?4,?5)",
                         params![event.id, destination, sender, recipient, message.data()],
                     )?;
+                    if let Some(revision) = smtp.revisions.get(destination) {
+                        tx.execute("INSERT INTO smtp_render_revisions VALUES (?1,?2,?3,?4) ON CONFLICT DO NOTHING", params![cluster,destination,revision.token(),revision.canonical()])?;
+                        let identical: bool = tx.query_row("SELECT descriptor=?4 FROM smtp_render_revisions WHERE cluster=?1 AND destination=?2 AND revision=?3", params![cluster,destination,revision.token(),revision.canonical()], |row| row.get(0))?;
+                        if !identical {
+                            return Err(StorageError::Conflict);
+                        }
+                        tx.execute(
+                            "INSERT INTO smtp_revision_bindings VALUES (?1,?2,?3,?4)",
+                            params![event.id, destination, cluster, revision.token()],
+                        )?;
+                    }
                 }
             }
         }
