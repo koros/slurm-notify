@@ -4,15 +4,15 @@ use std::io::Read;
 use zeroize::Zeroizing;
 
 const BOUNDS: [usize; 3] = [5, 64, 128];
-const LIMIT: usize = 12 + 5 + 64 + 128;
+pub(super) const LIMIT: usize = 12 + 5 + 64 + 128;
 
 // Deliberately no Debug/Clone; decoding never returns raw credentials.
-struct Request {
-    port: u16,
-    credentials: Credentials,
+pub(super) struct Request {
+    pub(super) port: u16,
+    pub(super) credentials: Credentials,
 }
 
-fn decode(mut input: impl Read) -> Result<Request, transport::Error> {
+pub(super) fn decode(mut input: impl Read) -> Result<Request, transport::Error> {
     let mut fields = Vec::with_capacity(3);
     for bound in BOUNDS {
         let mut prefix = [0; 4];
@@ -56,7 +56,7 @@ fn decode(mut input: impl Read) -> Result<Request, transport::Error> {
 
 // Own and erase the outgoing frame too; callers must preserve this wrapper when
 // eventually moving it into a supervised writer. No argv/environment transport.
-fn encode(
+pub(super) fn encode(
     port: u16,
     username: &str,
     password: &str,
@@ -74,7 +74,7 @@ fn encode(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Ack {
+pub(super) enum Ack {
     Authenticated,
     Credentials,
     Unsupported,
@@ -82,9 +82,16 @@ enum Ack {
     Permanent,
     Reply,
     Io,
+    Input,
+    Certificate,
+    Configuration,
+    Protocol,
+    UpgradeMissing,
+    UpgradeTemporary,
+    UpgradePermanent,
 }
 impl Ack {
-    fn bytes(self) -> &'static [u8] {
+    pub(super) fn bytes(self) -> &'static [u8] {
         match self {
             Self::Authenticated => b"SMTP_AUTH AUTHENTICATED\n",
             Self::Credentials => b"SMTP_AUTH CREDENTIALS\n",
@@ -93,10 +100,17 @@ impl Ack {
             Self::Permanent => b"SMTP_AUTH PERMANENT\n",
             Self::Reply => b"SMTP_AUTH REPLY\n",
             Self::Io => b"SMTP_AUTH IO\n",
+            Self::Input => b"SMTP_AUTH INPUT\n",
+            Self::Certificate => b"SMTP_AUTH CERTIFICATE\n",
+            Self::Configuration => b"SMTP_AUTH CONFIGURATION\n",
+            Self::Protocol => b"SMTP_AUTH PROTOCOL\n",
+            Self::UpgradeMissing => b"SMTP_AUTH TLS_MISSING\n",
+            Self::UpgradeTemporary => b"SMTP_AUTH TLS_TEMP\n",
+            Self::UpgradePermanent => b"SMTP_AUTH TLS_PERM\n",
         }
     }
 }
-const ACKS: [Ack; 7] = [
+const ACKS: [Ack; 14] = [
     Ack::Authenticated,
     Ack::Credentials,
     Ack::Unsupported,
@@ -104,8 +118,15 @@ const ACKS: [Ack; 7] = [
     Ack::Permanent,
     Ack::Reply,
     Ack::Io,
+    Ack::Input,
+    Ack::Certificate,
+    Ack::Configuration,
+    Ack::Protocol,
+    Ack::UpgradeMissing,
+    Ack::UpgradeTemporary,
+    Ack::UpgradePermanent,
 ];
-fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
+pub(super) fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
     ACKS.into_iter()
         .find(|ack| ack.bytes() == bytes)
         .ok_or(transport::Error::InvalidResult)
@@ -113,6 +134,7 @@ fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
     #[test]
     fn bounded_roundtrip_and_invalid_inputs() {

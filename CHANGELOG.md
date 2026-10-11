@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Supervised private verified-TLS authentication child fixtures, zeroizing stdin ownership, distinct sanitized TLS/AUTH results, and bounded slow/drip-fed/disconnected AUTH acceptance without message submission.
+
 - Separate bounded private SMTP credential frames with zeroized owned buffers and strict authentication-only acknowledgments; malformed/truncated inputs and cross-mode tokens are rejected.
 
 - GitHub CI/coverage/toolchain badges, Linux/macOS checks and rustdoc validation, an enforced 80% Rust line-coverage gate with report artifacts, workflow linting, PR dependency review, weekly dependency updates, and gated checksummed development build artifacts.

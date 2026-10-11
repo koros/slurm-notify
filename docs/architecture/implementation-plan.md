@@ -1640,3 +1640,41 @@ remain pending.
 Validation: shared suite passes (169 Rust tests plus one ignored helper, 37 custom
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy. The coverage gate passes at 95.90% Rust lines (8,300/8,655).
+
+## Subsequent increment: supervised private authentication fixture child
+
+The custom process harness now has a separate authentication-only child mode.
+A bounded fixture envelope carries an ephemeral DER root (1–4,096 bytes) ahead of
+existing credentials; aggregate input is capped at 4,309 bytes. This harness-only
+trust provision is not an operational configuration or certificate bypass. Strict
+frame/EOF and root validation finish before a hardcoded loopback connection;
+certificate verification checks the fixed relay.invalid name. Connect/socket waits
+remain two seconds, independently bounded by a 500 ms parent request deadline.
+
+The generic supervisor now accepts owned AsRef byte buffers, retaining zeroizing
+owners through the writer and dropping them before reporting write completion.
+Existing Vec callers keep their behavior, environment clearing, process-group
+cleanup, limits, and zero-exit requirement. Credentials remain absent from argv,
+environment and static diagnostic output. Typed credentials pass directly to AUTH
+without converting back to caller-owned strings. Order remains STARTTLS, verified
+handshake, fresh secure EHLO, one AUTH; no MAIL/DATA or delivery acceptance occurs.
+
+Authentication acknowledgments now preserve TLS certificate/configuration/protocol
+and upgrade categories under the distinct SMTP_AUTH prefix. Truncated or I/O
+replies classify as I/O; malformed/oversized protocol replies remain Reply. Twelve
+new custom process scenarios cover 235, 454, 535, malformed reply, abrupt EOF,
+stalled and drip-fed AUTH, malformed envelope lengths, trailing frame bytes, and
+invalid DER. Stall/drip fixtures observe socket closure, drip proves continuing
+traffic, and parent return plus cleanup stays below 1.5 seconds. Preflight controls
+observe no loopback connection. Existing certificate and capability tests still
+cover zero AUTH on verification failure and no unsupported-mechanism fallback.
+
+No dependency, schema, normal runtime behavior, or public interface changed.
+Next: classify authenticated-child outcomes for owned outbox retry/block handling,
+retaining authentication-only success as not submitted, then verify restart and
+partial progress. Credential lookup and message construction/submission remain
+pending alongside public review, licensing, cluster validation, and activation.
+
+Validation: formatting, strict Clippy and shared suite pass (169 Rust tests plus
+one ignored helper, 49 custom process scenarios, eight SQLite tests, six hook
+tests). Rust line coverage passes the 80% gate at 95.93% (8,320/8,673).

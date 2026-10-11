@@ -63,6 +63,15 @@ fn authenticate(
     name: rustls::pki_types::ServerName<'static>,
 ) -> Result<(), Error> {
     let credentials = Credentials::new(username, password)?;
+    authenticate_credentials(credentials, connect, config, name)
+}
+
+pub(super) fn authenticate_credentials(
+    credentials: Credentials,
+    connect: impl FnOnce() -> std::io::Result<TcpStream>,
+    config: Arc<rustls::ClientConfig>,
+    name: rustls::pki_types::ServerName<'static>,
+) -> Result<(), Error> {
     let mut stream = smtp_tls::verified_starttls(connect().map_err(|_| Error::Io)?, config, name)
         .map_err(Error::Transport)?;
     stream
@@ -87,7 +96,7 @@ fn authenticate(
             plain |= words.any(|word| word.eq_ignore_ascii_case(b"PLAIN"));
         }
     })
-    .map_err(|_| Error::Reply)?;
+    .map_err(reply_error)?;
     if reply.code != 250 {
         return Err(Error::Reply);
     }
@@ -101,10 +110,7 @@ fn authenticate(
         .map_err(|_| Error::Io)?;
     drop(command);
     drop(credentials);
-    let result = match read_reply(&mut stream, limits())
-        .map_err(|_| Error::Reply)?
-        .code
-    {
+    let result = match read_reply(&mut stream, limits()).map_err(reply_error)?.code {
         235 => Ok(()),
         400..=499 => Err(Error::Temporary),
         500..=599 => Err(Error::Permanent),
@@ -114,6 +120,13 @@ fn authenticate(
     // Teardown must not replace an explicit authentication result.
     let _ = stream.flush();
     result
+}
+
+fn reply_error(error: super::smtp_reply::Error) -> Error {
+    match error {
+        super::smtp_reply::Error::Io | super::smtp_reply::Error::Truncated => Error::Io,
+        _ => Error::Reply,
+    }
 }
 
 #[cfg(test)]

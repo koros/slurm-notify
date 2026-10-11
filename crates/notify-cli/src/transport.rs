@@ -153,14 +153,14 @@ pub(super) fn supervise(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn supervise_with<T>(
     command: &mut Command,
-    input: Vec<u8>,
+    input: impl AsRef<[u8]> + Send + 'static,
     timeout: Duration,
     input_limit: usize,
     output_limit: usize,
     decode: fn(&[u8]) -> Result<T, Error>,
 ) -> Result<T, Error> {
     use std::os::unix::process::CommandExt;
-    if input.len() > input_limit || timeout.is_zero() || output_limit == 0 {
+    if input.as_ref().len() > input_limit || timeout.is_zero() || output_limit == 0 {
         return Err(Error::InvalidInput);
     }
     // Start the deadline before spawning. Local process creation and OS reaping
@@ -181,7 +181,8 @@ pub(super) fn supervise_with<T>(
     let (sender, receiver) = mpsc::channel();
     let writer_sender = sender.clone();
     let writer = thread::spawn(move || {
-        let result = stdin.write_all(&input).map_err(|_| Error::Io);
+        let result = stdin.write_all(input.as_ref()).map_err(|_| Error::Io);
+        drop(input); // Preserve and drop zeroizing owners before reporting completion.
         drop(stdin); // EOF marks the end of the bounded request.
         let _ = writer_sender.send((false, result.map(|_| Vec::new())));
     });
@@ -243,7 +244,7 @@ pub(super) fn supervise_with<T>(
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub(super) fn supervise_with<T>(
     _command: &mut Command,
-    _input: Vec<u8>,
+    _input: impl AsRef<[u8]> + Send + 'static,
     _timeout: Duration,
     _input_limit: usize,
     _output_limit: usize,

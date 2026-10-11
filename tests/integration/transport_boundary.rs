@@ -26,6 +26,11 @@ mod supervised_provider;
 
 #[path = "../../crates/notify-cli/src/smtp_ack.rs"]
 mod smtp_ack;
+#[path = "../../crates/notify-cli/src/smtp_auth.rs"]
+mod smtp_auth;
+mod smtp_auth_boundary;
+#[path = "../../crates/notify-cli/src/smtp_auth_frame.rs"]
+mod smtp_auth_frame;
 #[path = "../../crates/notify-cli/src/smtp_dispatch.rs"]
 mod smtp_dispatch;
 mod smtp_negotiation_boundary;
@@ -54,6 +59,10 @@ fn main() {
         };
         std::io::stdout().write_all(bytes).unwrap();
         std::process::exit(if failed { 1 } else { 0 });
+    }
+    if mode.as_deref() == Some("--smtp-auth-fixture") {
+        let result = smtp_auth_boundary::serve(std::io::stdin().lock(), std::io::stdout().lock());
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
     }
     if mode.as_deref() == Some("--smtp-negotiation") {
         // Negotiation is not delivery: this probe never emits a delivery ACK.
@@ -177,12 +186,13 @@ fn acceptance() {
     orchestrated_mid_batch_cancellation_restart();
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
+    smtp_auth_boundary::acceptance();
     smtp_negotiation_boundary::acceptance();
     smtp_negotiation_boundary::handshake_acceptance();
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
     owned_smtp_upgrade_policy_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
