@@ -8,6 +8,8 @@ mod lifecycle;
 mod scheduler;
 #[path = "../../crates/notify-cli/src/smtp_frozen_frame.rs"]
 mod smtp_frozen_frame;
+#[path = "../../crates/notify-cli/src/smtp_metadata.rs"]
+mod smtp_metadata;
 #[path = "../../crates/notify-cli/src/smtp_poll.rs"]
 mod smtp_poll;
 #[path = "../../crates/notify-cli/src/smtp_render.rs"]
@@ -1902,11 +1904,10 @@ fn orchestrated_frozen_blocked_restart() {
         .map(|name| smtp_routes::Route {
             name,
             visibility: smtp_render::JobVisibility::Hidden,
-            metadata: smtp_render::Metadata {
+            metadata: smtp_routes::Metadata {
                 sender: "s@fixture.invalid",
                 recipient: "r@fixture.invalid",
-                identity: name,
-                timestamp: 123,
+                namespace: name,
             },
         })
         .collect();

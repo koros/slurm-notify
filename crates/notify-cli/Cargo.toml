@@ -17,6 +17,8 @@ url = "=2.5.4"
 httpdate = "=1.0.3"
 # Explicit zeroization version for the private prototypes.
 zeroize = "=1.8.1"
+# Reuse locked TLS crypto for bounded deterministic private SMTP identities.
+ring = "=0.17.14"
 # Reuse the locked codec for private AUTH PLAIN fixtures; no new package version.
 base64 = "=0.22.1"
 # Message builder only: SMTP transport, TLS, pooling and async features stay disabled.

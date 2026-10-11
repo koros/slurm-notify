@@ -1320,11 +1320,10 @@ mod tests {
         super::super::smtp_routes::Route {
             name: "primary",
             visibility,
-            metadata: super::super::smtp_render::Metadata {
+            metadata: super::super::smtp_routes::Metadata {
                 sender: "s@fixture.invalid",
                 recipient: "r@fixture.invalid",
-                identity: "primary",
-                timestamp: 123,
+                namespace: "primary",
             },
         }
     }

@@ -403,6 +403,7 @@ dependencies = [
  "libc",
  "powerfmt",
  "rcgen",
+ "ring",
  "rusqlite",
  "rustls",
  "time",

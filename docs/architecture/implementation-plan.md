@@ -2235,3 +2235,36 @@ Validation: shared checks pass with 219 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.31% (10,444/10,733), above the unchanged 80% gate. No real-cluster
 or real-relay tests were run.
+
+### Private per-event SMTP metadata selection
+
+ADR 0013 replaces literal validated-route message IDs/dates with explicit route
+namespaces and bounded SHA-256 event/state/destination/namespace selection. Date
+comes from the poll's observed time; identity excludes time so retries remain
+stable. Empty actual-start context is allowed for pre-execution cancellation.
+Selected IDs contain no raw identity fields, but are fingerprints rather than
+anonymity guarantees. Existing atomic preparation freezes the exact resulting
+headers and replay skips rendering. The Message-ID domain remains fixture-only.
+
+Reuse already-locked ring 0.17.14 as a direct private dev dependency for incremental
+SHA-256; only the lockfile root dependency edge changes. No registry versions,
+schema, public interfaces or executable defaults change. The strict builder probe
+validates explicit namespaces and envelopes; shared namespaces are now valid
+because destination names are hashed too. Route-level timestamps are removed from
+this private plan; the low-level arbitrary fixture renderer remains explicit.
+
+Tests cover a golden vector, event/state/route/namespace distinctions, field
+boundaries, stable IDs under changed observation time, cancellation without start
+context and work/date bounds. Actual mixed-route headers prove four distinct IDs
+for two events/two SMTP routes and exact observation Dates. Reopen at a later time
+preserves frozen bytes and outbox identities. Existing validated orchestration and
+owned blocked-dispatch TLS acceptance use selected metadata.
+
+Next: complete owned TLS retry/lost-result acceptance using selected per-event
+metadata. Production domains, credentials, route revisions, public review,
+privacy defaults, licensing and real-cluster/relay activation remain pending.
+
+Validation: shared checks pass with 223 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.38% (10,657/10,944), above the unchanged 80% gate. No real-cluster
+or real-relay tests were run.
