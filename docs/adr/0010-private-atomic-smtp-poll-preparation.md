@@ -63,3 +63,34 @@ Next: compose prepared storage with private durable scheduler polling using a
 fallible bounded fixture preparation callback; install the in-memory candidate only
 after commit. Event rendering/redaction, route revisions, credentials, public
 review, licensing, real-cluster validation and runtime activation remain pending.
+
+
+## Subsequent scheduler composition
+
+The private smtp_poll module now composes the shared bounded query/parser with
+atomic prepared storage. It validates routes and an explicit maximum message count,
+clones the reconciler, queries/reconciles, checks new-event/SMTP-route cardinality,
+prepares bounded messages locally, persists the batch, and installs the candidate
+only after successful commit. Historical/suppressed events never call preparation.
+Callbacks return only a static preparation failure, and batch values do not expose
+message Debug/Clone output. Prepared DATA retains its existing 16,384-byte cap;
+count limits govern retained message payloads, not all upstream heap allocations.
+
+Preparation is synchronous fixture work. The API bounds callback count and message
+size, and retains the existing scheduler query deadline; it cannot interrupt an
+arbitrary blocking renderer or promise a deadline for the entire poll/preparation.
+No network or preparation callback is invoked inside the storage transaction.
+The caller must restore durable state before beginning or retrying after reopen.
+The existing plain poll and its error categories remain unchanged.
+
+Four tests cover mixed routes and stored recipients/DATA, restored replay with
+changed routes and zero preparation calls, limits before callbacks, later preparation
+failure without writes, a late checkpoint failure preserving a previous pending
+job/checkpoint in both memory and SQLite, retry success, settings/query/parser errors
+and suppressed discovery. The owned TLS fixture now runs the composed private
+query/reconciliation/preparation/commit path before real child submission and frozen
+retry/reopen checks. Query output is synthetic; no real Slurm or relay is contacted.
+
+Next: integrate prepared polling into the private bounded polling cycle and health
+reporting/orchestration. Product event rendering/redaction, route revision semantics,
+credential lookup, public review, licensing and activation remain pending.

@@ -8,6 +8,8 @@ mod lifecycle;
 mod scheduler;
 #[path = "../../crates/notify-cli/src/smtp_frozen_frame.rs"]
 mod smtp_frozen_frame;
+#[path = "../../crates/notify-cli/src/smtp_poll.rs"]
+mod smtp_poll;
 #[path = "../../crates/notify-cli/src/storage.rs"]
 mod storage;
 #[path = "../../crates/notify-cli/src/transport.rs"]
@@ -1690,15 +1692,7 @@ fn owned_frozen_submission_restart() {
         let root = state_directory(&directory);
         let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
         let mut reconciler = lifecycle::Reconciler::with_capacity(10);
-        let events = reconciler
-            .observe_snapshot(
-                "",
-                "cluster|1|alice|s|actual|COMPLETED|0:0",
-                "cluster",
-                "alice",
-                true,
-            )
-            .unwrap();
+
         let message = smtp_message::prepare(
             "frozen@fixture.invalid",
             "kept@fixture.invalid",
@@ -1708,24 +1702,39 @@ fn owned_frozen_submission_restart() {
             123,
         )
         .unwrap();
-        store
-            .persist_prepared_reconciler(
-                storage::PollPreparation {
-                    candidate: &reconciler,
-                    deliverable: &events,
-                    destinations: &["smtp"],
-                    smtp_destinations: &["smtp"],
-                    messages: &[storage::SmtpPreparation {
-                        event: &events[0],
-                        destination: "smtp",
-                        message: &message,
-                    }],
-                },
-                "cluster",
-                "2026-10-10T01:00:00",
-                10,
-            )
-            .unwrap();
+        let request = scheduler::PollRequest {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-10T01:00:00",
+            timeout: Duration::from_secs(5),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let mut frozen_message = Some(message);
+        smtp_poll::poll_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            &smtp_poll::Settings {
+                destinations: &["smtp"],
+                smtp_destinations: &["smtp"],
+                max_messages: 1,
+            },
+            10,
+            |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0"
+                }
+                .into())
+            },
+            |_, _| Ok(frozen_message.take().unwrap()),
+        )
+        .unwrap();
         let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
         let snapshot = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
         let first = delivery::deliver_due_detailed(

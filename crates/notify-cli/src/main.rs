@@ -9,6 +9,8 @@ mod lifecycle;
 #[cfg(test)]
 mod scheduler;
 #[cfg(test)]
+mod smtp_poll;
+#[cfg(test)]
 mod storage;
 
 #[cfg(test)]

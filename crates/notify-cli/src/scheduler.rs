@@ -224,7 +224,7 @@ pub(super) struct PollRequest<'a> {
 
 // Explicit windows and limits only; no public defaults. Injection lets ordinary
 // tests run the complete query/parse/reconcile path without Slurm access.
-fn poll_with(
+pub(super) fn poll_with(
     request: &PollRequest<'_>,
     reconciler: &mut super::lifecycle::Reconciler,
     mut query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,

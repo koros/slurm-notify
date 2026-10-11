@@ -1984,3 +1984,37 @@ Validation: shared checks pass (197 Rust tests plus one ignored helper, custom
 process acceptance, eight standalone SQLite tests and six hook tests), including
 formatting and strict Clippy. Fresh Rust line coverage passes the 80% gate at
 97.17% (8,903/9,162). No real-cluster or real-relay tests were run.
+
+
+## Subsequent increment: private prepared durable scheduler polling
+
+A separate smtp_poll module shares the existing scheduler query/parser and atomic
+prepared storage. It validates SMTP route selection and explicit message-count
+limits, clones the reconciler, reconciles bounded query output, checks cardinality
+before invoking any preparation callback, builds local messages and commits all
+poll state before publishing the candidate in memory. No callback runs under the
+SQLite transaction. Preparation failure is static and excludes raw payloads.
+
+Four tests cover mixed routes/recipients/DATA, restored replay with changed routes
+without rebuilding, preparation failure and count exhaustion without writes,
+late storage failure preserving a previous pending job and checkpoint in memory
+and SQLite, retry success, invalid settings, scheduler/parser errors and suppressed
+discovery. Owned SMTP TLS acceptance now uses this composed polling path before
+temporary-refusal and accepted-send/lost-result retry/reopen delivery fixtures.
+The original plain durable poll, cycle error categories, schema and defaults stay
+unchanged; no dependencies or public contracts are added.
+
+Preparation callbacks are synchronous local fixtures: count and DATA size are
+bounded, but an arbitrary blocked callback cannot be interrupted. Existing query
+deadlines do not promise an end-to-end renderer deadline. Caller restores durable
+state first; production routing/rendering remains pending.
+
+Next: integrate prepared polling with the private bounded cycle, health reporting
+and orchestration. Event rendering/redaction, route revisions, credential lookup,
+public review, licensing, real relay/cluster validation and activation remain
+pending.
+
+Validation: shared checks pass (201 Rust tests plus one ignored helper, custom
+process acceptance, eight standalone SQLite tests and six hook tests), including
+formatting and strict Clippy. Fresh Rust line coverage passes the unchanged 80%
+gate at 97.17% (9,217/9,485). No real-cluster or real-relay tests were run.
