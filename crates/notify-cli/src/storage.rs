@@ -741,6 +741,24 @@ impl Store {
         Ok(removed)
     }
 
+    // One bounded transaction; every binding (including pending work) protects
+    // its descriptor. This operation does not remove snapshots or ledger history.
+    pub(super) fn prune_smtp_provider_revisions(
+        &mut self,
+        cluster: &str,
+        limit: usize,
+    ) -> Result<usize, StorageError> {
+        if cluster.is_empty() || cluster.len() > 4096 || limit == 0 || limit > 256 {
+            return Err(StorageError::InvalidInput);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let removed = tx.execute("DELETE FROM smtp_provider_revisions WHERE rowid IN (SELECT r.rowid FROM smtp_provider_revisions r WHERE r.cluster=?1 AND NOT EXISTS(SELECT 1 FROM smtp_provider_bindings b WHERE b.cluster=r.cluster AND b.destination=r.destination AND b.revision=r.revision) ORDER BY r.destination,r.revision LIMIT ?2) AND NOT EXISTS(SELECT 1 FROM smtp_provider_bindings b WHERE b.cluster=smtp_provider_revisions.cluster AND b.destination=smtp_provider_revisions.destination AND b.revision=smtp_provider_revisions.revision)", params![cluster,limit as i64])?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub(super) fn frozen_smtp(
         &self,
         event_id: &str,
@@ -2339,6 +2357,17 @@ pub(super) mod tests {
         assert_eq!(count(&store, "smtp_revision_bindings"), 0);
         assert_eq!(count(&store, "smtp_messages"), 0);
         assert_eq!(count(&store, "smtp_provider_revisions"), 1);
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 1).unwrap(),
+            1
+        );
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 256).unwrap(),
+            0
+        );
+        assert_eq!(count(&store, "smtp_provider_revisions"), 0);
         assert_eq!(count(&store, "events"), 2);
     }
     #[test]
@@ -3025,6 +3054,116 @@ pub(super) mod tests {
         assert_eq!(count(&store, "smtp_render_revisions"), 1);
         assert_eq!(store.prune_smtp_revisions("cluster", 1).unwrap(), 0);
         assert_eq!(store.due_deliveries("cluster", 10, 10).unwrap().len(), 1);
+    }
+    #[test]
+    fn provider_cleanup_is_bounded_cluster_scoped_and_rolls_back_late_failure() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let bound = provider("smtp", "bound.fixture.invalid");
+        let owned = provider_messages(&events, &rendering[0]);
+        let messages: Vec<_> = events
+            .iter()
+            .zip(&owned)
+            .map(|(event, message)| SmtpPreparation {
+                event,
+                destination: "smtp",
+                message,
+            })
+            .collect();
+        store
+            .persist_prepared_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: std::slice::from_ref(&bound),
+                },
+                "cluster",
+                "window",
+                10,
+            )
+            .unwrap();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        for namespace in ["orphan-a", "orphan-b"] {
+            let descriptor = provider("smtp", namespace);
+            store
+                .db
+                .execute(
+                    "INSERT INTO smtp_provider_revisions VALUES ('cluster','smtp',?1,?2)",
+                    params![descriptor.token(), descriptor.canonical()],
+                )
+                .unwrap();
+        }
+        store
+            .db
+            .execute(
+                "INSERT INTO smtp_provider_revisions VALUES ('other','smtp',?1,?2)",
+                params![bound.token(), bound.canonical()],
+            )
+            .unwrap();
+        for (cluster, limit) in [
+            ("", 1),
+            (&"x".repeat(4097), 1),
+            ("cluster", 0),
+            ("cluster", 257),
+        ] {
+            assert!(matches!(
+                store.prune_smtp_provider_revisions(cluster, limit),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        store.db.execute_batch("CREATE TABLE cleanup_probe(n INTEGER); CREATE TRIGGER reject_second_provider BEFORE DELETE ON smtp_provider_revisions BEGIN INSERT INTO cleanup_probe VALUES(1); SELECT CASE WHEN (SELECT count(*) FROM cleanup_probe)=2 THEN RAISE(ABORT,'fixture') END; END;").unwrap();
+        assert!(matches!(
+            store.prune_smtp_provider_revisions("cluster", 2),
+            Err(StorageError::Database(_))
+        ));
+        assert_eq!(count(&store, "smtp_provider_revisions"), 4);
+        assert_eq!(count(&store, "cleanup_probe"), 0);
+        store
+            .db
+            .execute_batch("DROP TRIGGER reject_second_provider;")
+            .unwrap();
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 1).unwrap(),
+            1
+        );
+        assert_eq!(count(&store, "smtp_provider_revisions"), 3);
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 256).unwrap(),
+            1
+        );
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 1).unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .bound_smtp_provider(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .token(),
+            bound.token()
+        );
+        assert_eq!(store.prune_smtp_provider_revisions("other", 1).unwrap(), 1);
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(count(&store, "smtp_provider_revisions"), 1);
+        assert_eq!(
+            store.prune_smtp_provider_revisions("cluster", 1).unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .frozen_smtp(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .data(),
+            owned[0].data()
+        );
+        assert_eq!(count(&store, "smtp_render_revisions"), 1);
+        assert_eq!(count(&store, "events"), 2);
+        assert_eq!(store.due_deliveries("cluster", 10, 10).unwrap().len(), 4);
     }
     #[test]
     fn malformed_owned_revision_state_fails_closed() {

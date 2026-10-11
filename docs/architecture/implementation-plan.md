@@ -2617,3 +2617,27 @@ integration. No schema, dependency, public contract or production activation cha
 Validation: shared checks pass with 270 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.46% (14,319/14,692), above the unchanged 80% gate.
+
+### Bounded SMTP provider revision cleanup
+
+Private Store::prune_smtp_provider_revisions validates a nonempty cluster of at
+most 4096 bytes and a deletion limit of 1..=256. One immediate transaction selects
+unreferenced provider descriptors in destination/revision order, rechecks binding
+absence on deletion and commits the actual removal count. Every existing binding
+protects its descriptor, including pending and completed work awaiting retention.
+The operation leaves rendering descriptors, snapshots, ledger and attempts intact.
+
+Tests cover invalid bounds, bounded batches, cluster isolation, a late trigger
+failure rolling back earlier deletions, pending protection and exact frozen bytes
+after reopen. Completed-retention acceptance verifies cascading binding removal
+makes the provider eligible for pruning and that deletion survives reopen without
+removing event history. No schema, dependency or public contract changes occur;
+cleanup remains caller-invoked with no new runtime default.
+
+Next: private orchestration integration of provider-aware polling, pair permission,
+validated resolution and supervised bound dispatch. Production activation and public
+CLI/config contracts still require their separate review and acceptance gates.
+
+Validation: shared checks pass with 271 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.51% (14,436/14,804), above the unchanged 80% gate.

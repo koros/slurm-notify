@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded, cluster-scoped cleanup of unreferenced SMTP provider revisions, with transactional rollback, pending-message protection and completed-retention/reopen tests.
+
 - Private supervised bound SMTP STARTTLS submission using the persisted relay, TLS name, trust roots and AUTH identity, with bounded zeroizing stdin, child revalidation and owned endpoint/restart/lost-result acceptance. Implicit TLS remains blocked.
 
 - Private SMTP rendering/provider-pair permissions and opaque validated resolution contexts, checking actual trust content and authentication identity before injected dispatch or retry retirement; reopen, denial and secret-rotation tests. Concrete bound transport remains pending.
