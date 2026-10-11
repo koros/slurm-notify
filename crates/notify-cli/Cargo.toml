@@ -19,6 +19,13 @@ httpdate = "=1.0.3"
 zeroize = "=1.8.1"
 # Reuse the locked codec for private AUTH PLAIN fixtures; no new package version.
 base64 = "=0.22.1"
+# Message builder only: SMTP transport, TLS, pooling and async features stay disabled.
+lettre = { version = "=0.11.19", default-features = false, features = ["builder"] }
+# Builder transitive pins retain the development Rust 1.74 compiler.
+email-encoding = "=0.4.1"
+idna_adapter = "=1.1.0"
+stacker = "=0.1.17"
+psm = "=0.1.24"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = "=0.12.1"
 time = "=0.3.36"

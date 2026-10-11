@@ -1708,3 +1708,35 @@ pending.
 Validation: shared checks pass (174 Rust tests plus one ignored helper, 51 custom
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy. Coverage passes the 80% gate at 95.98% Rust lines (8,504/8,860).
+
+## Subsequent increment: bounded private SMTP message construction
+
+A private single-recipient builder uses lettre's independently assessed builder
+feature; transport remains deferred. ASCII addr-specs are preflight bounded and
+library validated. Stable identity and explicit frozen Date prevent regeneration
+on repeated construction. The prototype rejects structured CR/LF/NUL injection,
+unsupported mailbox syntax, non-ASCII fields, oversize subjects/body/identity,
+and out-of-range dates before building. Text accepts printable ASCII and LF only;
+lettre handles headers, content type/transfer encoding, and CRLF normalization.
+
+The separate DATA framing helper checks canonical CRLF, 998-byte content lines,
+ASCII and formatted length, doubles every leading dot (including a line containing
+only a dot), and appends exactly one terminator within a separate byte ceiling.
+Three tests verify deterministic bytes and envelope, terminal/newline/empty bodies,
+dot transparency, field injection, library address rejection, every size boundary,
+malformed formatted lines, and bounded DATA expansion. Owned formatted/DATA buffers
+use zeroization; upstream/caller copies do not share that guarantee. No Debug or
+Clone is provided for Prepared; errors contain only static categories.
+
+Dependency features, compiler-compatible transitive pins, source assessment and
+limitations are recorded in ADR 0007. No runtime defaults, schema, or public
+contracts changed. This milestone constructs synthetic messages only.
+Next: private submission using validated envelope/DATA, with phase-specific reply
+policy and positive final DATA acknowledgment required for success. Supervised
+message framing, durable frozen-message persistence, credential lookup, public
+review, licensing, cluster validation and activation remain pending.
+
+Validation: shared checks pass (177 Rust tests plus one ignored helper, 51 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy with the new locked builder dependencies. The 80% coverage gate
+passes at 96.03% Rust lines (8,717/9,077).
