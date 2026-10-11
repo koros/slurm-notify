@@ -1699,4 +1699,72 @@ mod tests {
             assert_eq!(report, BatchReport::default());
         }
     }
+    #[test]
+    fn smtp_submission_retry_budget_survives_restart_for_refusal_and_lost_result() {
+        use crate::{smtp_submit_dispatch, smtp_submit_frame, transport};
+        for lost in [false, true] {
+            let directory = Directory::new();
+            let mut store = seeded(&directory, &["primary"]);
+            let identity = store
+                .due_deliveries("cluster", 10, 10)
+                .unwrap()
+                .remove(0)
+                .event_id;
+            for (attempt, now, completion, next) in
+                [(1, 10, 20, 25), (2, 25, 30, 40), (3, 40, 50, 70)]
+            {
+                let item = store.due_deliveries("cluster", now, 10).unwrap().remove(0);
+                assert_eq!(item.attempt_number, attempt);
+                assert_eq!(item.event_id, identity);
+                let report = deliver_due_fallible(
+                    &mut store,
+                    "cluster",
+                    now,
+                    10,
+                    policy(),
+                    |_| {
+                        let result = if lost {
+                            Err(transport::Error::ChildExit)
+                        } else {
+                            smtp_submit_frame::decode_ack(b"SMTP_SUBMIT FINAL TEMP NA\n")
+                        };
+                        smtp_submit_dispatch::classify(result).into_dispatch()
+                    },
+                    || Some(completion),
+                )
+                .unwrap();
+                assert_eq!(report.delivered, 0);
+                assert_eq!(report.retrying, usize::from(attempt < 3));
+                assert_eq!(report.failed, usize::from(attempt == 3));
+                drop(store);
+                store = open(&directory);
+                assert!(store
+                    .due_deliveries("cluster", next - 1, 10)
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(
+                    store.due_deliveries("cluster", next, 10).unwrap().len(),
+                    usize::from(attempt < 3)
+                );
+            }
+            let report = deliver_due_fallible(
+                &mut store,
+                "cluster",
+                100,
+                10,
+                policy(),
+                |_| panic!("exhausted submission must not dispatch"),
+                || panic!("no completion clock"),
+            )
+            .unwrap();
+            assert_eq!(report, BatchReport::default());
+            assert_eq!(
+                db(&directory)
+                    .query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                3
+            );
+        }
+    }
 }

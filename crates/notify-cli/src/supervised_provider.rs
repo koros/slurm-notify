@@ -5,6 +5,7 @@ use super::{delivery::ProviderOutcome, transport};
 pub(super) enum Diagnostic {
     Acknowledged,
     SmtpReady,
+    SmtpSubmission(super::smtp_submit::Phase, super::smtp_submit::Diagnostic),
     SmtpAuthenticated,
     SmtpCredentials,
     SmtpAuthUnsupported,
@@ -38,6 +39,7 @@ pub(super) enum Acceptance {
     Unknown,
     NotAttempted,
     NotSubmitted,
+    NotAccepted,
 }
 
 #[derive(Debug, PartialEq, Eq)]

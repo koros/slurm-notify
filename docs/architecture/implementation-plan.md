@@ -1822,3 +1822,40 @@ and activation remain pending.
 Validation: shared checks pass (184 Rust tests plus one ignored helper, 66 custom
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy. The 80% coverage gate passes at 96.21% Rust lines (9,625/10,004).
+
+## Subsequent increment: durable submission result handling
+
+The private parent submission classifier validates canonical child evidence again
+for injected callers, preserves phase/diagnostic and explicit not-accepted evidence,
+and maps valid final acceptance/refusal/retry outcomes into the existing worker.
+Pre-authentication results reuse AUTH block/retry policy. Missing or failed child
+results retain conservative unknown acceptance; forged combinations cannot invent
+success. Reports distinguish relay acceptance from final refusal, pre-DATA failure,
+and uncertain final results. This evidence is returned in memory; no new persistence
+schema or diagnostic logging was introduced.
+
+Two classifier tests verify decoded evidence and blocked/untrusted result handling.
+A durable retry-budget test checks explicit temporary refusal and lost child result
+across reopen through three attempts, preserving identity and completion-time retry
+deadlines and preventing further dispatch after exhaustion. Two custom owned-store
+scenarios compose real submission children: delivered, permanently rejected and
+retrying rows commit before a preflight block, with a later destination untouched;
+reopen preserves exact counts/identity/attempts/deadline and ownership. A relay-accepted
+session discards its parent result and exits unsuccessfully after observing QUIT;
+the parent schedules a retry, reopening preserves attempt two, and a second accepted
+session delivers. Both servers verify the same frozen synthetic message bytes,
+demonstrating possible duplicate submission rather than claiming deduplication.
+
+The fixture identity/date/body are explicit test constants, not a durable message
+storage contract or a rendering of the outbox event. Durable frozen-message mapping
+remains separate work. Existing submission fixture checks were factored into a shared
+bounded helper; strict TLS, stdin ownership, reply limits, and deadlines remain.
+No dependencies, public interfaces, schema, or runtime defaults changed.
+Next: private frozen message persistence design/experiment so retries and restart
+use identical validated envelope/message bytes rather than reconstructing fixtures.
+Credential lookup, public review, licensing, cluster validation and activation remain
+pending.
+
+Validation: shared checks pass (187 Rust tests plus one ignored helper, 68 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy. Coverage passes the 80% gate at 96.23% Rust lines (9,854/10,240).

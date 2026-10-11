@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private SMTP submission outbox policy preserving phase/acceptance evidence, durable accepted/rejected/retry/block partial progress, retry exhaustion and relay-accepted/lost-child-result replay fixtures.
+
 - Bounded private SMTP submission child requests and canonical phase/acceptance acknowledgments, with supervised final DATA stall/drip/EOF, relay acceptance/refusal, preflight no-connect and wrong/failed-child checks.
 
 - Private verified/authenticated SMTP submission with bounded phase replies, one validated envelope/DATA transaction, final-acknowledgment acceptance policy, write-failure fixtures, and real TLS message observation.

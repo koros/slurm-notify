@@ -43,6 +43,8 @@ mod smtp_reply;
 #[path = "../../crates/notify-cli/src/smtp_submit.rs"]
 mod smtp_submit;
 mod smtp_submit_boundary;
+#[path = "../../crates/notify-cli/src/smtp_submit_dispatch.rs"]
+mod smtp_submit_dispatch;
 #[path = "../../crates/notify-cli/src/smtp_submit_frame.rs"]
 mod smtp_submit_frame;
 #[path = "../../crates/notify-cli/src/smtp_tls.rs"]
@@ -82,6 +84,11 @@ fn main() {
         };
         std::io::stdout().write_all(bytes).unwrap();
         std::process::exit(if failed { 1 } else { 0 });
+    }
+    if mode.as_deref() == Some("--smtp-submit-lost-result") {
+        // Relay acceptance is observed normally, but its parent result is lost.
+        let _ = smtp_submit_boundary::serve(std::io::stdin().lock(), std::io::sink());
+        std::process::exit(1);
     }
     if mode.as_deref() == Some("--smtp-submit-fixture") {
         let result = smtp_submit_boundary::serve(std::io::stdin().lock(), std::io::stdout().lock());
@@ -214,6 +221,8 @@ fn acceptance() {
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
     owned_smtp_auth_progress_restart();
+    owned_smtp_submission_restart();
+    owned_smtp_lost_result_replay();
     smtp_submit_boundary::acceptance();
     smtp_auth_boundary::acceptance();
     smtp_negotiation_boundary::acceptance();
@@ -1502,4 +1511,158 @@ fn owned_smtp_auth_progress_restart() {
             .filter(|item| item.destination != "a")
             .all(|item| item.attempt_number == 1));
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_smtp_submission_restart() {
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+    poll_fixture_with_destinations(&mut store, &mut reconciler, &["a", "b", "c", "d", "e"]);
+    let before = store.due_deliveries("cluster", 10, 10).unwrap();
+    let identity = before[0].event_id.clone();
+    let mut completions = 0;
+    let failure = delivery::deliver_due_detailed(
+        &mut store,
+        "cluster",
+        10,
+        10,
+        retry_policy(),
+        |item| {
+            assert_eq!(item.event_id, identity);
+            let result = match item.destination.as_str() {
+                "a" => smtp_submit_boundary::fixture_result(0),
+                "b" => smtp_submit_boundary::fixture_result(2),
+                "c" => smtp_submit_boundary::fixture_result(1),
+                "d" => {
+                    let mut command = Command::new(std::env::current_exe().unwrap());
+                    command.arg("--smtp-submit-fixture");
+                    transport::supervise_with(
+                        &mut command,
+                        zeroize::Zeroizing::new(Vec::new()),
+                        Duration::from_millis(500),
+                        smtp_submit_frame::INPUT_LIMIT,
+                        smtp_submit_frame::OUTPUT_LIMIT,
+                        smtp_submit_frame::decode_ack,
+                    )
+                }
+                _ => panic!("later destination must remain untouched"),
+            };
+            smtp_submit_dispatch::classify(result).into_dispatch()
+        },
+        || {
+            completions += 1;
+            Some(20)
+        },
+    )
+    .unwrap_err();
+    assert_eq!(completions, 3);
+    assert_eq!(failure.kind, delivery::FailureKind::DispatchBlocked);
+    assert_eq!(
+        failure.diagnostic,
+        Some(supervised_provider::Diagnostic::SmtpInput)
+    );
+    assert_eq!(failure.committed.delivered, 1);
+    assert_eq!(failure.committed.failed, 1);
+    assert_eq!(failure.committed.retrying, 1);
+    assert!(!failure.acceptance_uncertain);
+    drop(store);
+    let store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let pending = store.due_deliveries("cluster", 24, 10).unwrap();
+    assert_eq!(
+        pending
+            .iter()
+            .map(|item| item.destination.as_str())
+            .collect::<Vec<_>>(),
+        vec!["d", "e"]
+    );
+    assert!(pending
+        .iter()
+        .all(|item| item.event_id == identity && item.attempt_number == 1));
+    let due = store.due_deliveries("cluster", 25, 10).unwrap();
+    let retry = due.iter().find(|item| item.destination == "c").unwrap();
+    assert_eq!(retry.attempt_number, 2);
+    assert_eq!(retry.event_id, identity);
+    assert!(matches!(
+        storage::Store::open_private(&root, Duration::from_millis(50)),
+        Err(storage::StorageError::StatePath(
+            state_path::Error::AlreadyOwned
+        ))
+    ));
+    drop(store);
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM outbox WHERE status='delivered'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_smtp_lost_result_replay() {
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+    poll_fixture(&mut store, &mut reconciler);
+    let identity = store.due_deliveries("cluster", 10, 10).unwrap()[0]
+        .event_id
+        .clone();
+    let report = delivery::deliver_due_fallible(
+        &mut store,
+        "cluster",
+        10,
+        10,
+        retry_policy(),
+        |_| {
+            // Server verifies the full frozen synthetic bytes, sends 250 and observes
+            // QUIT. Child discards its parent acknowledgment and exits unsuccessfully.
+            let report = smtp_submit_dispatch::classify(smtp_submit_boundary::fixture_result(10));
+            assert_eq!(report.acceptance, supervised_provider::Acceptance::Unknown);
+            report.into_dispatch()
+        },
+        || Some(20),
+    )
+    .unwrap();
+    assert_eq!(report.retrying, 1);
+    assert_eq!(report.delivered, 0);
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    assert!(store.due_deliveries("cluster", 24, 10).unwrap().is_empty());
+    let retry = store.due_deliveries("cluster", 25, 10).unwrap().remove(0);
+    assert_eq!(retry.event_id, identity);
+    assert_eq!(retry.attempt_number, 2);
+    let report = delivery::deliver_due_fallible(
+        &mut store,
+        "cluster",
+        25,
+        10,
+        retry_policy(),
+        |_| smtp_submit_dispatch::classify(smtp_submit_boundary::fixture_result(0)).into_dispatch(),
+        || Some(30),
+    )
+    .unwrap();
+    assert_eq!(report.delivered, 1);
+    drop(store);
+    let store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+    drop(store);
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
 }
