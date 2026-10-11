@@ -175,3 +175,28 @@ trust and authentication identity in owned loopback restart/lost-result acceptan
 Provider cleanup and orchestration integration follow separately. No new schema,
 dependencies, public contracts, installed credentials/monitoring, real-cluster tests
 or production activation are introduced.
+
+### Concrete supervised bound SMTP submission
+
+Private smtp_bound_transport consumes the validated resolution context and frozen
+message through a bounded zeroizing stdin frame. The child revalidates canonical
+provider identity, actual DER trust fingerprint, AUTH identity, envelope and DATA
+before connecting to the bound relay/port. Required STARTTLS verifies the bound
+server name against only the supplied trust roots, then authenticates and submits
+the original bytes. Static acknowledgments use the existing retry classification.
+Implicit TLS is rejected before spawning; no fallback selects another transport.
+
+The parent supervisor bounds DNS, input, TLS, socket work and child output with an
+absolute deadline. Child socket deadlines accept whole milliseconds from 1 to
+30,000 and connection attempts inspect at most 16 resolved addresses. The helper
+command remains a private trusted fixture choice, not an installed CLI contract.
+
+Three unit tests cover frame round trips, every truncated frame prefix, trailing
+bytes, field bounds, invalid deadlines and unsupported TLS before spawn. Owned
+loopback acceptance keeps the original relay alive across SQLite reopen, verifies
+TLS name and AUTH identity, denies changed settings before a decoy connection,
+rotates the secret under the same identity and replays exact DATA after temporary
+failure or a lost child result. Accepted sockets explicitly use blocking I/O.
+
+Next: bounded unreferenced provider revision cleanup, then private orchestration
+integration. No schema, dependency, public contract or production activation changes.

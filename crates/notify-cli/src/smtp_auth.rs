@@ -18,7 +18,7 @@ pub(super) enum Error {
     Io,
 }
 
-// Intentionally no Debug/Clone implementation or credential accessors.
+// No Debug/Clone; private consuming plaintext serialization is for bounded stdin only.
 pub(super) struct Credentials {
     plain: Zeroizing<Vec<u8>>,
 }
@@ -39,6 +39,9 @@ impl Credentials {
         plain.push(0);
         plain.extend_from_slice(password.as_bytes());
         Ok(Self { plain })
+    }
+    pub(super) fn into_plain(self) -> Zeroizing<Vec<u8>> {
+        self.plain
     }
     fn command(&self) -> Zeroizing<Vec<u8>> {
         // Maximum payload 194 bytes gives a bounded 260-byte encoded value.

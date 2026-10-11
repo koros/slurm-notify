@@ -6,6 +6,8 @@ mod delivery;
 mod lifecycle;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
+#[path = "../../crates/notify-cli/src/smtp_bound_transport.rs"]
+mod smtp_bound_transport;
 #[path = "../../crates/notify-cli/src/smtp_frozen_frame.rs"]
 mod smtp_frozen_frame;
 #[path = "../../crates/notify-cli/src/smtp_metadata.rs"]
@@ -87,6 +89,19 @@ fn main() {
         std::process::exit(if result.is_ok() && !lost { 0 } else { 1 });
     }
 
+    if std::env::args().nth(1).as_deref() == Some("--smtp-bound-fixture") {
+        std::process::exit(
+            if smtp_bound_transport::serve(std::io::stdin(), std::io::stdout()).is_ok() {
+                0
+            } else {
+                2
+            },
+        );
+    }
+    if std::env::args().nth(1).as_deref() == Some("--smtp-bound-lost-result") {
+        let _ = smtp_bound_transport::serve(std::io::stdin(), std::io::sink());
+        std::process::exit(7);
+    }
     let mode = std::env::args().nth(1);
     if matches!(
         mode.as_deref(),
@@ -258,6 +273,7 @@ fn acceptance() {
     owned_smtp_submission_restart();
     owned_smtp_lost_result_replay();
     owned_revision_delivery_restart();
+    owned_bound_transport_restart();
     smtp_submit_boundary::acceptance();
     smtp_auth_boundary::acceptance();
     smtp_negotiation_boundary::acceptance();
@@ -2418,6 +2434,333 @@ fn owned_revision_delivery_restart() {
             db.query_row("SELECT count(*) FROM smtp_revision_bindings", [], |row| row
                 .get::<_, i64>(0))
                 .unwrap(),
+            1
+        );
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_bound_transport_restart() {
+    use base64::Engine;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use smtp_provider_delivery::{Hooks, Permission, Permissions, Resolved};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        sync::Arc,
+    };
+    fn line(stream: &mut impl Read) -> zeroize::Zeroizing<Vec<u8>> {
+        let mut bytes = zeroize::Zeroizing::new(Vec::new());
+        loop {
+            let mut byte = [0];
+            match stream.read(&mut byte) {
+                Ok(0) => break,
+                Ok(_) => {
+                    bytes.push(byte[0]);
+                    assert!(bytes.len() <= 16384);
+                    if byte[0] == b'\n' {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        bytes
+    }
+    for mode in [1, 10] {
+        let cert = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()]).unwrap();
+        let root = cert.serialize_der().unwrap();
+        let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
+        let config = Arc::new(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![CertificateDer::from(root.clone())],
+                    PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+                        cert.serialize_private_key_der(),
+                    )),
+                )
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let decoy = TcpListener::bind("127.0.0.1:0").unwrap();
+        decoy.set_nonblocking(true).unwrap();
+        let profile = smtp_provider_revision::Profile {
+            destination: "smtp",
+            relay: "127.0.0.1",
+            port: listener.local_addr().unwrap().port(),
+            tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: &trust,
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        };
+        let provider = smtp_provider_revision::Descriptor::new(&profile).unwrap();
+        let directory = storage::tests::Directory::new();
+        let root_path = state_directory(&directory);
+        let mut store =
+            storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
+        let routes = [smtp_routes::Route {
+            name: "smtp",
+            visibility: smtp_render::JobVisibility::Hidden,
+            metadata: smtp_routes::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                namespace: "fixture",
+            },
+        }];
+        let rendering = smtp_routes::Plan::new(&["smtp"], &routes, 1).unwrap();
+        let plan = smtp_routes::ProviderPlan::new(&rendering, &[provider.profile()]).unwrap();
+        let request = scheduler::PollRequest {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let query = |command: &mut Command, _, _| {
+            Ok(if command.get_program() == "squeue" {
+                ""
+            } else {
+                "cluster|1|alice|s|actual|COMPLETED|0:0"
+            }
+            .into())
+        };
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        plan.poll_with(&request, &mut reconciler, &mut store, 10, query)
+            .unwrap();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let bound_rendering = store
+            .bound_smtp_revision(&item.event_id, "smtp")
+            .unwrap()
+            .unwrap();
+        let saved = store.frozen_smtp(&item.event_id, "smtp").unwrap().unwrap();
+        let expected = zeroize::Zeroizing::new(saved.data().to_vec());
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            for attempt in 0..2 {
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline);
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => panic!("bound listener failed"),
+                    }
+                };
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                socket.write_all(b"220 bound fixture\r\n").unwrap();
+                assert!(line(&mut socket).as_slice() == b"EHLO fixture.invalid\r\n");
+                socket.write_all(b"250-bound\r\n250 STARTTLS\r\n").unwrap();
+                assert!(line(&mut socket).as_slice() == b"STARTTLS\r\n");
+                socket.write_all(b"220 upgrade\r\n").unwrap();
+                let mut stream = rustls::StreamOwned::new(
+                    rustls::ServerConnection::new(config.clone()).unwrap(),
+                    socket,
+                );
+                assert!(line(&mut stream).as_slice() == b"EHLO fixture.invalid\r\n");
+                stream
+                    .write_all(b"250-secure\r\n250 AUTH PLAIN\r\n")
+                    .unwrap();
+                let password = if attempt == 0 {
+                    "first-fixture"
+                } else {
+                    "rotated-fixture"
+                };
+                let plain = zeroize::Zeroizing::new(format!("\0fixture-user\0{password}"));
+                let auth = zeroize::Zeroizing::new(format!(
+                    "AUTH PLAIN {}\r\n",
+                    base64::engine::general_purpose::STANDARD.encode(plain.as_bytes())
+                ));
+                assert!(line(&mut stream).as_slice() == auth.as_bytes());
+                stream.write_all(b"235 authenticated\r\n").unwrap();
+                for (command, reply) in [
+                    (
+                        b"MAIL FROM:<s@fixture.invalid>\r\n".as_slice(),
+                        b"250 sender\r\n".as_slice(),
+                    ),
+                    (b"RCPT TO:<r@fixture.invalid>\r\n", b"250 recipient\r\n"),
+                    (b"DATA\r\n", b"354 go\r\n"),
+                ] {
+                    assert!(line(&mut stream).as_slice() == command);
+                    stream.write_all(reply).unwrap();
+                }
+                let mut received = zeroize::Zeroizing::new(Vec::new());
+                loop {
+                    let bytes = line(&mut stream);
+                    assert!(!bytes.is_empty());
+                    received.extend_from_slice(&bytes);
+                    assert!(received.len() <= 16384);
+                    if bytes.as_slice() == b".\r\n" {
+                        break;
+                    }
+                }
+                assert!(received.as_slice() == expected.as_slice());
+                let reply = if attempt == 0 && mode == 1 {
+                    b"450 temporary\r\n".as_slice()
+                } else {
+                    b"250 accepted\r\n"
+                };
+                stream.write_all(reply).unwrap();
+                stream.flush().unwrap();
+            }
+        });
+        let entries = [Permission {
+            cluster: "cluster",
+            destination: "smtp",
+            rendering: bound_rendering.token(),
+            provider: provider.token(),
+        }];
+        let permissions = Permissions::new(&entries).unwrap();
+        let report = smtp_provider_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &permissions,
+                resolve: |bound: &smtp_provider_revision::Descriptor| {
+                    Resolved::new(bound, &profile, &[&root], "fixture-user", "first-fixture")
+                },
+                send: |_: &storage::DueDelivery,
+                       _: &smtp_revision::Descriptor,
+                       frozen: &storage::FrozenMessage,
+                       resolved: Resolved| {
+                    let mut command = Command::new(std::env::current_exe().unwrap());
+                    command.arg(if mode == 10 {
+                        "--smtp-bound-lost-result"
+                    } else {
+                        "--smtp-bound-fixture"
+                    });
+                    smtp_bound_transport::dispatch(
+                        &mut command,
+                        resolved,
+                        frozen,
+                        Duration::from_secs(3),
+                    )
+                },
+                clock: || Some(12),
+                cancelled: || false,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.retrying, 1);
+        drop(store);
+        let mut store =
+            storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
+        let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        let changed_profile = smtp_provider_revision::Profile {
+            port: decoy.local_addr().unwrap().port(),
+            ..provider.profile()
+        };
+        let changed = smtp_routes::ProviderPlan::new(&rendering, &[changed_profile]).unwrap();
+        assert!(changed
+            .poll_with(&request, &mut restored, &mut store, 17, query)
+            .unwrap()
+            .is_empty());
+        let changed_profile = smtp_provider_revision::Profile {
+            port: decoy.local_addr().unwrap().port(),
+            ..provider.profile()
+        };
+        let failure = smtp_provider_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            17,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &permissions,
+                resolve: |bound: &smtp_provider_revision::Descriptor| {
+                    Resolved::new(
+                        bound,
+                        &changed_profile,
+                        &[&root],
+                        "fixture-user",
+                        "rotated-fixture",
+                    )
+                },
+                send: |_: &storage::DueDelivery,
+                       _: &smtp_revision::Descriptor,
+                       _: &storage::FrozenMessage,
+                       _: Resolved| panic!("changed endpoint spawned"),
+                clock: || panic!("blocked endpoint clock"),
+                cancelled: || false,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.diagnostic,
+            Some(supervised_provider::Diagnostic::SmtpProviderResolution(
+                smtp_provider_delivery::Error::Profile
+            ))
+        );
+        assert_eq!(
+            store.due_deliveries("cluster", 17, 10).unwrap()[0].attempt_number,
+            2
+        );
+        assert!(decoy.accept().is_err());
+        let report = smtp_provider_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            17,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &permissions,
+                resolve: |bound: &smtp_provider_revision::Descriptor| {
+                    Resolved::new(bound, &profile, &[&root], "fixture-user", "rotated-fixture")
+                },
+                send: |item: &storage::DueDelivery,
+                       _: &smtp_revision::Descriptor,
+                       frozen: &storage::FrozenMessage,
+                       resolved: Resolved| {
+                    assert_eq!(item.attempt_number, 2);
+                    assert!(frozen.data() == saved.data());
+                    let mut command = Command::new(std::env::current_exe().unwrap());
+                    command.arg("--smtp-bound-fixture");
+                    smtp_bound_transport::dispatch(
+                        &mut command,
+                        resolved,
+                        frozen,
+                        Duration::from_secs(3),
+                    )
+                },
+                clock: || Some(18),
+                cancelled: || false,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.delivered, 1);
+        assert!(store.due_deliveries("cluster", 18, 10).unwrap().is_empty());
+        assert!(decoy.accept().is_err());
+        server.join().unwrap();
+        drop(store);
+        let db = rusqlite::Connection::open(root_path.join("state.sqlite3")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM smtp_provider_revisions", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
             1
         );
     }
