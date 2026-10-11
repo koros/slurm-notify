@@ -2173,3 +2173,30 @@ Validation: shared checks pass with 213 Rust tests plus one ignored helper,
 expanded custom process acceptance, eight SQLite tests and six hook tests. Fresh
 Rust line coverage is 97.23% (10,012/10,297), above the unchanged 80% gate.
 No real-cluster or real-relay tests were run.
+
+### Private validated SMTP rendering plans
+
+ADR 0012 adds an immutable borrowed rendering plan with explicit per-route metadata
+and disclosure. Collection/name bounds precede allocation and parsing; duplicate
+or missing bindings, reused route Message-ID tokens and invalid count/envelope/ID/
+date metadata fail during construction. A bounded local builder probe shares
+actual message validation without scheduler, clock, storage or provider work.
+
+The plan composes existing prepared polling with its fixed route bindings. Four
+tests cover invalid metadata/bindings/limits, valid maximum name/count boundaries,
+disclosure and unknown-route rejection, event-dependent oversized ID rollback,
+reopen recovery and replay preserving earlier frozen disclosure. Non-SMTP routes
+remain part of the atomic outbox without receiving snapshots.
+
+No schema, dependencies, public contracts or production defaults changed. This
+separate polling composition does not yet replace arbitrary prepared-tick hooks.
+
+Next: validated-plan selection in private orchestration, preserving cancellation,
+preflight, budgets and maintenance after event-dependent rendering failures.
+Production per-event identity/domain, timestamps, credentials, route revisions,
+licensing, public review and real-cluster/relay activation remain pending.
+
+Validation: shared checks pass with 217 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.29% (10,265/10,551), above the unchanged 80% gate. No real-cluster
+or real-relay tests were run.

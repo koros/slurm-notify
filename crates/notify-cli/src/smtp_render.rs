@@ -27,6 +27,21 @@ pub(super) enum Error {
     Message(smtp_message::Error),
 }
 
+// Bounded local builder probe validates explicit metadata without an event,
+// scheduler query, clock sample, storage write or provider call.
+pub(super) fn validate_metadata(metadata: &Metadata<'_>) -> Result<(), Error> {
+    smtp_message::prepare(
+        metadata.sender,
+        metadata.recipient,
+        metadata.identity,
+        "Slurm metadata validation",
+        "",
+        metadata.timestamp,
+    )
+    .map(|_| ())
+    .map_err(Error::Message)
+}
+
 pub(super) fn prepare(
     event: &Event,
     metadata: &Metadata<'_>,

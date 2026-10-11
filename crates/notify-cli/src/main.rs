@@ -62,6 +62,9 @@ mod smtp_message;
 mod smtp_render;
 
 #[cfg(test)]
+mod smtp_routes;
+
+#[cfg(test)]
 mod smtp_submit;
 
 #[cfg(test)]

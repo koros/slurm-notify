@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private immutable SMTP rendering plans validating bounded route bindings, explicit disclosure and message metadata before scheduler polling, with event-dependent failure/reopen recovery and frozen-disclosure replay tests.
+
 - Mixed-route SMTP disclosure and late rendering-failure acceptance, preserving earlier poll state and frozen snapshots, recovering through owned TLS delivery after reopen and suppressing duplicate preparation/sends.
 
 - Private bounded SMTP lifecycle rendering with fixed state labels, explicit hidden/numeric job-ID disclosure, omitted cluster/attempt context, static rejection diagnostics and atomic preparation/reopen recovery tests.
