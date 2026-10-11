@@ -23,19 +23,10 @@ pub(super) enum Error {
 
 // Caller restores durable state first. Preparation is synchronous, count-bounded
 // and local; an arbitrary blocking callback cannot be interrupted by this API.
-pub(super) fn poll_with(
-    request: &PollRequest<'_>,
-    reconciler: &mut Reconciler,
-    store: &mut Store,
-    settings: &Settings<'_>,
-    observed_at: i64,
-    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
-    mut prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
-) -> Result<Vec<Event>, Error> {
+pub(super) fn valid_settings(settings: &Settings<'_>) -> bool {
     let mut routes = std::collections::HashSet::new();
     let mut smtp = std::collections::HashSet::new();
-    if observed_at < 0
-        || settings.max_messages == 0
+    !(settings.max_messages == 0
         || settings.max_messages.checked_mul(16384).is_none()
         || settings.smtp_destinations.is_empty()
         || settings
@@ -45,8 +36,19 @@ pub(super) fn poll_with(
         || settings
             .smtp_destinations
             .iter()
-            .any(|name| !routes.contains(name) || !smtp.insert(*name))
-    {
+            .any(|name| !routes.contains(name) || !smtp.insert(*name)))
+}
+
+pub(super) fn poll_with(
+    request: &PollRequest<'_>,
+    reconciler: &mut Reconciler,
+    store: &mut Store,
+    settings: &Settings<'_>,
+    observed_at: i64,
+    query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+    mut prepare: impl FnMut(&Event, &str) -> Result<Prepared, ()>,
+) -> Result<Vec<Event>, Error> {
+    if observed_at < 0 || !valid_settings(settings) {
         return Err(Error::InvalidInput);
     }
     let mut candidate = reconciler.clone();

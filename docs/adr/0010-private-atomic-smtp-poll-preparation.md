@@ -131,3 +131,25 @@ Next: wire prepared cycle selection into private delivery/retention/health
 orchestration, retaining existing cancellation and partial-progress behavior.
 Event rendering/redaction, route revision, credentials, public review, licensing
 and real-cluster/runtime activation remain pending.
+
+### Private prepared SMTP orchestration
+
+Prepared polling now selects the shared fallible tick orchestration. SMTP route
+and message-limit policy is checked before clocks, queries, delivery or cleanup,
+including exhausted polling. Existing capacity/storage/window preflight,
+completion clocks, cancellation, partial-progress failures, cleanup and health
+reporting use the same implementation as plain polling. Preparation failures allow
+previously committed pending work to continue; storage/window failures stop
+maintenance. Cancellation after commit leaves frozen pending messages intact.
+
+Three new tests cover cancellation after prepared commit, frozen state on reopen,
+exhausted-poll delivery/health, invalid-route rejection before side effects and
+pending delivery after preparation failure with an unchanged checkpoint and
+sanitized health failure. Existing orchestration failure tests exercise the shared
+engine. No schema, dependencies, public interfaces or runtime defaults changed;
+synchronous preparation remains bounded by count/size but is not interruptible.
+
+Next: owned SMTP child acceptance through the complete prepared tick, including
+retry/reopen and blocked-dispatch partial progress. Rendering/redaction, route
+revision, credentials, licensing, public review and real-cluster activation remain
+pending.

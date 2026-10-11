@@ -227,10 +227,104 @@ impl Cycles {
         settings: &Settings<'_>,
         maintenance: &Maintenance,
         store: &mut Store,
-        mut hooks: Hooks<Q, S, C, X>,
+        hooks: Hooks<Q, S, C, X>,
     ) -> TickReport
     where
         Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        S: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let Hooks {
+            mut query,
+            send,
+            clock,
+            cancelled,
+        } = hooks;
+        self.tick_using(
+            settings,
+            maintenance,
+            store,
+            Hooks {
+                query: (),
+                send,
+                clock,
+                cancelled,
+            },
+            true,
+            |cycles, store, now| cycles.step(settings, store, false, now, &mut query),
+        )
+    }
+
+    pub(super) fn tick_prepared_fallible<Q, P, S, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        prepared: PreparedHooks<'_, Q, P>,
+        hooks: Hooks<(), S, C, X>,
+    ) -> TickReport
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        P: FnMut(&super::lifecycle::Event, &str) -> Result<super::smtp_message::Prepared, ()>,
+        S: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let PreparedHooks {
+            smtp_destinations,
+            max_messages,
+            mut query,
+            mut prepare,
+        } = prepared;
+        let valid = super::smtp_poll::valid_settings(&super::smtp_poll::Settings {
+            destinations: settings.destinations,
+            smtp_destinations,
+            max_messages,
+        });
+        self.tick_using(
+            settings,
+            maintenance,
+            store,
+            hooks,
+            valid,
+            |cycles, store, now| {
+                cycles.step_prepared(
+                    settings,
+                    store,
+                    false,
+                    now,
+                    PreparedHooks {
+                        smtp_destinations,
+                        max_messages,
+                        query: &mut query,
+                        prepare: &mut prepare,
+                    },
+                )
+            },
+        )
+    }
+
+    fn tick_using<S, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        mut hooks: Hooks<(), S, C, X>,
+        valid_poll: bool,
+        mut poll: impl FnMut(&mut Self, &mut Store, i64) -> Result<Outcome, Error>,
+    ) -> TickReport
+    where
         S: FnMut(
             &super::storage::DueDelivery,
         ) -> Result<
@@ -246,7 +340,7 @@ impl Cycles {
             report.cancelled = true;
             return report;
         }
-        if !valid_settings(settings, maintenance) {
+        if !valid_poll || !valid_settings(settings, maintenance) {
             report.preflight = Some(Err(StageError::Policy));
             return report;
         }
@@ -294,7 +388,7 @@ impl Cycles {
             return report;
         }
         report.preflight = Some(Ok(()));
-        let poll = self.step(settings, store, false, now, &mut hooks.query);
+        let poll = poll(self, store, now);
         let stop = matches!(
             &poll,
             Err(Error::Storage(_) | Error::Window(_) | Error::Poll(DurablePollError::Storage(_)))
@@ -912,6 +1006,158 @@ mod tests {
 
     fn open(directory: &Directory) -> Store {
         Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
+    }
+
+    #[test]
+    fn prepared_tick_cancellation_preserves_frozen_pending_delivery_after_reopen() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        let mut cancellations = 0;
+        let report = cycles.tick_prepared_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            PreparedHooks {
+                smtp_destinations: &["primary"],
+                max_messages: 1,
+                query: smtp_query,
+                prepare: |event: &super::super::lifecycle::Event, route: &str| {
+                    smtp_message(event, route)
+                },
+            },
+            Hooks {
+                query: (),
+                send: |_: &super::super::storage::DueDelivery| panic!("cancelled before delivery"),
+                clock: || Some(7200),
+                cancelled: || {
+                    cancellations += 1;
+                    cancellations > 1
+                },
+            },
+        );
+        assert!(report.cancelled);
+        assert!(matches!(
+            report.poll,
+            Some(Ok(Outcome::Committed { events: 1, .. }))
+        ));
+        drop(store);
+        let mut store = open(&directory);
+        let due = store.due_deliveries("cluster", 7200, 10).unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(store
+            .frozen_smtp(&due[0].event_id, &due[0].destination)
+            .unwrap()
+            .is_some());
+        let report = cycles.tick_prepared_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            PreparedHooks {
+                smtp_destinations: &["primary"],
+                max_messages: 1,
+                query: |_: &mut Command, _, _| panic!("exhausted"),
+                prepare: |_: &super::super::lifecycle::Event, _: &str| panic!("exhausted"),
+            },
+            Hooks {
+                query: (),
+                send: |_: &super::super::storage::DueDelivery| {
+                    Ok(super::super::delivery::ProviderOutcome::Delivered)
+                },
+                clock: || Some(7201),
+                cancelled: || false,
+            },
+        );
+        assert!(matches!(report.poll, Some(Ok(Outcome::Exhausted))));
+        assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+        assert!(report.health.unwrap().is_ok());
+    }
+
+    #[test]
+    fn prepared_tick_rejects_invalid_routes_before_maintenance() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        let report = cycles.tick_prepared_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            PreparedHooks {
+                smtp_destinations: &["unknown"],
+                max_messages: 1,
+                query: |_: &mut Command, _, _| panic!("invalid policy"),
+                prepare: |_: &super::super::lifecycle::Event, _: &str| panic!("invalid policy"),
+            },
+            Hooks {
+                query: (),
+                send: |_: &super::super::storage::DueDelivery| panic!("invalid policy"),
+                clock: || panic!("invalid policy"),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.preflight, Some(Err(StageError::Policy)));
+        assert_eq!(cycles.remaining, 1);
+    }
+
+    #[test]
+    fn prepared_tick_failure_still_delivers_earlier_pending_work() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(2).unwrap();
+        cycles
+            .step_prepared(
+                &settings(),
+                &mut store,
+                false,
+                7200,
+                PreparedHooks {
+                    smtp_destinations: &["primary"],
+                    max_messages: 1,
+                    query: smtp_query,
+                    prepare: smtp_message,
+                },
+            )
+            .unwrap();
+        let report = cycles.tick_prepared_fallible(
+            &settings(),
+            &maintenance(),
+            &mut store,
+            PreparedHooks {
+                smtp_destinations: &["primary"],
+                max_messages: 1,
+                query: |command: &mut Command, _, _| {
+                    Ok(if command.get_program() == "squeue" {
+                        String::new()
+                    } else {
+                        "cluster|2|alice|s|actual|COMPLETED|0:0".into()
+                    })
+                },
+                prepare: |_: &super::super::lifecycle::Event, _: &str| Err(()),
+            },
+            Hooks {
+                query: (),
+                send: |_: &super::super::storage::DueDelivery| {
+                    Ok(super::super::delivery::ProviderOutcome::Delivered)
+                },
+                clock: || Some(7260),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(report.poll.unwrap().unwrap_err(), StageError::Poll);
+        assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+        let health = report.health.unwrap().unwrap();
+        assert_eq!(health.poll.last_failure, Some(Failure::Preparation));
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(60));
+        drop(store);
+        let mut store = open(&directory);
+        assert!(store
+            .due_deliveries("cluster", 7260, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("1970-01-01T02:00:00")
+        );
     }
 
     fn maintenance() -> Maintenance {

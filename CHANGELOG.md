@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private prepared SMTP orchestration sharing delivery, retention, health and cancellation handling; route preflight before side effects, frozen-message restart recovery and continued pending delivery after preparation failure.
+
 - Private prepared SMTP cycle steps sharing durable restoration, accounting windows, finite poll budgets and health tracking, with distinct preparation/limit failures, checkpoint-preserving restart recovery and owned SMTP cycle-to-delivery acceptance.
 
 - Private durable scheduler polling with fallible per-event/SMTP-route fixture preparation, explicit message-count preflight, atomic snapshot persistence and in-memory publication after commit; preparation/query/storage failure, suppression, replay and owned SMTP restart coverage.

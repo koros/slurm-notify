@@ -2050,3 +2050,30 @@ Validation: shared checks pass (204 Rust tests plus one ignored helper, custom
 process acceptance, eight standalone SQLite tests and six hook tests), including
 formatting and strict Clippy. Fresh Rust line coverage passes the unchanged 80%
 gate at 97.12% (9,448/9,728). No real-cluster or real-relay tests were run.
+
+### Private prepared SMTP orchestration
+
+Prepared polling now selects the shared fallible tick orchestration. SMTP route
+and message-limit policy is checked before clocks, queries, delivery or cleanup,
+including exhausted polling. Existing capacity/storage/window preflight,
+completion clocks, cancellation, partial-progress failures, cleanup and health
+reporting use the same implementation as plain polling. Preparation failures allow
+previously committed pending work to continue; storage/window failures stop
+maintenance. Cancellation after commit leaves frozen pending messages intact.
+
+Three new tests cover cancellation after prepared commit, frozen state on reopen,
+exhausted-poll delivery/health, invalid-route rejection before side effects and
+pending delivery after preparation failure with an unchanged checkpoint and
+sanitized health failure. Existing orchestration failure tests exercise the shared
+engine. No schema, dependencies, public interfaces or runtime defaults changed;
+synchronous preparation remains bounded by count/size but is not interruptible.
+
+Next: owned SMTP child acceptance through the complete prepared tick, including
+retry/reopen and blocked-dispatch partial progress. Rendering/redaction, route
+revision, credentials, licensing, public review and real-cluster activation remain
+pending.
+
+Validation: shared checks pass with 207 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.11% (9,632/9,919), above the unchanged 80% gate. No real-cluster or
+real-relay tests were run.
