@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Three private configuration mutation acceptance tests for atomic file replacement, symlink substitution, same-size rewrites and permission changes; reopen behavior and static failures are verified without activating a loader.
+
 - Private Unix configuration byte snapshots with descriptor-relative no-follow reads, owned 0700/0600 permissions, zeroizing bounded buffers, mutation checks and five filesystem/edge tests; no installed loader or public contracts.
 
 - Private bounded Python draft-configuration fixture validation with strict key/integer/count checks, static diagnostics and 11 failure/edge tests included in shared CI/hooks; no installed parser or approved contracts.

@@ -36,6 +36,14 @@ modes, hard/symbolic links, directories/FIFOs, oversized/empty files and observe
 read-time mutation. Fixtures use temporary owned files and the synthetic mixed
 draft; there is no scheduler/provider access.
 
+Three additional deterministic acceptance tests replace the opened file atomically,
+substitute a symlink after collecting bytes, rewrite the same number of bytes with
+a forced distinct timestamp, and change permissions before publication. An unlinked
+descriptor fails the one-link check; same-size mutation fails metadata comparison;
+changed permissions fail ownership policy. Reopening an atomic replacement reads
+the new regular file, while reopening a symlink or permissive file rejects it.
+No sleeps, scheduler access or external network calls are required.
+
 This is a byte reader. It does not parse JSON, load referenced trust files/secrets,
 establish supported state/config paths or activate monitoring. The Python draft
 validator remains a separate review harness; there is no installed Rust-to-Python

@@ -2844,3 +2844,20 @@ Validation: shared checks pass with 280 Rust tests plus one ignored helper, cust
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.49% (15,391/15,788), above the 80% gate; Python
 fixture validation remains outside that metric.
+
+### Private configuration replacement and mutation acceptance
+
+Added three deterministic filesystem acceptance tests covering atomic replacement
+of an opened file, symlink substitution after reading, same-size rewriting with an
+explicit timestamp change and permission changes before publication. Rechecks
+reject the old unlinked descriptor, observed metadata changes and unsafe modes.
+Fresh reads accept the replacement regular file and reject substituted symlinks.
+No implementation behavior, dependencies, public contract or runtime defaults change.
+
+Next: private resource-loading preparation; installed parser/config-to-plan mapping
+and activation still require explicit contract review. Metadata observation remains
+subject to the writer/race limits in ADR 0016.
+
+Validation: shared checks pass with 283 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.48% (15,452/15,851), above the 80% gate.

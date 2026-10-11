@@ -293,6 +293,76 @@ mod tests {
             assert!(matches!(read(&linked), Err(Error::UnsafePermissions)));
         }
         #[test]
+        fn atomic_replacement_rejects_old_descriptor_and_reopen_reads_new_file() {
+            let (_directory, path) = fixture();
+            let replacement = path.with_file_name("replacement");
+            let mut next = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&replacement)
+                .unwrap();
+            next.write_all(b"replacement bytes").unwrap();
+            assert!(matches!(
+                unix::read_with(&path, |file| {
+                    fs::rename(&replacement, &path).unwrap();
+                    bounded(file)
+                }),
+                Err(Error::UnsafePermissions)
+            ));
+            assert_eq!(read(&path).unwrap().bytes(), b"replacement bytes");
+        }
+        #[test]
+        fn symlink_replacement_never_publishes_or_follows_replacement() {
+            let (_directory, path) = fixture();
+            let target = path.with_file_name("target");
+            fs::write(&target, b"replacement target").unwrap();
+            assert!(matches!(
+                unix::read_with(&path, |file| {
+                    let snapshot = bounded(file)?;
+                    fs::remove_file(&path).unwrap();
+                    symlink(&target, &path).unwrap();
+                    Ok(snapshot)
+                }),
+                Err(Error::UnsafePermissions)
+            ));
+            assert!(matches!(read(&path), Err(Error::Io)));
+            assert_eq!(fs::read(&target).unwrap(), b"replacement target");
+        }
+        #[test]
+        fn same_size_rewrite_and_permission_change_reject_collected_bytes() {
+            let (_directory, path) = fixture();
+            assert!(matches!(
+                unix::read_with(&path, |file| {
+                    let snapshot = bounded(file)?;
+                    let mut writer = OpenOptions::new().write(true).open(&path).unwrap();
+                    writer
+                        .write_all(&vec![b'x'; snapshot.bytes().len()])
+                        .unwrap();
+                    // Force a distinct timestamp without relying on filesystem clock resolution.
+                    writer
+                        .set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+                        .unwrap();
+                    Ok(snapshot)
+                }),
+                Err(Error::Changed)
+            ));
+            assert!(read(&path)
+                .unwrap()
+                .bytes()
+                .iter()
+                .all(|byte| *byte == b'x'));
+            assert!(matches!(
+                unix::read_with(&path, |file| {
+                    let snapshot = bounded(file)?;
+                    fs::set_permissions(&path, Permissions::from_mode(0o644)).unwrap();
+                    Ok(snapshot)
+                }),
+                Err(Error::UnsafePermissions)
+            ));
+            assert!(matches!(read(&path), Err(Error::UnsafePermissions)));
+        }
+        #[test]
         fn size_and_metadata_changes_fail_without_publishing_partial_snapshot() {
             let (_directory, path) = fixture();
             assert!(matches!(
