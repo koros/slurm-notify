@@ -16,6 +16,8 @@ mod smtp_poll;
 mod smtp_render;
 #[path = "../../crates/notify-cli/src/smtp_revision.rs"]
 mod smtp_revision;
+#[path = "../../crates/notify-cli/src/smtp_revision_delivery.rs"]
+mod smtp_revision_delivery;
 #[path = "../../crates/notify-cli/src/smtp_routes.rs"]
 mod smtp_routes;
 #[path = "../../crates/notify-cli/src/storage.rs"]
@@ -251,6 +253,7 @@ fn acceptance() {
     orchestrated_mixed_render_failure_restart();
     owned_smtp_submission_restart();
     owned_smtp_lost_result_replay();
+    owned_revision_delivery_restart();
     smtp_submit_boundary::acceptance();
     smtp_auth_boundary::acceptance();
     smtp_negotiation_boundary::acceptance();
@@ -2259,4 +2262,159 @@ fn owned_frozen_submission_restart() {
             .unwrap(),
         0
     );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_revision_delivery_restart() {
+    use smtp_revision_delivery::{Hooks, Permission, Permissions};
+    for mode in [1, 10] {
+        let directory = storage::tests::Directory::new();
+        let root = state_directory(&directory);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let routes = [smtp_routes::Route {
+            name: "smtp",
+            visibility: smtp_render::JobVisibility::Hidden,
+            metadata: smtp_routes::Metadata {
+                sender: "s@fixture.invalid",
+                recipient: "r@fixture.invalid",
+                namespace: "fixture",
+            },
+        }];
+        let plan = smtp_routes::Plan::new(&["smtp"], &routes, 4).unwrap();
+        let request = scheduler::PollRequest {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        plan.poll_revision_with(
+            &request,
+            &mut reconciler,
+            &mut store,
+            10,
+            |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "cluster|1|alice|s|actual|COMPLETED|0:0"
+                }
+                .into())
+            },
+        )
+        .unwrap();
+        let item = store.due_deliveries("cluster", 10, 10).unwrap().remove(0);
+        let original = store
+            .bound_smtp_revision(&item.event_id, "smtp")
+            .unwrap()
+            .unwrap();
+        let saved = store.frozen_smtp(&item.event_id, "smtp").unwrap().unwrap();
+        let entries = [Permission {
+            cluster: "cluster",
+            destination: "smtp",
+            revision: original.token(),
+        }];
+        let permitted = Permissions::new(&entries).unwrap();
+        let report = smtp_revision_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &permitted,
+                send: |_: &storage::DueDelivery,
+                       revision: &smtp_revision::Descriptor,
+                       frozen: &storage::FrozenMessage| {
+                    assert_eq!(revision.token(), original.token());
+                    assert_eq!(frozen.data(), saved.data());
+                    smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(
+                        mode, frozen,
+                    ))
+                    .into_dispatch()
+                },
+                clock: || Some(12),
+                cancelled: || false,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.retrying, 1);
+        let due = 12 + retry_policy().initial_delay_seconds;
+        drop(store);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let denied = Permissions::new(&[]).unwrap();
+        let failure = smtp_revision_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            due,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &denied,
+                send: |_: &storage::DueDelivery,
+                       _: &smtp_revision::Descriptor,
+                       _: &storage::FrozenMessage| {
+                    panic!("denied revision spawned child")
+                },
+                clock: || panic!("denied revision clock"),
+                cancelled: || false,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.diagnostic,
+            Some(supervised_provider::Diagnostic::SmtpRevisionDenied)
+        );
+        assert_eq!(
+            store.due_deliveries("cluster", due, 10).unwrap()[0].attempt_number,
+            2
+        );
+        assert_eq!(store.prune_smtp_revisions("cluster", 10).unwrap(), 0);
+        let report = smtp_revision_delivery::deliver_due(
+            &mut store,
+            "cluster",
+            due,
+            10,
+            retry_policy(),
+            Hooks {
+                permissions: &permitted,
+                send: |item: &storage::DueDelivery,
+                       revision: &smtp_revision::Descriptor,
+                       frozen: &storage::FrozenMessage| {
+                    assert_eq!(item.attempt_number, 2);
+                    assert_eq!(revision.token(), original.token());
+                    assert_eq!(frozen.data(), saved.data());
+                    smtp_submit_dispatch::classify(smtp_submit_boundary::frozen_result(0, frozen))
+                        .into_dispatch()
+                },
+                clock: || Some(due + 1),
+                cancelled: || false,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.delivered, 1);
+        assert!(store
+            .due_deliveries("cluster", due + 1, 10)
+            .unwrap()
+            .is_empty());
+        drop(store);
+        let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM smtp_revision_bindings", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
 }

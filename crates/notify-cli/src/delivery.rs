@@ -210,6 +210,44 @@ where
     C: FnMut() -> Option<i64>,
     X: FnMut() -> bool,
 {
+    deliver_due_checked(
+        store,
+        cluster,
+        now,
+        limit,
+        policy,
+        CheckedHooks {
+            authorize: |_: &Store, _: &DueDelivery| Ok(()),
+            send: |item: &DueDelivery, ()| (hooks.send)(item),
+            clock: hooks.clock,
+            cancelled: hooks.cancelled,
+        },
+    )
+}
+
+// Authorization precedes sending and retry-budget retirement. The context is
+// loaded under the single-owner store and consumed by the corresponding send.
+pub(super) struct CheckedHooks<A, S, C, X> {
+    pub(super) authorize: A,
+    pub(super) send: S,
+    pub(super) clock: C,
+    pub(super) cancelled: X,
+}
+
+pub(super) fn deliver_due_checked<T, A, S, C, X>(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
+    mut hooks: CheckedHooks<A, S, C, X>,
+) -> Result<BatchReport, BatchFailure>
+where
+    A: FnMut(&Store, &DueDelivery) -> Result<T, super::supervised_provider::Diagnostic>,
+    S: FnMut(&DueDelivery, T) -> Result<ProviderOutcome, super::supervised_provider::Diagnostic>,
+    C: FnMut() -> Option<i64>,
+    X: FnMut() -> bool,
+{
     let mut report = BatchReport::default();
     let mut uncertain = false;
     let result = (|| -> Result<(), WorkerError> {
@@ -227,6 +265,7 @@ where
             if (hooks.cancelled)() {
                 return Err(WorkerError::Cancelled);
             }
+            let context = (hooks.authorize)(store, &item).map_err(WorkerError::DispatchBlocked)?;
             if item.attempt_number > i64::from(policy.max_attempts) {
                 store
                     .retire_exhausted(&item, policy.max_attempts)
@@ -234,7 +273,7 @@ where
                 report.failed += 1;
                 continue;
             }
-            let provider = (hooks.send)(&item).map_err(WorkerError::DispatchBlocked)?;
+            let provider = (hooks.send)(&item, context).map_err(WorkerError::DispatchBlocked)?;
             uncertain = true;
             // Clock failure/regression after acceptance must remain visible and replayable.
             let completed_at = (hooks.clock)()

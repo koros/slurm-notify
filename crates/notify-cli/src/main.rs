@@ -66,6 +66,8 @@ mod smtp_routes;
 
 #[cfg(test)]
 mod smtp_revision;
+#[cfg(test)]
+mod smtp_revision_delivery;
 
 #[cfg(test)]
 mod smtp_metadata;

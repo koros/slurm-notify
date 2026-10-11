@@ -1,6 +1,6 @@
 # ADR 0014: private durable SMTP route revisions
 
-Status: private rendering descriptors, storage and atomic polling implemented; revision-aware dispatch and provider profiles pending.
+Status: private rendering descriptors, atomic polling, guarded dispatch and cleanup implemented; durable provider profiles pending.
 No public configuration, storage, routing or release contract is approved here.
 
 ## Problem and invariant
@@ -211,3 +211,40 @@ Next: revision-aware controlled dispatch with explicit permitted revisions and
 bounded unreferenced cleanup. Durable relay/TLS/auth profile binding remains
 required before production routing. Runtime orchestration still uses the existing
 legacy fixture path; no operational executable or real-cluster activation occurs.
+
+### Revision-aware controlled delivery and bounded cleanup
+
+The private smtp_revision_delivery worker requires a validated immutable allowlist
+of (cluster, destination, rendering revision) entries. At most 64 entries are
+accepted; an empty list denies all. Each due row loads and validates its durable
+descriptor/snapshot before checking permission. Missing legacy bindings, malformed
+state and denied revisions block with static diagnostics before sending, sampling
+a completion clock or retiring exhausted retries. Approved sends receive the bound
+descriptor and original snapshot, without consulting current rendering policy.
+
+The shared controlled worker now accepts a checked authorization context before
+budget retirement. Existing callers retain their prior behavior through a trivial
+authorization adapter. Cancellation, partial committed progress, completion-based
+retry scheduling and uncertain acceptance bookkeeping keep their existing rules.
+Tests cover permission bounds, cluster/destination isolation, legacy/malformed
+blocks, denied exhausted rows, partial progress, cancellation between sends, exact
+retry bytes after reopen and completed snapshot/binding retention cleanup.
+
+Store::prune_smtp_revisions removes at most 256 unreferenced descriptors for one
+explicit cluster in an immediate transaction. Every binding protects its revision,
+including pending and completed rows until ordinary outbox retention removes them.
+A late-delete failure rolls back the complete cleanup batch. Tests verify bounds,
+cluster isolation, late rollback, reopen and retained pending references. Jobs,
+event history and checkpoints remain intact.
+
+Owned loopback TLS acceptance exercises both temporary submission refusal and lost
+child-result retry through this guard. Reopen with an empty allowlist blocks before
+child work without another attempt; restoring the explicit permission delivers the
+exact original snapshot and retains the two-attempt durable history. Relay/trust/
+authentication profiles are still caller-selected fixture inputs: this guard is
+rendering permission only, not durable production provider routing.
+
+Next: design and implement durable provider-profile descriptors and bindings, then
+verify exact relay/TLS/auth identity across restart. Public activation, credential
+integration, privacy defaults, licensing and real-cluster/relay validation remain
+separate gates. No new dependencies, schema versions or executable defaults change.

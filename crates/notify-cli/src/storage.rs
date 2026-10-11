@@ -684,6 +684,24 @@ impl Store {
         Ok(Some(descriptor))
     }
 
+    // One bounded transaction; every binding (including pending work) protects
+    // its descriptor. This operation does not remove snapshots or ledger history.
+    pub(super) fn prune_smtp_revisions(
+        &mut self,
+        cluster: &str,
+        limit: usize,
+    ) -> Result<usize, StorageError> {
+        if cluster.is_empty() || cluster.len() > 4096 || limit == 0 || limit > 256 {
+            return Err(StorageError::InvalidInput);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let removed = tx.execute("DELETE FROM smtp_render_revisions WHERE rowid IN (SELECT r.rowid FROM smtp_render_revisions r WHERE r.cluster=?1 AND NOT EXISTS(SELECT 1 FROM smtp_revision_bindings b WHERE b.cluster=r.cluster AND b.destination=r.destination AND b.revision=r.revision) ORDER BY r.destination,r.revision LIMIT ?2) AND NOT EXISTS(SELECT 1 FROM smtp_revision_bindings b WHERE b.cluster=smtp_render_revisions.cluster AND b.destination=smtp_render_revisions.destination AND b.revision=smtp_render_revisions.revision)", params![cluster,limit as i64])?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub(super) fn frozen_smtp(
         &self,
         event_id: &str,
@@ -2346,6 +2364,68 @@ pub(super) mod tests {
             Err(StorageError::Conflict)
         ));
         assert_eq!(count(&store, "smtp_render_revisions"), 0);
+    }
+    #[test]
+    fn revision_cleanup_is_bounded_cluster_scoped_and_rolls_back_late_failure() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let item = smtp_seed(&mut store);
+        let bound = revision("bound");
+        store
+            .freeze_smtp_revision(&item.event_id, "smtp", &smtp_message("done"), &bound)
+            .unwrap();
+        for namespace in ["orphan-a", "orphan-b"] {
+            let descriptor = revision(namespace);
+            store
+                .db
+                .execute(
+                    "INSERT INTO smtp_render_revisions VALUES ('cluster','smtp',?1,?2)",
+                    params![descriptor.token(), descriptor.canonical()],
+                )
+                .unwrap();
+        }
+        store
+            .db
+            .execute(
+                "INSERT INTO smtp_render_revisions VALUES ('other','smtp',?1,?2)",
+                params![bound.token(), bound.canonical()],
+            )
+            .unwrap();
+        for (cluster, limit) in [("", 1), ("cluster", 0), ("cluster", 257)] {
+            assert!(matches!(
+                store.prune_smtp_revisions(cluster, limit),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        store.db.execute_batch("CREATE TABLE cleanup_probe(n INTEGER); CREATE TRIGGER reject_second_revision BEFORE DELETE ON smtp_render_revisions BEGIN INSERT INTO cleanup_probe VALUES(1); SELECT CASE WHEN (SELECT count(*) FROM cleanup_probe)=2 THEN RAISE(ABORT,'fixture') END; END;").unwrap();
+        assert!(matches!(
+            store.prune_smtp_revisions("cluster", 2),
+            Err(StorageError::Database(_))
+        ));
+        assert_eq!(count(&store, "smtp_render_revisions"), 4);
+        assert_eq!(count(&store, "cleanup_probe"), 0);
+        store
+            .db
+            .execute_batch("DROP TRIGGER reject_second_revision;")
+            .unwrap();
+        assert_eq!(store.prune_smtp_revisions("cluster", 1).unwrap(), 1);
+        assert_eq!(count(&store, "smtp_render_revisions"), 3);
+        assert_eq!(store.prune_smtp_revisions("cluster", 256).unwrap(), 1);
+        assert_eq!(store.prune_smtp_revisions("cluster", 1).unwrap(), 0);
+        assert_eq!(
+            store
+                .bound_smtp_revision(&item.event_id, "smtp")
+                .unwrap()
+                .unwrap()
+                .token(),
+            bound.token()
+        );
+        assert_eq!(store.prune_smtp_revisions("other", 1).unwrap(), 1);
+        drop(store);
+        let mut store = open(&directory);
+        assert_eq!(count(&store, "smtp_render_revisions"), 1);
+        assert_eq!(store.prune_smtp_revisions("cluster", 1).unwrap(), 0);
+        assert_eq!(store.due_deliveries("cluster", 10, 10).unwrap().len(), 1);
     }
     #[test]
     fn malformed_owned_revision_state_fails_closed() {
