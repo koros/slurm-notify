@@ -54,6 +54,9 @@ mod smtp_auth_dispatch;
 #[cfg(test)]
 mod smtp_message;
 
+#[cfg(test)]
+mod smtp_submit;
+
 fn main() {
     eprintln!("Slurm Notify is under development; monitoring is not implemented.");
     std::process::exit(1);

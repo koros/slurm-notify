@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private verified/authenticated SMTP submission with bounded phase replies, one validated envelope/DATA transaction, final-acknowledgment acceptance policy, write-failure fixtures, and real TLS message observation.
+
 - Bounded private single-recipient SMTP message builder, stable identity/date, injection and ASCII-input validation, CRLF/DATA transparency tests; test-only lettre builder with documented compiler compatibility pins.
 
 - Private authenticated-SMTP outbox policy: temporary failures retry, credential/mechanism/permanent failures block, authentication success stays pending; owned-store restart and partial-progress acceptance.

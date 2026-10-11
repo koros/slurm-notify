@@ -72,6 +72,34 @@ pub(super) fn authenticate_credentials(
     config: Arc<rustls::ClientConfig>,
     name: rustls::pki_types::ServerName<'static>,
 ) -> Result<(), Error> {
+    let mut stream = connect_authenticated(credentials, connect, config, name)?;
+    stream.0.conn.send_close_notify();
+    let _ = stream.flush();
+    Ok(())
+}
+
+// Opaque verified/authenticated stream: only this module can construct it.
+pub(super) struct Authenticated(rustls::StreamOwned<rustls::ClientConnection, TcpStream>);
+impl std::io::Read for Authenticated {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        std::io::Read::read(&mut self.0, bytes)
+    }
+}
+impl Write for Authenticated {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+pub(super) fn connect_authenticated(
+    credentials: Credentials,
+    connect: impl FnOnce() -> std::io::Result<TcpStream>,
+    config: Arc<rustls::ClientConfig>,
+    name: rustls::pki_types::ServerName<'static>,
+) -> Result<Authenticated, Error> {
     let mut stream = smtp_tls::verified_starttls(connect().map_err(|_| Error::Io)?, config, name)
         .map_err(Error::Transport)?;
     stream
@@ -116,10 +144,8 @@ pub(super) fn authenticate_credentials(
         500..=599 => Err(Error::Permanent),
         _ => Err(Error::Reply), // No challenge, fallback mechanism, or internal retry.
     };
-    stream.conn.send_close_notify();
-    // Teardown must not replace an explicit authentication result.
-    let _ = stream.flush();
-    result
+    result?;
+    Ok(Authenticated(stream))
 }
 
 fn reply_error(error: super::smtp_reply::Error) -> Error {

@@ -144,3 +144,16 @@ compatibility is not a security or product support certification.
 All ordinary acceptance uses ephemeral loopback servers and temporary owned stores.
 Real relay tests require separate user authorization and site policy validation.
 Releases, licensing, support baselines, and operational onboarding remain unresolved.
+
+## Private submission experiment progress
+
+The authenticated stream type is opaque and can be obtained only after verified
+STARTTLS/fresh EHLO/AUTH. A test-only single-recipient submission consumes that
+stream plus a validated Prepared message. The wire implementation reads bounded
+replies per MAIL/RCPT/DATA/final DATA and never pipelines commands or retries
+internally. Only final DATA 250 yields relay acceptance. Explicit final 4xx/5xx
+and missing final replies retain different acceptance evidence. QUIT is a
+best-effort write with no reply wait; its failure cannot reverse acceptance.
+This is a private experiment, not a complete operational SMTP transport. Parent
+submission framing/deadlines, sanitized cross-process results, durable frozen
+messages, activation and real relay validation remain pending.

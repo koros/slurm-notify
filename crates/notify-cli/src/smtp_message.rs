@@ -11,7 +11,7 @@ const MESSAGE_LIMIT: usize = 16384;
 const WIRE_LIMIT: usize = 16384;
 
 #[derive(Debug, PartialEq, Eq)]
-enum Error {
+pub(super) enum Error {
     Address,
     Header,
     Body,
@@ -21,10 +21,22 @@ enum Error {
 }
 
 // No Debug/Clone: addresses and message bytes are not diagnostics.
-struct Prepared {
+pub(super) struct Prepared {
     sender: Address,
     recipient: Address,
     data: Zeroizing<Vec<u8>>,
+}
+
+impl Prepared {
+    pub(super) fn mail_command(&self) -> String {
+        format!("MAIL FROM:<{}>\r\n", self.sender)
+    }
+    pub(super) fn recipient_command(&self) -> String {
+        format!("RCPT TO:<{}>\r\n", self.recipient)
+    }
+    pub(super) fn data(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 fn address(value: &str) -> Result<Address, Error> {
@@ -44,7 +56,7 @@ fn address(value: &str) -> Result<Address, Error> {
     Ok(parsed)
 }
 
-fn prepare(
+pub(super) fn prepare(
     sender: &str,
     recipient: &str,
     identity: &str,

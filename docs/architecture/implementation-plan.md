@@ -1740,3 +1740,43 @@ Validation: shared checks pass (177 Rust tests plus one ignored helper, 51 custo
 process scenarios, eight SQLite tests, six hook tests), including formatting and
 strict Clippy with the new locked builder dependencies. The 80% coverage gate
 passes at 96.03% Rust lines (8,717/9,077).
+
+## Subsequent increment: private authenticated SMTP submission
+
+Verified STARTTLS plus fresh secure EHLO and successful AUTH can now return an
+opaque authenticated stream. Only the authentication module constructs this type;
+submission accepts it and a privately validated single-recipient message. Existing
+authentication-only child behavior remains intact. Structured message input is
+validated independently by the constructor; future child framing must finish all
+input validation before connecting. No plaintext public submission
+entry point, credential lookup, new dependency, schema, or normal runtime behavior
+was introduced.
+
+The private transaction sends MAIL, one RCPT, DATA, and the already bounded/dot-stuffed
+message, reading each reply through the existing bounded parser (128 bytes per
+line, 256 total, four lines). Exact expected success codes advance the phase; 4xx
+retry and 5xx reject. Unexpected/malformed replies and I/O retry without continuing
+the transaction. Pre-DATA failure is not submitted; explicit final DATA refusal is
+not accepted; missing/malformed final acknowledgment or DATA write failure carries
+unknown acceptance. Only final DATA 250 yields Delivered as relay acceptance.
+Best-effort QUIT writes do not replace that result; no QUIT reply is awaited.
+Socket timeouts remain caller responsibilities until child integration adds the
+absolute parent deadline. A killed child before acknowledgment can still replay.
+
+Four tests cover temporary/permanent/unexpected/malformed/truncated replies at
+each transaction phase, exact sequencing and early stop, absent final reply,
+write failure at every stage, QUIT failure after success, and a real verified-TLS
+loopback session. The latter observes fresh EHLO, exactly one AUTH/envelope/DATA,
+full prepared message bytes and dot transparency, then QUIT. All waits and observed
+message buffers are bounded; boolean assertions avoid printing protocol inputs.
+The generic transaction helper is private and used by scripted test streams only;
+the submission entry point requires the opaque authenticated stream.
+
+Next: separate bounded submission child framing and sanitized phase/acceptance
+acknowledgments, with supervised slow/disconnected final DATA reply fixtures.
+Durable frozen-message storage, retry integration, credential lookup, public review,
+licensing, cluster validation and activation remain pending.
+
+Validation: shared checks pass (181 Rust tests plus one ignored helper, 51 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy. Coverage passes the 80% gate at 96.15% Rust lines (9,361/9,736).
