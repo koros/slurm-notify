@@ -1678,3 +1678,33 @@ pending alongside public review, licensing, cluster validation, and activation.
 Validation: formatting, strict Clippy and shared suite pass (169 Rust tests plus
 one ignored helper, 49 custom process scenarios, eight SQLite tests, six hook
 tests). Rust line coverage passes the 80% gate at 95.93% (8,320/8,673).
+
+## Subsequent increment: authenticated-child outbox policy
+
+A private parent classifier consumes the separate authentication acknowledgment.
+Temporary AUTH, I/O, protocol/reply, and temporary upgrade failures retry; invalid
+credentials/input, unsupported mechanisms, permanent AUTH, certificate/configuration,
+and missing/permanent upgrade failures block. Static AUTH diagnostics distinguish
+these outcomes. Authentication success remains not submitted and leaves the row
+pending; no acknowledgment can produce Delivered or recipient rejection. Missing
+child acknowledgments retain the supervisor's conservative unknown-acceptance policy.
+
+Three classifier tests cover all acknowledged categories and representative parent
+failures. Two durable unit tests exercise every blocking category, retained identity,
+zero attempts/completion samples, and transient retry deadlines across reopen through
+the three-attempt budget. Two custom owned-store scenarios compose actual child
+454 or timeout results followed by 535: the earlier completion-time retry survives
+the block, the later destination remains untouched, repeated permanent blocks add
+no attempts, and ownership/identity/retry deadlines persist on reopen. No message
+is marked delivered. Existing loopback fixtures are shared without changing their
+bounded, verified-TLS behavior. No dependencies, schema, public contract, or runtime
+default changed.
+
+Next: bounded private SMTP message/envelope construction and submission fixtures,
+with final DATA acknowledgment as the sole delivery-success evidence. Credential
+lookup, public interface review, licensing, cluster validation and activation remain
+pending.
+
+Validation: shared checks pass (174 Rust tests plus one ignored helper, 51 custom
+process scenarios, eight SQLite tests, six hook tests), including formatting and
+strict Clippy. Coverage passes the 80% gate at 95.98% Rust lines (8,504/8,860).

@@ -5,6 +5,11 @@ use super::{delivery::ProviderOutcome, transport};
 pub(super) enum Diagnostic {
     Acknowledged,
     SmtpReady,
+    SmtpAuthenticated,
+    SmtpCredentials,
+    SmtpAuthUnsupported,
+    SmtpAuthTemporary,
+    SmtpAuthPermanent,
     SmtpInput,
     SmtpCertificate,
     SmtpConfiguration,

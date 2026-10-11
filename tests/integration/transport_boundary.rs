@@ -29,6 +29,8 @@ mod smtp_ack;
 #[path = "../../crates/notify-cli/src/smtp_auth.rs"]
 mod smtp_auth;
 mod smtp_auth_boundary;
+#[path = "../../crates/notify-cli/src/smtp_auth_dispatch.rs"]
+mod smtp_auth_dispatch;
 #[path = "../../crates/notify-cli/src/smtp_auth_frame.rs"]
 mod smtp_auth_frame;
 #[path = "../../crates/notify-cli/src/smtp_dispatch.rs"]
@@ -186,6 +188,7 @@ fn acceptance() {
     orchestrated_mid_batch_cancellation_restart();
     cancelled_preflight_preserves_owned_store();
     accepted_send_commit_failure_replays();
+    owned_smtp_auth_progress_restart();
     smtp_auth_boundary::acceptance();
     smtp_negotiation_boundary::acceptance();
     smtp_negotiation_boundary::handshake_acceptance();
@@ -1340,5 +1343,137 @@ fn owned_smtp_upgrade_policy_restart() {
             .unwrap(),
             0
         );
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn owned_smtp_auth_progress_restart() {
+    use supervised_provider::Diagnostic;
+    for transient_mode in [1, 5] {
+        let directory = storage::tests::Directory::new();
+        let root = state_directory(&directory);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let mut reconciler = lifecycle::Reconciler::with_capacity(10);
+        poll_fixture_with_destinations(&mut store, &mut reconciler, &["a", "b", "c"]);
+        let before = store.due_deliveries("cluster", 10, 10).unwrap();
+        assert_eq!(before.len(), 3);
+        let identity = before[0].event_id.clone();
+        let mut calls = 0;
+        let mut completions = 0;
+        let failure = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            retry_policy(),
+            |item| {
+                calls += 1;
+                assert_eq!(item.event_id, identity);
+                let result = match item.destination.as_str() {
+                    "a" => smtp_auth_boundary::fixture_result(transient_mode),
+                    "b" => smtp_auth_boundary::fixture_result(2),
+                    _ => panic!("later destination must remain untouched"),
+                };
+                if item.destination == "a" {
+                    if transient_mode == 1 {
+                        assert_eq!(result, Ok(smtp_auth_frame::Ack::Temporary));
+                    } else {
+                        assert_eq!(result, Err(transport::Error::Timeout));
+                    }
+                } else {
+                    assert_eq!(result, Ok(smtp_auth_frame::Ack::Permanent));
+                }
+                smtp_auth_dispatch::classify(result).into_dispatch()
+            },
+            || {
+                completions += 1;
+                Some(20)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(calls, 2);
+        assert_eq!(completions, 1);
+        assert_eq!(failure.kind, delivery::FailureKind::DispatchBlocked);
+        assert_eq!(failure.diagnostic, Some(Diagnostic::SmtpAuthPermanent));
+        assert_eq!(failure.committed.retrying, 1);
+        assert_eq!(failure.committed.delivered, 0);
+        assert_eq!(failure.committed.failed, 0);
+        assert!(!failure.acceptance_uncertain);
+        drop(store);
+        let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        assert!(matches!(
+            storage::Store::open_private(&root, Duration::from_millis(50)),
+            Err(storage::StorageError::StatePath(
+                state_path::Error::AlreadyOwned
+            ))
+        ));
+        let pending = store.due_deliveries("cluster", 24, 10).unwrap();
+        assert_eq!(
+            pending
+                .iter()
+                .map(|item| item.destination.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+        assert!(pending
+            .iter()
+            .all(|item| item.attempt_number == 1 && item.event_id == identity));
+        let due = store.due_deliveries("cluster", 25, 10).unwrap();
+        let retry = due.iter().find(|item| item.destination == "a").unwrap();
+        assert_eq!(retry.attempt_number, 2);
+        assert_eq!(retry.event_id, identity);
+        let restored = store.restore("cluster", 10).unwrap();
+        assert_eq!(restored.0.emitted.len(), 1);
+        let blocked_again = delivery::deliver_due_detailed(
+            &mut store,
+            "cluster",
+            24,
+            10,
+            retry_policy(),
+            |item| {
+                assert_eq!(item.destination, "b");
+                smtp_auth_dispatch::classify(smtp_auth_boundary::fixture_result(2)).into_dispatch()
+            },
+            || panic!("permanent AUTH block must not sample completion clock"),
+        )
+        .unwrap_err();
+        assert_eq!(blocked_again.committed, delivery::BatchReport::default());
+        assert_eq!(
+            blocked_again.diagnostic,
+            Some(Diagnostic::SmtpAuthPermanent)
+        );
+        drop(store);
+        let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'delivered'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        drop(db);
+        let store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let pending = store.due_deliveries("cluster", 25, 10).unwrap();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(
+            pending
+                .iter()
+                .find(|item| item.destination == "a")
+                .unwrap()
+                .attempt_number,
+            2
+        );
+        assert!(pending
+            .iter()
+            .filter(|item| item.destination != "a")
+            .all(|item| item.attempt_number == 1));
     }
 }

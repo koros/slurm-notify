@@ -74,148 +74,15 @@ fn classify(error: smtp_auth::Error) -> Ack {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn acceptance() {
     use super::transport;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-    use std::{net::TcpListener, process::Command, thread, time::Instant};
+
+    use std::{net::TcpListener, process::Command};
     use zeroize::Zeroizing;
-    fn line(stream: &mut impl Read) -> Zeroizing<Vec<u8>> {
-        let mut bytes = Zeroizing::new(Vec::with_capacity(273));
-        let mut byte = [0];
-        while bytes.len() < 273 && matches!(stream.read(&mut byte), Ok(1)) {
-            bytes.push(byte[0]);
-            if bytes.ends_with(b"\r\n") {
-                break;
-            }
-        }
-        bytes
-    }
     // Explicit success/refusals, malformed reply, disconnect, stall, drip.
     for mode in 0..7 {
-        let cert = rcgen::generate_simple_self_signed(vec!["relay.invalid".into()]).unwrap();
-        let root = cert.serialize_der().unwrap();
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(
-                vec![CertificateDer::from(root.clone())],
-                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der())),
-            )
-            .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            let mut socket = loop {
-                match listener.accept() {
-                    Ok((socket, _)) => break socket,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline);
-                        thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(_) => panic!("AUTH fixture accept failed"),
-                }
-            };
-            socket.set_nonblocking(false).unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            socket
-                .set_write_timeout(Some(Duration::from_secs(1)))
-                .unwrap();
-            socket.write_all(b"220 ready\r\n").unwrap();
-            assert!(&*line(&mut socket) == b"EHLO fixture.invalid\r\n");
-            socket.write_all(b"250-relay\r\n250 STARTTLS\r\n").unwrap();
-            assert!(&*line(&mut socket) == b"STARTTLS\r\n");
-            socket.write_all(b"220 upgrade\r\n").unwrap();
-            let mut stream = rustls::StreamOwned::new(
-                rustls::ServerConnection::new(Arc::new(config)).unwrap(),
-                socket,
-            );
-            assert!(&*line(&mut stream) == b"EHLO fixture.invalid\r\n");
-            stream
-                .write_all(b"250-secure\r\n250 AUTH PLAIN\r\n")
-                .and_then(|()| stream.flush())
-                .unwrap();
-            assert!(&*line(&mut stream) == b"AUTH PLAIN AHUAcA==\r\n"); // Synthetic u/p only; boolean assertion.
-            if mode == 4 {
-                return 0;
-            } // Abrupt EOF after exactly one AUTH.
-            if mode < 4 {
-                let reply: &[u8] = match mode {
-                    0 => b"235 authenticated\r\n",
-                    1 => b"454 temporary\r\n",
-                    2 => b"535 rejected\r\n",
-                    _ => b"garbage\r\n",
-                };
-                stream
-                    .write_all(reply)
-                    .and_then(|()| stream.flush())
-                    .unwrap();
-                assert!(line(&mut stream).is_empty()); // No MAIL or repeated AUTH.
-                return 0;
-            }
-            let mut writes = 0;
-            if mode == 6 {
-                stream
-                    .write_all(b"235 ")
-                    .and_then(|()| stream.flush())
-                    .unwrap();
-                loop {
-                    if stream
-                        .write_all(b" ")
-                        .and_then(|()| stream.flush())
-                        .is_err()
-                    {
-                        break;
-                    }
-                    writes += 1;
-                    thread::sleep(Duration::from_millis(20));
-                    assert!(writes < 100); // Fixture cannot run forever.
-                }
-            }
-            // Parent termination closes the TLS socket; timeout would fail here.
-            let mut byte = [0];
-            match stream.read(&mut byte) {
-                Ok(0) => (),
-                Err(error) => assert!(matches!(
-                    error.kind(),
-                    std::io::ErrorKind::UnexpectedEof
-                        | std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::BrokenPipe
-                )),
-                _ => panic!("unexpected command after AUTH"),
-            }
-            writes
+        fixture_result(mode).unwrap_or_else(|error| {
+            assert_eq!(error, transport::Error::Timeout);
+            Ack::Io
         });
-        let frame = smtp_auth_frame::encode(port, "u", "p").unwrap();
-        let mut input = Zeroizing::new(Vec::with_capacity(4 + root.len() + frame.len()));
-        input.extend_from_slice(&(root.len() as u32).to_be_bytes());
-        input.extend_from_slice(&root);
-        input.extend_from_slice(&frame);
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command.arg("--smtp-auth-fixture");
-        let start = Instant::now();
-        let result = transport::supervise_with(
-            &mut command,
-            input,
-            Duration::from_millis(500),
-            INPUT_LIMIT,
-            32,
-            smtp_auth_frame::decode_ack,
-        );
-        let expected = match mode {
-            0 => Ok(Ack::Authenticated),
-            1 => Ok(Ack::Temporary),
-            2 => Ok(Ack::Permanent),
-            3 => Ok(Ack::Reply),
-            4 => Ok(Ack::Io),
-            _ => Err(transport::Error::Timeout),
-        };
-        assert_eq!(result, expected);
-        assert!(start.elapsed() < Duration::from_millis(1500));
-        let writes = server.join().unwrap();
-        if mode == 6 {
-            assert!(writes >= 2);
-        }
     }
     for input in [
         vec![],
@@ -271,4 +138,153 @@ pub(super) fn acceptance() {
             matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
         );
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn fixture_result(mode: u8) -> Result<Ack, super::transport::Error> {
+    assert!(mode < 7);
+    use super::transport;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use std::{net::TcpListener, process::Command, thread, time::Instant};
+    use zeroize::Zeroizing;
+    fn line(stream: &mut impl Read) -> Zeroizing<Vec<u8>> {
+        let mut bytes = Zeroizing::new(Vec::with_capacity(273));
+        let mut byte = [0];
+        while bytes.len() < 273 && matches!(stream.read(&mut byte), Ok(1)) {
+            bytes.push(byte[0]);
+            if bytes.ends_with(b"\r\n") {
+                break;
+            }
+        }
+        bytes
+    }
+    // Explicit success/refusals, malformed reply, disconnect, stall, drip.
+
+    let cert = rcgen::generate_simple_self_signed(vec!["relay.invalid".into()]).unwrap();
+    let root = cert.serialize_der().unwrap();
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from(root.clone())],
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der())),
+        )
+        .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => panic!("AUTH fixture accept failed"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        socket
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        socket.write_all(b"220 ready\r\n").unwrap();
+        assert!(&*line(&mut socket) == b"EHLO fixture.invalid\r\n");
+        socket.write_all(b"250-relay\r\n250 STARTTLS\r\n").unwrap();
+        assert!(&*line(&mut socket) == b"STARTTLS\r\n");
+        socket.write_all(b"220 upgrade\r\n").unwrap();
+        let mut stream = rustls::StreamOwned::new(
+            rustls::ServerConnection::new(Arc::new(config)).unwrap(),
+            socket,
+        );
+        assert!(&*line(&mut stream) == b"EHLO fixture.invalid\r\n");
+        stream
+            .write_all(b"250-secure\r\n250 AUTH PLAIN\r\n")
+            .and_then(|()| stream.flush())
+            .unwrap();
+        assert!(&*line(&mut stream) == b"AUTH PLAIN AHUAcA==\r\n"); // Synthetic u/p only; boolean assertion.
+        if mode == 4 {
+            return 0;
+        } // Abrupt EOF after exactly one AUTH.
+        if mode < 4 {
+            let reply: &[u8] = match mode {
+                0 => b"235 authenticated\r\n",
+                1 => b"454 temporary\r\n",
+                2 => b"535 rejected\r\n",
+                _ => b"garbage\r\n",
+            };
+            stream
+                .write_all(reply)
+                .and_then(|()| stream.flush())
+                .unwrap();
+            assert!(line(&mut stream).is_empty()); // No MAIL or repeated AUTH.
+            return 0;
+        }
+        let mut writes = 0;
+        if mode == 6 {
+            stream
+                .write_all(b"235 ")
+                .and_then(|()| stream.flush())
+                .unwrap();
+            loop {
+                if stream
+                    .write_all(b" ")
+                    .and_then(|()| stream.flush())
+                    .is_err()
+                {
+                    break;
+                }
+                writes += 1;
+                thread::sleep(Duration::from_millis(20));
+                assert!(writes < 100); // Fixture cannot run forever.
+            }
+        }
+        // Parent termination closes the TLS socket; timeout would fail here.
+        let mut byte = [0];
+        match stream.read(&mut byte) {
+            Ok(0) => (),
+            Err(error) => assert!(matches!(
+                error.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+            )),
+            _ => panic!("unexpected command after AUTH"),
+        }
+        writes
+    });
+    let frame = smtp_auth_frame::encode(port, "u", "p").unwrap();
+    let mut input = Zeroizing::new(Vec::with_capacity(4 + root.len() + frame.len()));
+    input.extend_from_slice(&(root.len() as u32).to_be_bytes());
+    input.extend_from_slice(&root);
+    input.extend_from_slice(&frame);
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.arg("--smtp-auth-fixture");
+    let start = Instant::now();
+    let result = transport::supervise_with(
+        &mut command,
+        input,
+        Duration::from_millis(500),
+        INPUT_LIMIT,
+        32,
+        smtp_auth_frame::decode_ack,
+    );
+    let expected = match mode {
+        0 => Ok(Ack::Authenticated),
+        1 => Ok(Ack::Temporary),
+        2 => Ok(Ack::Permanent),
+        3 => Ok(Ack::Reply),
+        4 => Ok(Ack::Io),
+        _ => Err(transport::Error::Timeout),
+    };
+    assert_eq!(result, expected);
+    assert!(start.elapsed() < Duration::from_millis(1500));
+    let writes = server.join().unwrap();
+    if mode == 6 {
+        assert!(writes >= 2);
+    }
+    result
 }
