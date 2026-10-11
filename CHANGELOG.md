@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private SMTP rendering/provider-pair permissions and opaque validated resolution contexts, checking actual trust content and authentication identity before injected dispatch or retry retirement; reopen, denial and secret-rotation tests. Concrete bound transport remains pending.
+
 - Private immutable provider-aware SMTP polling with complete profile preflight, atomic rendering/provider bindings, changed-policy reopen recovery and rollback/suppression tests. Exact bound-profile dispatch remains pending.
 
 - Private schema v4 for immutable SMTP provider revisions and cluster-coherent bindings, atomic prepared persistence, bounded loading and migration/conflict/rollback/reopen tests. Provider-aware polling and resolved dispatch remain pending.

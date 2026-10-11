@@ -1,7 +1,7 @@
 # ADR 0015: private SMTP provider-profile revisions
 
 Status: pure descriptors, trust fingerprints and atomic provider storage implemented;
-provider-aware polling implemented; resolved transport integration pending. This establishes no public configuration contract.
+provider-aware polling and pair/resolution guards implemented; concrete bound transport pending. This establishes no public configuration contract.
 
 ## Identity and validation
 
@@ -142,3 +142,36 @@ Next: validate explicit rendering/provider-pair permissions and resolve the exac
 bound relay, trust and authentication identity before transport, with owned TLS
 endpoint/restart acceptance. No new schema, dependencies, public contracts, runtime
 defaults, installed monitoring or real-cluster/relay activation is introduced.
+
+### Provider-pair permission and validated resolution guard
+
+Private smtp_provider_delivery requires an immutable allowlist of at most 64
+(cluster, destination, rendering revision, provider revision) entries. Empty lists
+deny all; duplicate pairs, invalid names and malformed tokens are rejected. Each
+due row loads both durable descriptors and checks the complete pair before local
+resource resolution. Missing/corrupt bindings and denied pairs block before sending,
+clock sampling or exhausted retry retirement. Existing fixture adapters remain.
+
+Opaque Resolved construction compares the supplied profile to the bound descriptor,
+hashes and validates the actual DER trust set, requires the exact authentication
+identity, and validates credentials using the existing zeroizing AUTH PLAIN type.
+No credentials are persisted or exposed through diagnostics. The worker compares
+the returned context's canonical bytes/token with the stored provider again; a
+resolver cannot substitute a context validated against another profile. Approved
+sends receive the original snapshot and consume the validated profile/resources.
+Secret rotation under the same reference/identity keeps the provider token stable.
+
+Five tests cover pair validation and all matching fields, actual trust/auth identity
+checks, secret rotation, missing legacy/render-only/corrupt bindings, denial before
+resolution or retry retirement, resolution errors, wrong returned contexts,
+cancellation and exact snapshot/pair replay across reopen with completion-based
+retry scheduling. Diagnostics contain static categories only.
+
+This increment validates caller-injected local resolution and guards an injected
+send callback. It does not yet build a concrete network transport from Resolved;
+an arbitrary callback is not proof of bound endpoint use. Next: construct verified
+TLS/authenticated submission from the validated context and verify exact endpoint,
+trust and authentication identity in owned loopback restart/lost-result acceptance.
+Provider cleanup and orchestration integration follow separately. No new schema,
+dependencies, public contracts, installed credentials/monitoring, real-cluster tests
+or production activation are introduced.
