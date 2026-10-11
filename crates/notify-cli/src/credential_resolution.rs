@@ -47,6 +47,7 @@ pub(super) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use super::*;
     #[test]
     fn owned_credentials_preserve_exact_bytes_and_allow_restart_rotation() {

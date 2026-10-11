@@ -190,6 +190,7 @@ pub(super) fn read(_: &std::path::Path) -> Result<Snapshot, Error> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness compiles helpers without unit tests.
     use super::*;
     #[test]
     fn stream_budget_counts_actual_reads_and_preserves_bytes() {
@@ -242,7 +243,9 @@ mod tests {
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     mod files {
+        #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
         use super::*;
+        #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
         use std::{
             fs::{self, OpenOptions, Permissions},
             io::Write,

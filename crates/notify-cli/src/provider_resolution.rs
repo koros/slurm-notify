@@ -44,10 +44,12 @@ pub(super) fn resolve(
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
+    #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use crate::{
         smtp_auth::Credentials,
         smtp_provider_revision::{self, TlsMode},
     };
+    #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use std::{
         fs::{self, OpenOptions},
         io::Write,

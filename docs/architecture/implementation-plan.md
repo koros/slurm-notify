@@ -2943,3 +2943,24 @@ Installed configuration mapping and activation still require explicit review.
 Validation: shared checks pass with 297 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.49% (16,141/16,556), above the 80% gate.
+
+### Composed resources in supervised transport acceptance
+
+The custom loopback STARTTLS retry/lost-result scenarios now load protected owned
+DER files and resolve injected credentials through provider_resolution. Missing
+trust and an empty password block before child creation; maintenance stays skipped.
+Reopen checks preserve attempt two, frozen bytes, provider binding and checkpoint.
+Changed endpoints remain blocked, then restored trust and a rotated password recover
+through bounded supervised transport with exact AUTH/DATA assertions. Completed
+ordinary work stays complete, and the audit contains only actual transport attempts.
+
+This extends existing acceptance scenarios rather than adding ordinary unit tests.
+No external network, cluster, mailbox, dependency, default or product contract changes.
+ADR 0019 distinguishes loopback evidence from installed operation.
+
+Next: remaining private resource/configuration mapping preparation. Public parser,
+CLI/config/event baselines and runtime activation still require explicit review.
+
+Validation: shared checks pass with 297 Rust tests plus one ignored helper, the
+expanded custom process acceptance, eight SQLite tests, six hook tests and 11 draft
+configuration tests. Rust line coverage is 97.49% (16,140/16,556), above the 80% gate.

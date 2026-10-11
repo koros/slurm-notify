@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Composed private trust/credential resolution in supervised loopback STARTTLS acceptance, including resource blocks before child creation, retry/lost-result restart preservation and rotated-password recovery with verified frozen bytes.
+
 - Private composed-resource pending-delivery acceptance verifies permission/cancellation gates, trust/credential blocks without consuming attempts, frozen bytes and binding/checkpoint preservation across reopen, and rotated-password recovery through synthetic send callbacks.
 
 - Private SMTP resource composition joins owned trust and injected credentials to immutable provider bindings, with profile/trust gates before lookup and five rotation/failure tests; no permission grant, delivery or installed activation.

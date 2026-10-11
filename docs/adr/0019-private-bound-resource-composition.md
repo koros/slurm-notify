@@ -43,6 +43,17 @@ provider binding and scheduler checkpoint. A restored trust file and rotated
 password recover the same message on attempt two. Reopening after the synthetic
 delivered outcome confirms the work is no longer due. No SMTP connection is made.
 
+The existing custom supervised transport harness also composes these loaders in
+its loopback STARTTLS retry and lost-result scenarios. A mode-0600 DER fixture in
+a private directory replaces direct in-memory resolution. After the first send,
+missing trust and an empty password each block before child construction, skip
+maintenance and preserve the pending attempt, frozen bytes, provider binding and
+checkpoint across reopen. Changed endpoints remain blocked. Restored trust and a
+rotated password then reach the verified TLS fixture; it checks AUTH and the exact
+frozen DATA bytes. Ordinary-route progress remains complete, and the delivery audit
+retains only actual transport attempts. This is synthetic loopback evidence, not
+installed operation or delivery to a real mailbox.
+
 Trust and credential sources are read sequentially, without promising a transaction
 across external resources. ADRs 0016–0018 retain their metadata, filesystem deadline
 and injected-source allocation/deadline limitations. This is local preparation,
@@ -51,5 +62,5 @@ CLI, schema, environment adapter or source-selection policy.
 
 ## Next
 
-Exercise composed-resource resolution with bounded supervised transport acceptance.
+Prepare the remaining private resource/configuration mapping boundaries.
 Public configuration mapping and runtime activation still require explicit review.

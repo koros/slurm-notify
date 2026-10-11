@@ -1,9 +1,15 @@
 //! Custom test harness doubles as a trusted private child, never installed.
 #![allow(dead_code)]
+#[path = "../../crates/notify-cli/src/config_snapshot.rs"]
+mod config_snapshot;
+#[path = "../../crates/notify-cli/src/credential_resolution.rs"]
+mod credential_resolution;
 #[path = "../../crates/notify-cli/src/delivery.rs"]
 mod delivery;
 #[path = "../../crates/notify-cli/src/lifecycle.rs"]
 mod lifecycle;
+#[path = "../../crates/notify-cli/src/provider_resolution.rs"]
+mod provider_resolution;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
 #[path = "../../crates/notify-cli/src/smtp_bound_transport.rs"]
@@ -30,6 +36,8 @@ mod smtp_routes;
 mod storage;
 #[path = "../../crates/notify-cli/src/transport.rs"]
 mod transport;
+#[path = "../../crates/notify-cli/src/trust_snapshot.rs"]
+mod trust_snapshot;
 #[path = "../../crates/notify-cli/src/webhook.rs"]
 mod webhook;
 
@@ -2444,11 +2452,42 @@ fn owned_bound_transport_restart() {
     use base64::Engine;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use smtp_provider_delivery::{Permission, Permissions, Resolved};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::{
         io::{Read, Write},
         net::TcpListener,
         sync::Arc,
     };
+    fn resolve_resources(
+        bound: &smtp_provider_revision::Descriptor,
+        profile: &smtp_provider_revision::Profile<'_>,
+        path: &std::path::Path,
+        password: &[u8],
+    ) -> Result<Resolved, smtp_provider_delivery::Error> {
+        provider_resolution::resolve(
+            bound,
+            profile,
+            &[path.to_owned()],
+            "USER",
+            "PASSWORD",
+            |name, _| {
+                Ok(zeroize::Zeroizing::new(if name == "USER" {
+                    b"fixture-user".to_vec()
+                } else {
+                    password.to_vec()
+                }))
+            },
+        )
+        .map_err(|error| match error {
+            provider_resolution::Error::Profile => smtp_provider_delivery::Error::Profile,
+            provider_resolution::Error::Trust(_) | provider_resolution::Error::TrustMismatch => {
+                smtp_provider_delivery::Error::Trust
+            }
+            provider_resolution::Error::Credentials(_) => {
+                smtp_provider_delivery::Error::Credentials
+            }
+        })
+    }
     fn line(stream: &mut impl Read) -> zeroize::Zeroizing<Vec<u8>> {
         let mut bytes = zeroize::Zeroizing::new(Vec::new());
         loop {
@@ -2502,6 +2541,15 @@ fn owned_bound_transport_restart() {
         let root_path = state_directory(&directory);
         let mut store =
             storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
+        let trust_path = root_path.canonicalize().unwrap().join("trust.der");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&trust_path)
+            .unwrap()
+            .write_all(&root)
+            .unwrap();
         let routes = [smtp_routes::Route {
             name: "smtp",
             visibility: smtp_render::JobVisibility::Hidden,
@@ -2671,7 +2719,7 @@ fn owned_bound_transport_restart() {
                 query,
                 send: (
                     |bound: &smtp_provider_revision::Descriptor| {
-                        Resolved::new(bound, &profile, &[&root], "fixture-user", "first-fixture")
+                        resolve_resources(bound, &profile, &trust_path, b"first-fixture")
                     },
                     |_: &storage::DueDelivery| {
                         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -2702,13 +2750,107 @@ fn owned_bound_transport_restart() {
         let mut store =
             storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
         let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        for missing_trust in [true, false] {
+            if missing_trust {
+                std::fs::remove_file(&trust_path).unwrap();
+            } else {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&trust_path)
+                    .unwrap()
+                    .write_all(&root)
+                    .unwrap();
+            }
+            let mut cycles = polling_cycle::Cycles::new(1).unwrap();
+            let mut times = [17, 17].into_iter();
+            let tick = cycles.tick_mixed_bound_smtp(
+                &cycle_settings,
+                &maintenance,
+                &mut store,
+                polling_cycle::MixedBoundSmtp {
+                    ordinary_destinations: &["webhook"],
+                    smtp: polling_cycle::BoundSmtp {
+                        rendering: polling_cycle::Rendering {
+                            routes: &routes,
+                            max_messages: 1,
+                        },
+                        profiles: &profiles,
+                        permissions: &permissions,
+                        timeout: Duration::from_secs(3),
+                    },
+                },
+                polling_cycle::Hooks {
+                    query,
+                    send: (
+                        |bound: &smtp_provider_revision::Descriptor| {
+                            resolve_resources(bound, &profile, &trust_path, b"")
+                        },
+                        |_: &storage::DueDelivery| -> Command {
+                            panic!("resource block spawned child")
+                        },
+                        |_: &storage::DueDelivery| panic!("completed ordinary route replayed"),
+                    ),
+                    clock: || times.next(),
+                    cancelled: || false,
+                },
+            );
+            assert!(matches!(
+                tick.delivery,
+                Some(Err(polling_cycle::StageError::DispatchBlocked))
+            ));
+            assert!(tick.cleanup.is_none() && tick.health.is_none());
+            let expected = if missing_trust {
+                smtp_provider_delivery::Error::Trust
+            } else {
+                smtp_provider_delivery::Error::Credentials
+            };
+            assert_eq!(
+                tick.delivery_failure.unwrap().diagnostic,
+                Some(supervised_provider::Diagnostic::SmtpProviderResolution(
+                    expected
+                ))
+            );
+            // Polling commits independently before dispatch is blocked.
+            let checkpoint = store.restore("cluster", 10).unwrap().1;
+            assert_eq!(checkpoint.as_deref(), Some("1970-01-01T00:00:17"));
+            drop(store);
+            store = storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
+            assert_eq!(
+                store.due_deliveries("cluster", 17, 10).unwrap()[0].attempt_number,
+                2
+            );
+            assert!(
+                store
+                    .frozen_smtp(&item.event_id, "smtp")
+                    .unwrap()
+                    .unwrap()
+                    .data()
+                    == saved.data()
+            );
+            assert_eq!(
+                store
+                    .bound_smtp_provider(&item.event_id, "smtp")
+                    .unwrap()
+                    .unwrap()
+                    .token(),
+                provider.token()
+            );
+            assert_eq!(store.restore("cluster", 10).unwrap().1, checkpoint);
+            assert!(decoy.accept().is_err());
+        }
         let changed_profile = smtp_provider_revision::Profile {
             port: decoy.local_addr().unwrap().port(),
             ..provider.profile()
         };
         let changed = smtp_routes::ProviderPlan::new(&rendering, &[changed_profile]).unwrap();
+        let changed_request = scheduler::PollRequest {
+            history_end: "1970-01-01T00:00:17",
+            ..request
+        };
         assert!(changed
-            .poll_with(&request, &mut restored, &mut store, 17, query)
+            .poll_with(&changed_request, &mut restored, &mut store, 17, query)
             .unwrap()
             .is_empty());
         let changed_profile = smtp_provider_revision::Profile {
@@ -2738,12 +2880,11 @@ fn owned_bound_transport_restart() {
                 query,
                 send: (
                     |bound: &smtp_provider_revision::Descriptor| {
-                        Resolved::new(
+                        resolve_resources(
                             bound,
                             &changed_profiles[0],
-                            &[&root],
-                            "fixture-user",
-                            "rotated-fixture",
+                            &trust_path,
+                            b"rotated-fixture",
                         )
                     },
                     |_: &storage::DueDelivery| -> Command { panic!("changed endpoint spawned") },
@@ -2792,7 +2933,7 @@ fn owned_bound_transport_restart() {
                 query,
                 send: (
                     |bound: &smtp_provider_revision::Descriptor| {
-                        Resolved::new(bound, &profile, &[&root], "fixture-user", "rotated-fixture")
+                        resolve_resources(bound, &profile, &trust_path, b"rotated-fixture")
                     },
                     |item: &storage::DueDelivery| {
                         assert_eq!(item.attempt_number, 2);

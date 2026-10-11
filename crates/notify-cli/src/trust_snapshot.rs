@@ -63,6 +63,7 @@ pub(super) fn load(paths: &[PathBuf]) -> Result<Trust, Error> {
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
+    #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use std::{
         fs::{self, OpenOptions},
         io::Write,
