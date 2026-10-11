@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Draft local CLI/config/event contract review package, SMTP configuration extension and synthetic mixed-provider example; no approved contracts or runtime activation.
+
 - Mixed-route cancellation and blocked-resolution restart acceptance, verifying preserved SMTP snapshots/bindings, untouched attempts, skipped helper/maintenance work and later recovery; refreshed prototype readiness assessment.
 
 - Private mixed-route orchestration with explicit ordinary destinations, preserved bound SMTP permissions, durable-artifact downgrade rejection, partial-progress/reopen tests and mixed owned TLS retry/lost-result acceptance.

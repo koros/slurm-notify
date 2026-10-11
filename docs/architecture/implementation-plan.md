@@ -2739,3 +2739,30 @@ acceptance where needed; do not infer approval of public surfaces from prototype
 Validation: shared checks pass with 275 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.47% (15,163/15,557), above the unchanged 80% gate.
+
+### Concrete local contract review package
+
+Prepared a proposed CLI grammar with side effects, exit policy, setup/test behavior,
+foreground cancellation and output acceptance. Added an SMTP config extension for
+explicit relay/TLS/trust/auth resources, frozen profiles, exact pair permissions and
+pending-history preservation. The synthetic mixed-provider example uses environment
+names and placeholder fingerprints; it is not runnable configuration or authorization.
+Refreshed the webhook config draft to distinguish existing private capabilities from
+installed/product gaps and linked all drafts through a decision/review checklist.
+
+The package recommends strict JSON, explicit operational values, suppress as the
+setup recommendation for initial observations, minimal opaque-ID payloads, and a
+foreground webhook runtime slice followed by SMTP before the MVP is complete.
+Recommendations remain unapproved. Resource upper bounds, support/timezone semantics,
+historical-profile UX and compatibility fixtures still need review before schema
+freeze. No dependencies, schemas, CLI behavior, defaults or approved baselines change.
+
+Next: review the package and settle limits/semantics, then add approved snapshots and
+schemas before runtime activation. AGENTS.md requires explicit review for public
+CLI/config/event surfaces; a continuation request alone does not settle these new
+proposed decisions. Further draft refinement and private gap fixes can proceed.
+
+Validation: shared checks pass unchanged with 275 Rust tests plus one ignored
+helper, custom process acceptance, eight SQLite tests and six hook tests. Draft
+JSON syntax, duplicate keys and provider/permission references were checked. No Rust
+changes; the last measured Rust line coverage remains 97.47% (15,163/15,557).

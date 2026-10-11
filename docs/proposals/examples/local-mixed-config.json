@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "monitor": {
+    "mode": "local",
+    "cluster_id": "research-cluster",
+    "user_jobs_only": true,
+    "poll_seconds": 60,
+    "query_timeout_seconds": 10,
+    "accounting_lookback_seconds": 3600,
+    "accounting_overlap_seconds": 300,
+    "initial_observation": "suppress",
+    "command_output_limit_bytes": 1048576,
+    "retained_identity_limit": 10000,
+    "retained_event_limit": 20000
+  },
+  "storage": {
+    "path": "/home/researcher/.local/state/slurm-notify/state.sqlite3"
+  },
+  "providers": {
+    "primary": {
+      "type": "webhook",
+      "url_env": "SLURM_NOTIFY_WEBHOOK_URL",
+      "authorization_env": "SLURM_NOTIFY_WEBHOOK_AUTHORIZATION",
+      "request_timeout_seconds": 10,
+      "payload_limit_bytes": 16384
+    },
+    "research_email": {
+      "type": "smtp",
+      "relay": "smtp.example.invalid",
+      "port": 587,
+      "tls_mode": "required_starttls",
+      "server_name": "smtp.example.invalid",
+      "trust_der_files": [
+        "/home/researcher/.config/slurm-notify/trust/relay.der"
+      ],
+      "authentication": {
+        "identity": "researcher",
+        "username_env": "SLURM_NOTIFY_SMTP_USERNAME",
+        "password_env": "SLURM_NOTIFY_SMTP_PASSWORD"
+      },
+      "sender": "researcher@example.invalid",
+      "recipient": "researcher@example.invalid",
+      "visibility": "hidden",
+      "identity_namespace": "research_email",
+      "request_timeout_milliseconds": 10000
+    }
+  },
+  "routes": [
+    {
+      "events": [
+        "JOB_COMPLETED",
+        "JOB_FAILED",
+        "JOB_TIMEOUT",
+        "JOB_OUT_OF_MEMORY",
+        "JOB_NODE_FAILURE",
+        "JOB_BOOT_FAILURE",
+        "JOB_DEADLINE",
+        "JOB_CANCELLED"
+      ],
+      "send_to": [
+        "primary",
+        "research_email"
+      ]
+    }
+  ],
+  "delivery": {
+    "max_attempts": 5,
+    "initial_backoff_seconds": 5,
+    "max_backoff_seconds": 300,
+    "jitter_seconds": 15,
+    "jitter_seed": "42",
+    "batch_limit": 50,
+    "smtp_permissions": [
+      {
+        "cluster_id": "research-cluster",
+        "destination": "research_email",
+        "rendering_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "provider_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  }
+}

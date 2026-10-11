@@ -17,8 +17,9 @@ YAML should also be accepted is an explicit review decision, not a silent change
 
 This proposal covers one local cluster, current-user jobs, one or more generic
 webhooks, explicit routes, SQLite state, and a single serialized delivery owner.
-SMTP, logs, remote mode, setup CLI behavior, and provider-specific payloads need
-separate proposals. Restricting this draft to webhooks does not remove SMTP from
+SMTP and CLI behavior are covered by the [SMTP extension](local-smtp-config-v1.md)
+and [CLI draft](local-cli-v1.md); logs, remote mode and other provider-specific
+payloads remain outside this scope. Restricting this draft to webhooks does not remove SMTP from
 the design handoff's first public MVP requirements.
 
 ## Proposed keys and validation
@@ -50,11 +51,13 @@ the design handoff's first public MVP requirements.
 | delivery.jitter_seed | Required non-negative integer represented as a decimal string fitting u64; avoids JSON numeric precision loss. No secrecy or cryptographic randomness claim. |
 | delivery.batch_limit | Required positive integer limiting due records read per batch. One serialized owner; no leases/concurrent sending claim. |
 
-All durations are whole seconds and byte limits are bytes, not Unicode character
-counts. Reject overflow in duration conversion, deadline construction, allocation
-budgets, and retry due-time arithmetic. Product upper bounds must be agreed with
-support/resource goals before activation; the example is not a limits schema.
-Initial-observation policy does not authorize an unbounded historical replay.
+Webhook/base configuration durations are whole seconds; the SMTP extension
+uses an explicitly named millisecond timeout. Base byte limits are bytes, not
+Unicode character counts. Reject overflow in duration conversion, deadline
+construction, allocation budgets, and retry due-time arithmetic. Product upper
+bounds must be agreed with support/resource goals before activation; the example
+is not a limits schema. Initial-observation policy does not authorize an unbounded
+historical replay.
 
 ## Secrets, routing, and reload
 
@@ -87,11 +90,13 @@ No implicit defaults are proposed for required keys. An eventual wizard may writ
 explicit values after cluster-policy validation and review. This proposal does not
 approve example poll intervals, resource caps, file paths, or first-scan behavior.
 
-Accounting overlap, route matching, per-provider policies, retained-limit separation,
-configuration loading, secure storage creation, safe installed-helper selection,
-opaque ID/payload freezing, and destination revision handling are not implemented.
-The prototype uses a single retained capacity for both identity/event limits and
-an explicit caller window. Diagnostics persistence/status and SMTP remain pending.
+The prototype already exercises caller-driven accounting windows, secure owned
+state, supervised transport and bound SMTP profiles. Installed configuration
+loading, additive event-filter routing, separate retained limits, opaque public IDs,
+frozen webhook payloads, webhook destination revisions, diagnostics output and
+safe installed-helper/resource loading remain pending. The prototype uses a single
+retained capacity for identities/events; its private SMTP tests are not approval of
+this public configuration or production activation.
 
 Review decisions: JSON versus YAML; required explicit values; first-scan semantics;
 secret sources and privacy; routing/reconfiguration; resource upper bounds; HTTPS,

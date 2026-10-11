@@ -40,9 +40,9 @@ rotation, host-key, reconnect and platform acceptance remain outstanding.
 
 ## Next sequence
 
-1. Prepare a review package for the proposed local CLI/config/event surfaces and
-   list unresolved defaults, initial-scan and catch-up semantics. Preparing a
-   proposal does not establish a supported contract.
+1. Review the prepared [local contract package](../proposals/local-contract-review-v1.md)
+   and settle resource limits, initial-scan/catch-up semantics and pending-profile UX.
+   The proposal does not establish a supported contract.
 2. After explicit contract review, activate the smallest foreground local runtime
    slice using the verified internal boundaries and controlled install fixtures.
 3. Add onboarding/diagnostics and explicit resource loading in separate increments.
