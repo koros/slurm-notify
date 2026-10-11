@@ -1,0 +1,120 @@
+{
+  "status": "draft-not-approved",
+  "purpose": "Review ranges only; not a JSON Schema or runtime validator.",
+  "integer_ranges": {
+    "monitor.poll_seconds": {
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "monitor.query_timeout_seconds": {
+      "minimum": 1,
+      "maximum": 300
+    },
+    "monitor.accounting_lookback_seconds": {
+      "minimum": 2,
+      "maximum": 604800
+    },
+    "monitor.accounting_overlap_seconds": {
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "monitor.command_output_limit_bytes": {
+      "minimum": 1024,
+      "maximum": 1048576
+    },
+    "monitor.retained_identity_limit": {
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "monitor.retained_event_limit": {
+      "minimum": 1,
+      "maximum": 200000
+    },
+    "monitor.stale_after_seconds": {
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "delivery.max_attempts": {
+      "minimum": 1,
+      "maximum": 20
+    },
+    "delivery.initial_backoff_seconds": {
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "delivery.max_backoff_seconds": {
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "delivery.jitter_seconds": {
+      "minimum": 0,
+      "maximum": 3600
+    },
+    "delivery.batch_limit": {
+      "minimum": 1,
+      "maximum": 256
+    },
+    "delivery.prepared_smtp_message_limit": {
+      "minimum": 1,
+      "maximum": 256
+    },
+    "maintenance.completed_delivery_retention_seconds": {
+      "minimum": 1,
+      "maximum": 31536000
+    },
+    "maintenance.cleanup_batch_limit": {
+      "minimum": 1,
+      "maximum": 256
+    },
+    "maintenance.health_sample_limit": {
+      "minimum": 1,
+      "maximum": 256
+    },
+    "maintenance.smtp_revision_cleanup_limit": {
+      "minimum": 0,
+      "maximum": 256
+    }
+  },
+  "webhook_integer_ranges": {
+    "request_timeout_seconds": {
+      "minimum": 1,
+      "maximum": 30
+    },
+    "payload_limit_bytes": {
+      "minimum": 1024,
+      "maximum": 16384
+    }
+  },
+  "smtp_integer_ranges": {
+    "port": {
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "request_timeout_milliseconds": {
+      "minimum": 1,
+      "maximum": 30000
+    }
+  },
+  "structural_limits": {
+    "config_bytes": 65536,
+    "container_depth": 8,
+    "object_members": 128,
+    "array_elements": 128,
+    "providers": 64,
+    "routes": 128,
+    "route_events": 9,
+    "route_destinations": 64,
+    "smtp_permissions": 64
+  },
+  "cross_field_rules": [
+    "query_timeout_seconds < poll_seconds",
+    "accounting_overlap_seconds < accounting_lookback_seconds",
+    "stale_after_seconds >= poll_seconds",
+    "max_backoff_seconds >= initial_backoff_seconds",
+    "jitter_seconds <= max_backoff_seconds"
+  ],
+  "conditional_requirements": {
+    "delivery.prepared_smtp_message_limit": "Required when any SMTP provider exists.",
+    "delivery.smtp_permissions": "Required when any SMTP provider exists; empty denies all."
+  }
+}

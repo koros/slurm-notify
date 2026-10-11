@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Draft configuration resource ceilings, strict integer/cross-field rules, explicit maintenance fields and a machine-readable review manifest with updated synthetic examples; no runtime or approved schema changes.
+
 - Draft local CLI/config/event contract review package, SMTP configuration extension and synthetic mixed-provider example; no approved contracts or runtime activation.
 
 - Mixed-route cancellation and blocked-resolution restart acceptance, verifying preserved SMTP snapshots/bindings, untouched attempts, skipped helper/maintenance work and later recovery; refreshed prototype readiness assessment.

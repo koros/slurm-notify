@@ -11,7 +11,8 @@
     "initial_observation": "suppress",
     "command_output_limit_bytes": 1048576,
     "retained_identity_limit": 10000,
-    "retained_event_limit": 20000
+    "retained_event_limit": 20000,
+    "stale_after_seconds": 180
   },
   "storage": {
     "path": "/home/researcher/.local/state/slurm-notify/state.sqlite3"
@@ -77,6 +78,13 @@
         "rendering_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "provider_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       }
-    ]
+    ],
+    "prepared_smtp_message_limit": 128
+  },
+  "maintenance": {
+    "completed_delivery_retention_seconds": 604800,
+    "cleanup_batch_limit": 100,
+    "health_sample_limit": 100,
+    "smtp_revision_cleanup_limit": 0
   }
 }

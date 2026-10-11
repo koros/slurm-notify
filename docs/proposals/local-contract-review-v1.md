@@ -10,6 +10,7 @@ implementation must preserve this distinction until review is complete.
 - [Local webhook configuration](local-webhook-config-v1.md): JSON format, explicit values, local scope and pending-route handling.
 - [Local SMTP extension](local-smtp-config-v1.md): bound profiles, credentials, trust and exact pair permissions.
 - [Webhook event payload](webhook-payload-v1.md): minimal metadata, opaque identity, frozen bytes and version semantics.
+- [Configuration limits](local-config-limits-v1.md): proposed structural/resource bounds and boundary acceptance.
 - [Product readiness](../architecture/product-readiness.md): implemented evidence and remaining product gates.
 
 ## Recommended decisions, still unapproved
@@ -32,11 +33,11 @@ or release is authorized by approving these drafts.
 
 ## Limits that must be settled before a schema is frozen
 
-The existing config draft intentionally does not prescribe product-wide upper
-bounds. Review maximum config bytes/depth, provider/route counts, scheduler stream
-bytes, retained identity/event counts, history/poll durations, payload bytes, retry
-attempts/delays and maintenance batch sizes. Safe integer conversion/allocation
-and deadline arithmetic are mandatory regardless of chosen bounds.
+The [limits draft](local-config-limits-v1.md) now proposes concrete bounds and
+cross-field validation, with a machine-readable review manifest and updated
+synthetic examples. It adds explicit stale/preparation/maintenance fields to the
+configuration draft. These choices still need acceptance or edits before schema
+freeze; they are ceilings, not defaults or cluster policy recommendations.
 
 Current private SMTP evidence supports 64 permission entries, descriptors up to
 4096 bytes, at most 32 trust roots/65,536 DER bytes, DATA up to 16,384 bytes and

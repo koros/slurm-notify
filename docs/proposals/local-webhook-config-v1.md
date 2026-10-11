@@ -4,7 +4,9 @@ Status: draft for review, not accepted configuration. The executable cannot read
 this file, validate it, monitor jobs, or deliver notifications. Numeric example
 values are review examples, not operational defaults or cluster recommendations.
 
-See [synthetic explicit configuration](examples/local-webhook-config.json).
+See [synthetic explicit configuration](examples/local-webhook-config.json) and
+the [proposed limits](local-config-limits-v1.md), including explicit maintenance
+fields and integer cross-field rules. Neither is an approved schema.
 
 ## Format and first scope
 
@@ -35,6 +37,7 @@ the design handoff's first public MVP requirements.
 | monitor.accounting_lookback_seconds | Required positive integer; bounded history window, not a claim that delayed accounting is complete. |
 | monitor.accounting_overlap_seconds | Required positive integer below accounting_lookback_seconds; overlap prior windows to handle late records and downtime. |
 | monitor.initial_observation | Required `suppress` or `emit`; controls events discovered on first scan, including terminals. Must remain durable across restart. |
+| monitor.stale_after_seconds | Required positive integer at least poll_seconds; threshold for checkpoint-age diagnostics, not proof of process liveness. |
 | monitor.command_output_limit_bytes | Required positive integer per scheduler stdout/stderr stream. Reject oversized output atomically. |
 | monitor.retained_identity_limit / retained_event_limit | Required positive integers. Overflow fails visibly; do not prune deduplication records and silently permit replay. |
 | storage.path | Required absolute user-local path. Safe directory/file creation, symlink rejection, permissions, and locking must be implemented before use. Network filesystem semantics are not promised. |
@@ -49,14 +52,18 @@ the design handoff's first public MVP requirements.
 | delivery.initial_backoff_seconds / max_backoff_seconds | Required positive integers; maximum >= initial. The maximum caps exponential backoff only. |
 | delivery.jitter_seconds | Required non-negative integer <= max_backoff_seconds; additive spreading never shortens backoff or Retry-After. |
 | delivery.jitter_seed | Required non-negative integer represented as a decimal string fitting u64; avoids JSON numeric precision loss. No secrecy or cryptographic randomness claim. |
+| delivery.prepared_smtp_message_limit | Required when SMTP exists; bounds newly prepared event/SMTP pairs before allocation. |
+| maintenance.completed_delivery_retention_seconds | Required positive duration; completed delivery artifact retention only, not automatic ledger deletion. |
+| maintenance.cleanup_batch_limit / health_sample_limit | Required positive integers; bounded maintenance and health sampling. |
+| maintenance.smtp_revision_cleanup_limit | Required integer 0..256; 0 explicitly disables unreferenced rendering/provider descriptor pruning. |
 | delivery.batch_limit | Required positive integer limiting due records read per batch. One serialized owner; no leases/concurrent sending claim. |
 
 Webhook/base configuration durations are whole seconds; the SMTP extension
 uses an explicitly named millisecond timeout. Base byte limits are bytes, not
 Unicode character counts. Reject overflow in duration conversion, deadline
 construction, allocation budgets, and retry due-time arithmetic. Product upper
-bounds must be agreed with support/resource goals before activation; the example
-is not a limits schema. Initial-observation policy does not authorize an unbounded
+bounds in the linked limits draft must be reviewed against support/resource goals
+before activation; the example is not a limits schema. Initial-observation policy does not authorize an unbounded
 historical replay.
 
 ## Secrets, routing, and reload

@@ -2766,3 +2766,28 @@ Validation: shared checks pass unchanged with 275 Rust tests plus one ignored
 helper, custom process acceptance, eight SQLite tests and six hook tests. Draft
 JSON syntax, duplicate keys and provider/permission references were checked. No Rust
 changes; the last measured Rust line coverage remains 97.47% (15,163/15,557).
+
+### Draft resource limits and boundary acceptance
+
+Added concrete proposed parsing/count/byte/duration ceilings, cross-field checks,
+referenced-resource bounds and post-review boundary acceptance. Explicit stale,
+SMTP preparation and maintenance keys complete the operational draft; examples now
+include them. A machine-readable range manifest supports review only, not schema
+validation. Authorization remains within the private 4096-byte bound; SMTP limits
+retain current private ceilings. Retry-After remains an independent floor.
+
+All values remain proposed ceilings, not defaults or cluster recommendations.
+Protected retention/history and rollback under preparation pressure remain explicit;
+no total RSS/SQLite disk-size guarantee is invented. No production implementation,
+dependency, public surface or approved contract baseline changes.
+
+Next: explicit review of the complete contract package and limits, then approved
+schemas/snapshots and the smallest foreground runtime activation. Private fixtures
+and draft refinement may continue without public activation; AGENTS.md requires
+explicit review before introducing the proposed public CLI/config/event contracts.
+
+Validation: shared checks pass unchanged with 275 Rust tests plus one ignored
+helper, custom process acceptance, eight SQLite tests and six hook tests. Both
+configuration examples pass draft range, structural, cross-field and reference
+consistency checks; all proposal JSON parses without duplicate keys. No Rust changes;
+the last measured Rust line coverage remains 97.47% (15,163/15,557).
