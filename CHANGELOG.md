@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private mixed-route orchestration with explicit ordinary destinations, preserved bound SMTP permissions, durable-artifact downgrade rejection, partial-progress/reopen tests and mixed owned TLS retry/lost-result acceptance.
+
 - Private SMTP-only orchestration composing provider-aware atomic polling, pair permissions, local resource resolution and supervised bound submission, with cancellation, denial, retry and owned TLS restart/lost-result acceptance.
 
 - Private bounded, cluster-scoped cleanup of unreferenced SMTP provider revisions, with transactional rollback, pending-message protection and completed-retention/reopen tests.

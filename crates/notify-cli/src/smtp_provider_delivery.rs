@@ -144,34 +144,7 @@ where
         policy,
         delivery::CheckedHooks {
             authorize: |store: &Store, item: &DueDelivery| {
-                let rendering = store
-                    .bound_smtp_revision(&item.event_id, &item.destination)
-                    .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
-                    .ok_or(Diagnostic::SmtpRevisionMissing)?;
-                let provider = store
-                    .bound_smtp_provider(&item.event_id, &item.destination)
-                    .map_err(|_| Diagnostic::SmtpProviderInvalid)?
-                    .ok_or(Diagnostic::SmtpProviderMissing)?;
-                if !hooks.permissions.permits(
-                    cluster,
-                    &item.destination,
-                    rendering.token(),
-                    provider.token(),
-                ) {
-                    return Err(Diagnostic::SmtpProviderDenied);
-                }
-                let resolved =
-                    (hooks.resolve)(&provider).map_err(Diagnostic::SmtpProviderResolution)?;
-                if resolved.provider().token() != provider.token()
-                    || resolved.provider().canonical() != provider.canonical()
-                {
-                    return Err(Diagnostic::SmtpProviderResolution(Error::Profile));
-                }
-                let frozen = store
-                    .frozen_smtp(&item.event_id, &item.destination)
-                    .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
-                    .ok_or(Diagnostic::SmtpRevisionMissing)?;
-                Ok((rendering, frozen, resolved))
+                authorize(store, item, cluster, hooks.permissions, &mut hooks.resolve)
             },
             send: |item: &DueDelivery,
                    (rendering, frozen, resolved): (
@@ -181,6 +154,104 @@ where
             )| (hooks.send)(item, &rendering, &frozen, resolved),
             clock: hooks.clock,
             cancelled: hooks.cancelled,
+        },
+    )
+}
+
+type Context = (smtp_revision::Descriptor, FrozenMessage, Resolved);
+fn authorize(
+    store: &Store,
+    item: &DueDelivery,
+    cluster: &str,
+    permissions: &Permissions<'_>,
+    resolve: &mut impl FnMut(&Descriptor) -> Result<Resolved, Error>,
+) -> Result<Context, Diagnostic> {
+    let rendering = store
+        .bound_smtp_revision(&item.event_id, &item.destination)
+        .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
+        .ok_or(Diagnostic::SmtpRevisionMissing)?;
+    let provider = store
+        .bound_smtp_provider(&item.event_id, &item.destination)
+        .map_err(|_| Diagnostic::SmtpProviderInvalid)?
+        .ok_or(Diagnostic::SmtpProviderMissing)?;
+    if !permissions.permits(
+        cluster,
+        &item.destination,
+        rendering.token(),
+        provider.token(),
+    ) {
+        return Err(Diagnostic::SmtpProviderDenied);
+    }
+    let resolved = (resolve)(&provider).map_err(Diagnostic::SmtpProviderResolution)?;
+    if resolved.provider().token() != provider.token()
+        || resolved.provider().canonical() != provider.canonical()
+    {
+        return Err(Diagnostic::SmtpProviderResolution(Error::Profile));
+    }
+    let frozen = store
+        .frozen_smtp(&item.event_id, &item.destination)
+        .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
+        .ok_or(Diagnostic::SmtpRevisionMissing)?;
+    Ok((rendering, frozen, resolved))
+}
+
+pub(super) struct MixedHooks<'a, R, S, O, C, X> {
+    pub(super) smtp: Hooks<'a, R, S, C, X>,
+    pub(super) ordinary_destinations: &'a [&'a str],
+    pub(super) ordinary_send: O,
+}
+pub(super) fn deliver_due_mixed<R, S, O, C, X>(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
+    mut mixed: MixedHooks<'_, R, S, O, C, X>,
+) -> Result<BatchReport, BatchFailure>
+where
+    R: FnMut(&Descriptor) -> Result<Resolved, Error>,
+    S: FnMut(
+        &DueDelivery,
+        &smtp_revision::Descriptor,
+        &FrozenMessage,
+        Resolved,
+    ) -> Result<ProviderOutcome, Diagnostic>,
+    O: FnMut(&DueDelivery) -> Result<ProviderOutcome, Diagnostic>,
+    C: FnMut() -> Option<i64>,
+    X: FnMut() -> bool,
+{
+    let hooks = &mut mixed.smtp;
+    delivery::deliver_due_checked(
+        store,
+        cluster,
+        now,
+        limit,
+        policy,
+        delivery::CheckedHooks {
+            authorize: |store: &Store, item: &DueDelivery| {
+                if mixed
+                    .ordinary_destinations
+                    .contains(&item.destination.as_str())
+                {
+                    if store
+                        .has_smtp_artifacts(&item.event_id, &item.destination)
+                        .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
+                    {
+                        return Err(Diagnostic::SmtpProviderDenied);
+                    }
+                    Ok(None)
+                } else {
+                    authorize(store, item, cluster, hooks.permissions, &mut hooks.resolve).map(Some)
+                }
+            },
+            send: |item: &DueDelivery, context: Option<Context>| match context {
+                Some((rendering, frozen, resolved)) => {
+                    (hooks.send)(item, &rendering, &frozen, resolved)
+                }
+                None => (mixed.ordinary_send)(item),
+            },
+            clock: &mut hooks.clock,
+            cancelled: &mut hooks.cancelled,
         },
     )
 }
@@ -299,6 +370,51 @@ mod tests {
                 .unwrap(),
         };
     }
+    #[test]
+    fn ordinary_route_cannot_downgrade_any_durable_smtp_evidence() {
+        for mode in 0..3 {
+            let directory = storage::tests::Directory::new();
+            let mut store = open(&directory);
+            let fixture = Fixture::new();
+            seed(&mut store, &fixture, mode);
+            let denied = Permissions::new(&[]).unwrap();
+            let result = deliver_due_mixed(
+                &mut store,
+                "cluster",
+                10,
+                10,
+                policy(),
+                MixedHooks {
+                    ordinary_destinations: &["smtp"],
+                    ordinary_send: |_: &DueDelivery| panic!("SMTP downgrade sent ordinary payload"),
+                    smtp: Hooks {
+                        permissions: &denied,
+                        resolve: |_: &Descriptor| -> Result<Resolved, Error> {
+                            panic!("downgrade resolved")
+                        },
+                        send: |_: &DueDelivery,
+                               _: &smtp_revision::Descriptor,
+                               _: &FrozenMessage,
+                               _: Resolved| {
+                            panic!("downgrade sent SMTP")
+                        },
+                        clock: || panic!("downgrade clock"),
+                        cancelled: || false,
+                    },
+                },
+            )
+            .unwrap_err();
+            assert_eq!(result.kind, delivery::FailureKind::DispatchBlocked);
+            assert_eq!(result.committed.delivered, 0);
+            drop(store);
+            let store = open(&directory);
+            assert_eq!(
+                store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+                1
+            );
+        }
+    }
+
     #[test]
     fn resolution_requires_actual_trust_and_auth_identity_but_allows_secret_rotation() {
         let fixture = Fixture::new();

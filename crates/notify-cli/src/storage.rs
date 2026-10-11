@@ -759,6 +759,15 @@ impl Store {
         Ok(removed)
     }
 
+    // Durable SMTP evidence cannot be downgraded to an ordinary callback.
+    pub(super) fn has_smtp_artifacts(
+        &self,
+        event_id: &str,
+        destination: &str,
+    ) -> Result<bool, StorageError> {
+        self.db.query_row("SELECT EXISTS(SELECT 1 FROM smtp_messages WHERE event_id=?1 AND destination=?2) OR EXISTS(SELECT 1 FROM smtp_revision_bindings WHERE event_id=?1 AND destination=?2) OR EXISTS(SELECT 1 FROM smtp_provider_bindings WHERE event_id=?1 AND destination=?2)", params![event_id, destination], |row| row.get(0)).map_err(StorageError::from)
+    }
+
     pub(super) fn frozen_smtp(
         &self,
         event_id: &str,

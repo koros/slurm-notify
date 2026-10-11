@@ -2675,3 +2675,39 @@ validation, installed monitoring and release gates remain outstanding.
 Validation: shared checks pass with 272 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage is 97.52% (14,676/15,049), above the unchanged 80% gate.
+
+### Private mixed-route dispatch
+
+Cycles::tick_mixed_bound_smtp validates an explicit partition of at most 64
+SMTP/ordinary destinations before clocks, storage or queries. Duplicate, overlapping,
+unknown or incomplete ordinary lists fail preflight. Ordinary names are bounded
+ASCII identifiers. Provider-aware polling atomically prepares SMTP snapshots and
+both descriptor bindings while ordinary destinations retain their existing outbox
+format. The SMTP-only tick delegates with an empty ordinary list.
+
+The mixed worker shares the existing pair authorization routine with SMTP-only
+delivery. Ordinary rows use only the explicit ordinary callback and do not resolve
+SMTP credentials. A bounded existence query checks all three durable SMTP artifact
+tables first: any message, rendering binding or provider binding rejects an ordinary
+send. This also protects legacy/render-only snapshots and malformed bound state
+without loading message contents. Unlisted rows go through the SMTP guard and cannot
+fall back after missing bindings, permission denial or resource-resolution failure.
+Authorization still precedes exhausted-budget retirement. Static blocks stop the
+batch and maintenance while reporting already committed progress.
+
+Tests cover invalid route partitions, cancellation after atomic preparation,
+ordinary success before a denied SMTP pair, retained partial progress after reopen,
+SMTP retry/recovery without ordinary replay, and downgrade rejection for legacy,
+render-only and provider-bound snapshots. Owned TLS acceptance now includes an
+ordinary destination alongside temporary/lost-result SMTP submission and reopened
+secret rotation, preserving exact DATA and the original endpoint. Ordinary transport
+remains caller-injected; its existing provider tests validate transport separately.
+No schema, dependency, public contract or runtime-default changes are introduced.
+
+Next: mixed-route mid-batch cancellation and blocked-resolution acceptance, then
+review the remaining prototype-to-product gaps. Public contracts, installed runtime,
+real-cluster validation and release gates remain separate outstanding work.
+
+Validation: shared checks pass with 274 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.45% (14,966/15,358), above the unchanged 80% gate.

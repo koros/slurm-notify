@@ -2511,7 +2511,7 @@ fn owned_bound_transport_restart() {
                 namespace: "fixture",
             },
         }];
-        let rendering = smtp_routes::Plan::new(&["smtp"], &routes, 1).unwrap();
+        let rendering = smtp_routes::Plan::new(&["smtp", "webhook"], &routes, 1).unwrap();
         let plan = smtp_routes::ProviderPlan::new(&rendering, &[provider.profile()]).unwrap();
         let request = scheduler::PollRequest {
             active_program: std::path::Path::new("squeue"),
@@ -2634,7 +2634,7 @@ fn owned_bound_transport_restart() {
             output_limit: 4096,
             emit_discovered: true,
             capacity: 10,
-            destinations: &["smtp"],
+            destinations: &["smtp", "webhook"],
             window: accounting_window::Policy {
                 lookback_seconds: 10,
                 overlap_seconds: 1,
@@ -2650,19 +2650,22 @@ fn owned_bound_transport_restart() {
         };
         let profiles = [provider.profile()];
         let mut cycles = polling_cycle::Cycles::new(1).unwrap();
-        let mut times = [10, 10, 12, 12, 12].into_iter();
-        let tick = cycles.tick_bound_smtp(
+        let mut times = [10, 10, 12, 12, 12, 12].into_iter();
+        let tick = cycles.tick_mixed_bound_smtp(
             &cycle_settings,
             &maintenance,
             &mut store,
-            polling_cycle::BoundSmtp {
-                rendering: polling_cycle::Rendering {
-                    routes: &routes,
-                    max_messages: 1,
+            polling_cycle::MixedBoundSmtp {
+                ordinary_destinations: &["webhook"],
+                smtp: polling_cycle::BoundSmtp {
+                    rendering: polling_cycle::Rendering {
+                        routes: &routes,
+                        max_messages: 1,
+                    },
+                    profiles: &profiles,
+                    permissions: &permissions,
+                    timeout: Duration::from_secs(3),
                 },
-                profiles: &profiles,
-                permissions: &permissions,
-                timeout: Duration::from_secs(3),
             },
             polling_cycle::Hooks {
                 query,
@@ -2679,6 +2682,10 @@ fn owned_bound_transport_restart() {
                         });
                         command
                     },
+                    |item: &storage::DueDelivery| {
+                        assert_eq!(item.destination, "webhook");
+                        Ok(delivery::ProviderOutcome::Delivered)
+                    },
                 ),
                 clock: || times.next(),
                 cancelled: || false,
@@ -2690,6 +2697,7 @@ fn owned_bound_transport_restart() {
         ));
         let report = tick.delivery.unwrap().unwrap();
         assert_eq!(report.retrying, 1);
+        assert_eq!(report.delivered, 1);
         drop(store);
         let mut store =
             storage::Store::open_private(&root_path, Duration::from_millis(50)).unwrap();
@@ -2746,18 +2754,21 @@ fn owned_bound_transport_restart() {
         assert!(decoy.accept().is_err());
         let mut cycles = polling_cycle::Cycles::new(1).unwrap();
         let mut times = [17, 17, 18, 18, 18].into_iter();
-        let tick = cycles.tick_bound_smtp(
+        let tick = cycles.tick_mixed_bound_smtp(
             &cycle_settings,
             &maintenance,
             &mut store,
-            polling_cycle::BoundSmtp {
-                rendering: polling_cycle::Rendering {
-                    routes: &routes,
-                    max_messages: 1,
+            polling_cycle::MixedBoundSmtp {
+                ordinary_destinations: &["webhook"],
+                smtp: polling_cycle::BoundSmtp {
+                    rendering: polling_cycle::Rendering {
+                        routes: &routes,
+                        max_messages: 1,
+                    },
+                    profiles: &profiles,
+                    permissions: &permissions,
+                    timeout: Duration::from_secs(3),
                 },
-                profiles: &profiles,
-                permissions: &permissions,
-                timeout: Duration::from_secs(3),
             },
             polling_cycle::Hooks {
                 query,
@@ -2770,6 +2781,10 @@ fn owned_bound_transport_restart() {
                         let mut command = Command::new(std::env::current_exe().unwrap());
                         command.arg("--smtp-bound-fixture");
                         command
+                    },
+                    |item: &storage::DueDelivery| {
+                        assert_eq!(item.destination, "webhook");
+                        Ok(delivery::ProviderOutcome::Delivered)
                     },
                 ),
                 clock: || times.next(),
@@ -2795,7 +2810,7 @@ fn owned_bound_transport_restart() {
             db.query_row("SELECT count(*) FROM delivery_attempts", [], |row| row
                 .get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
         assert_eq!(
             db.query_row("SELECT count(*) FROM smtp_provider_revisions", [], |row| {

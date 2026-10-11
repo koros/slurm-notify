@@ -154,6 +154,11 @@ pub(super) struct BoundSmtp<'a> {
     pub(super) timeout: Duration,
 }
 
+pub(super) struct MixedBoundSmtp<'a> {
+    pub(super) smtp: BoundSmtp<'a>,
+    pub(super) ordinary_destinations: &'a [&'a str],
+}
+
 fn prepared_error(error: super::smtp_poll::Error) -> Error {
     match error {
         super::smtp_poll::Error::InvalidInput => Error::Poll(DurablePollError::Poll(
@@ -413,6 +418,58 @@ impl Cycles {
         C: FnMut() -> Option<i64>,
         X: FnMut() -> bool,
     {
+        self.tick_mixed_bound_smtp(
+            settings,
+            maintenance,
+            store,
+            MixedBoundSmtp {
+                smtp: bound,
+                ordinary_destinations: &[],
+            },
+            Hooks {
+                query: hooks.query,
+                send: (
+                    hooks.send.0,
+                    hooks.send.1,
+                    |_: &super::storage::DueDelivery| {
+                        Err(super::supervised_provider::Diagnostic::SmtpProviderDenied)
+                    },
+                ),
+                clock: hooks.clock,
+                cancelled: hooks.cancelled,
+            },
+        )
+    }
+
+    // Explicit mixed routing; durable SMTP artifacts prohibit ordinary dispatch.
+    pub(super) fn tick_mixed_bound_smtp<Q, R, H, O, C, X>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        mixed: MixedBoundSmtp<'_>,
+        hooks: Hooks<Q, (R, H, O), C, X>,
+    ) -> TickReport
+    where
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        R: FnMut(
+            &super::smtp_provider_revision::Descriptor,
+        ) -> Result<
+            super::smtp_provider_delivery::Resolved,
+            super::smtp_provider_delivery::Error,
+        >,
+        H: FnMut(&super::storage::DueDelivery) -> Command,
+        O: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let bound = mixed.smtp;
+        let ordinary = mixed.ordinary_destinations;
         let Hooks {
             mut query,
             send,
@@ -430,7 +487,29 @@ impl Cycles {
                 cancelled,
             },
             || {
-                if bound.rendering.routes.len() != settings.destinations.len()
+                if settings.destinations.len() > 64
+                    || bound.rendering.routes.len() > 64
+                    || ordinary.len() > 64
+                    || bound.rendering.routes.len().checked_add(ordinary.len())
+                        != Some(settings.destinations.len())
+                    || ordinary.iter().any(|name| {
+                        name.is_empty()
+                            || name.len() > 64
+                            || !name
+                                .bytes()
+                                .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+                            || !settings.destinations.contains(name)
+                            || bound
+                                .rendering
+                                .routes
+                                .iter()
+                                .any(|route| route.name == *name)
+                    })
+                    || ordinary
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != ordinary.len()
                     || bound.timeout.is_zero()
                     || bound.timeout > Duration::from_secs(30)
                     || bound.timeout != Duration::from_millis(bound.timeout.as_millis() as u64)
@@ -455,29 +534,33 @@ impl Cycles {
                         .map_err(prepared_error)
                 })
             },
-            |store, now, (resolve, helper), clock, cancelled| {
-                super::smtp_provider_delivery::deliver_due(
+            |store, now, (resolve, helper, ordinary_send), clock, cancelled| {
+                super::smtp_provider_delivery::deliver_due_mixed(
                     store,
                     settings.cluster,
                     now,
                     maintenance.delivery_limit,
                     maintenance.retry,
-                    super::smtp_provider_delivery::Hooks {
-                        permissions: bound.permissions,
-                        resolve,
-                        send: |item: &super::storage::DueDelivery,
-                               _: &super::smtp_revision::Descriptor,
-                               message: &super::storage::FrozenMessage,
-                               resolved| {
-                            super::smtp_bound_transport::dispatch(
-                                &mut helper(item),
-                                resolved,
-                                message,
-                                bound.timeout,
-                            )
+                    super::smtp_provider_delivery::MixedHooks {
+                        ordinary_destinations: ordinary,
+                        ordinary_send,
+                        smtp: super::smtp_provider_delivery::Hooks {
+                            permissions: bound.permissions,
+                            resolve,
+                            send: |item: &super::storage::DueDelivery,
+                                   _: &super::smtp_revision::Descriptor,
+                                   message: &super::storage::FrozenMessage,
+                                   resolved| {
+                                super::smtp_bound_transport::dispatch(
+                                    &mut helper(item),
+                                    resolved,
+                                    message,
+                                    bound.timeout,
+                                )
+                            },
+                            clock,
+                            cancelled,
                         },
-                        clock,
-                        cancelled,
                     },
                 )
             },
@@ -1058,6 +1141,179 @@ mod tests {
                     Some(Err(StageError::DispatchBlocked))
                 ));
                 assert!(report.cleanup.is_none());
+            } else if now == 7200 {
+                assert_eq!(report.delivery.unwrap().unwrap().retrying, 1);
+            } else {
+                assert_eq!(report.delivery.unwrap().unwrap().delivered, 1);
+            }
+            drop(store);
+            store = open(&directory);
+            assert_eq!(
+                store
+                    .frozen_smtp(&item.event_id, "primary")
+                    .unwrap()
+                    .unwrap()
+                    .data(),
+                frozen.data()
+            );
+        }
+        assert!(store
+            .due_deliveries("cluster", 7300, 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn mixed_tick_keeps_ordinary_progress_and_bound_retry_across_restart() {
+        use crate::{
+            smtp_provider_delivery::{Permission, Permissions, Resolved},
+            smtp_provider_revision::{self, Profile, TlsMode},
+        };
+        let mut mixed_settings = settings();
+        mixed_settings.destinations = &["primary", "aaa"];
+        let ordinary_calls = std::cell::Cell::new(0);
+        let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
+            .unwrap()
+            .serialize_der()
+            .unwrap();
+        let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
+        let profile = Profile {
+            destination: "primary",
+            relay: "127.0.0.1",
+            port: 587,
+            tls: TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: &trust,
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        };
+        let profiles = [profile];
+        let routes = [render_route(crate::smtp_render::JobVisibility::Hidden)];
+        let denied = Permissions::new(&[]).unwrap();
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let mut cycles = Cycles::new(1).unwrap();
+        for ordinary in [
+            &["primary"][..],
+            &["aaa", "aaa"][..],
+            &["missing"][..],
+            &[][..],
+        ] {
+            let report = cycles.tick_mixed_bound_smtp(&mixed_settings, &maintenance(), &mut store,
+                MixedBoundSmtp { ordinary_destinations: ordinary, smtp: BoundSmtp { rendering: Rendering { routes: &routes, max_messages: 1 }, profiles: &profiles, permissions: &denied, timeout: Duration::from_secs(1) } },
+                Hooks { query: |_: &mut Command, _, _| panic!("invalid mixed query"),
+                    send: (|_: &crate::smtp_provider_revision::Descriptor| -> Result<Resolved, crate::smtp_provider_delivery::Error> { panic!("invalid mixed resolve") },
+                        |_: &crate::storage::DueDelivery| -> Command { panic!("invalid mixed spawn") },
+                        |_: &crate::storage::DueDelivery| panic!("invalid mixed ordinary")),
+                    clock: || panic!("invalid mixed clock"), cancelled: || false });
+            assert_eq!(report.preflight, Some(Err(StageError::Policy)));
+        }
+        let mut samples = 0;
+        let report = cycles.tick_mixed_bound_smtp(&mixed_settings, &maintenance(), &mut store,
+            MixedBoundSmtp { ordinary_destinations: &["aaa"], smtp: BoundSmtp { rendering: Rendering { routes: &routes, max_messages: 1 }, profiles: &profiles, permissions: &denied, timeout: Duration::from_secs(1) } },
+            Hooks { query: smtp_query,
+                send: (|_: &crate::smtp_provider_revision::Descriptor| -> Result<Resolved, crate::smtp_provider_delivery::Error> { panic!("cancelled resolution") },
+                    |_: &crate::storage::DueDelivery| -> Command { panic!("cancelled spawn") }, |_: &crate::storage::DueDelivery| panic!("cancelled ordinary")),
+                clock: || Some(7200), cancelled: || { samples += 1; samples > 1 } });
+        assert!(report.cancelled);
+        assert!(matches!(
+            report.poll,
+            Some(Ok(Outcome::Committed { events: 1, .. }))
+        ));
+        drop(store);
+        let mut store = open(&directory);
+        let item = store
+            .due_deliveries("cluster", 7200, 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.destination == "primary")
+            .unwrap();
+        let frozen = store
+            .frozen_smtp(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let rendering = store
+            .bound_smtp_revision(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let provider = store
+            .bound_smtp_provider(&item.event_id, "primary")
+            .unwrap()
+            .unwrap();
+        let entries = [Permission {
+            cluster: "cluster",
+            destination: "primary",
+            rendering: rendering.token(),
+            provider: provider.token(),
+        }];
+        let allowed = Permissions::new(&entries).unwrap();
+        for (permissions, now, reply) in [
+            (&denied, 7200, ""),
+            (&allowed, 7200, "SMTP_SUBMIT FINAL TEMP NA"),
+            (&allowed, 7205, "SMTP_SUBMIT FINAL ACCEPTED RA"),
+        ] {
+            let mut cycles = Cycles::new(1).unwrap();
+            cycles.remaining = 0;
+            let report = cycles.tick_mixed_bound_smtp(
+                &mixed_settings,
+                &maintenance(),
+                &mut store,
+                MixedBoundSmtp {
+                    ordinary_destinations: &["aaa"],
+                    smtp: BoundSmtp {
+                        rendering: Rendering {
+                            routes: &routes,
+                            max_messages: 1,
+                        },
+                        profiles: &profiles,
+                        permissions,
+                        timeout: Duration::from_secs(1),
+                    },
+                },
+                Hooks {
+                    query: |_: &mut Command, _, _| panic!("exhausted query"),
+                    send: (
+                        |bound: &crate::smtp_provider_revision::Descriptor| {
+                            Resolved::new(
+                                bound,
+                                &profiles[0],
+                                &[&root],
+                                "fixture-user",
+                                "fixture-secret",
+                            )
+                        },
+                        |due: &crate::storage::DueDelivery| {
+                            assert_eq!(due.event_id, item.event_id);
+                            assert!(!reply.is_empty());
+                            let mut command = Command::new("/bin/sh");
+                            command.args([
+                                "-c",
+                                "cat >/dev/null; printf '%s\n' \"$1\"",
+                                "fixture",
+                                reply,
+                            ]);
+                            command
+                        },
+                        |due: &crate::storage::DueDelivery| {
+                            assert_eq!(due.destination, "aaa");
+                            ordinary_calls.set(ordinary_calls.get() + 1);
+                            Ok(crate::delivery::ProviderOutcome::Delivered)
+                        },
+                    ),
+                    clock: || Some(now),
+                    cancelled: || false,
+                },
+            );
+            assert!(matches!(report.poll, Some(Ok(Outcome::Exhausted))));
+            if reply.is_empty() {
+                assert!(matches!(
+                    report.delivery,
+                    Some(Err(StageError::DispatchBlocked))
+                ));
+                assert!(report.cleanup.is_none());
+                assert_eq!(report.delivery_failure.unwrap().committed.delivered, 1);
             } else if now == 7200 {
                 assert_eq!(report.delivery.unwrap().unwrap().retrying, 1);
             } else {
