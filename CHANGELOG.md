@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private owned SMTP DER trust-set loading through protected file descriptors, enforcing 32 roots and a shared 64 KiB read budget, validating content fingerprints and rejecting duplicates; three rotation/failure/budget tests, no installed loader.
+
 - Three private configuration mutation acceptance tests for atomic file replacement, symlink substitution, same-size rewrites and permission changes; reopen behavior and static failures are verified without activating a loader.
 
 - Private Unix configuration byte snapshots with descriptor-relative no-follow reads, owned 0700/0600 permissions, zeroizing bounded buffers, mutation checks and five filesystem/edge tests; no installed loader or public contracts.

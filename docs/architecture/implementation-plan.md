@@ -2861,3 +2861,23 @@ subject to the writer/race limits in ADR 0016.
 Validation: shared checks pass with 283 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.48% (15,452/15,851), above the 80% gate.
+
+### Private owned trust resource loading
+
+Added test-only trust_snapshot to load caller-selected DER files through protected
+configuration-reader descriptors, with count/path preflight and a shared 65,536-byte
+budget. Each read receives the remaining budget plus one sentinel for overflow;
+owned roots and their existing SMTP content fingerprint publish only after all
+reads and DER validation succeed. Duplicate paths/content and malformed or oversized
+sets fail with static diagnostics. No ambient trust, dependencies or runtime defaults.
+
+Three tests cover valid owned/reordered reopen, rotation/removal, duplicate/malformed
+DER and count/path/aggregate ceilings. The reader's existing tests also exercise its
+reduced and invalid limits. ADR 0017 records sequential-loading and filesystem limits.
+
+Next: private credential/resource resolution preparation. Installed configuration
+mapping and activation remain gated by explicit public contract review.
+
+Validation: shared checks pass with 286 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.52% (15,589/15,986), above the 80% gate.

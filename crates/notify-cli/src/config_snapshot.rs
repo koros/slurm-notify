@@ -23,11 +23,17 @@ impl Snapshot {
         &self.0
     }
 }
-fn bounded(mut input: impl Read) -> Result<Snapshot, Error> {
+fn bounded(input: impl Read) -> Result<Snapshot, Error> {
+    bounded_limit(input, MAX_BYTES)
+}
+fn bounded_limit(mut input: impl Read, limit: usize) -> Result<Snapshot, Error> {
+    if limit == 0 || limit > MAX_BYTES {
+        return Err(Error::Limit);
+    }
     let mut bytes = Zeroizing::new(Vec::new());
     let mut block = Zeroizing::new([0; 4096]);
     loop {
-        let remaining = (MAX_BYTES + 1 - bytes.len()).min(block.len());
+        let remaining = (limit + 1 - bytes.len()).min(block.len());
         let size = match input.read(&mut block[..remaining]) {
             Ok(size) => size,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -41,7 +47,7 @@ fn bounded(mut input: impl Read) -> Result<Snapshot, Error> {
             };
         }
         bytes.extend_from_slice(&block[..size]);
-        if bytes.len() > MAX_BYTES {
+        if bytes.len() > limit {
             return Err(Error::Limit);
         }
     }
@@ -163,6 +169,20 @@ mod unix {
 pub(super) fn read(path: &std::path::Path) -> Result<Snapshot, Error> {
     unix::read(path)
 }
+pub(super) fn read_limit(path: &std::path::Path, limit: usize) -> Result<Snapshot, Error> {
+    if limit == 0 || limit > MAX_BYTES {
+        return Err(Error::Limit);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        unix::read_with(path, |file| bounded_limit(file, limit))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = path;
+        Err(Error::UnsupportedPlatform)
+    }
+}
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub(super) fn read(_: &std::path::Path) -> Result<Snapshot, Error> {
     Err(Error::UnsupportedPlatform)
@@ -193,6 +213,14 @@ mod tests {
         let mut source = Source { count: 0 };
         assert!(matches!(bounded(&mut source), Err(Error::Limit)));
         assert_eq!(source.count, MAX_BYTES + 1);
+        source.count = 0;
+        assert!(matches!(bounded_limit(&mut source, 7), Err(Error::Limit)));
+        assert_eq!(source.count, 8);
+        assert!(matches!(bounded_limit(&b"x"[..], 0), Err(Error::Limit)));
+        assert!(matches!(
+            bounded_limit(&b"x"[..], MAX_BYTES + 1),
+            Err(Error::Limit)
+        ));
     }
     #[test]
     fn io_failure_and_interruption_have_static_categories() {
@@ -365,6 +393,12 @@ mod tests {
         #[test]
         fn size_and_metadata_changes_fail_without_publishing_partial_snapshot() {
             let (_directory, path) = fixture();
+            assert!(matches!(read_limit(&path, 0), Err(Error::Limit)));
+            assert!(matches!(
+                read_limit(&path, MAX_BYTES + 1),
+                Err(Error::Limit)
+            ));
+            assert!(matches!(read_limit(&path, 7), Err(Error::Limit)));
             assert!(matches!(
                 unix::read_with(&path, |file| {
                     let snapshot = bounded(file)?;
