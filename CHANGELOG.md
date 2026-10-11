@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Owned TLS retry/lost-child-result acceptance through validated rendering ticks, checking selected Message-ID/Date headers, original snapshots despite changed route policy, completion-based retries and exact durable attempt history.
+
 - Private per-event SMTP Message-ID selection using bounded, length-prefixed SHA-256 event/route/namespace fields and observed-time frozen Dates; shared namespaces, cancellation context, actual-header uniqueness and reopen replay tests. Reuse locked ring 0.17.14 as a direct dev dependency without package version changes.
 
 - Private orchestration using validated SMTP rendering plans after cancellation and before clocks/storage, retaining poll budgets, frozen-message maintenance after rendering failure and owned TLS blocked-dispatch restart recovery.

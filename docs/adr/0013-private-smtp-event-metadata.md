@@ -52,3 +52,29 @@ No schema, public interfaces or executable defaults change. Next: owned TLS retr
 and lost-child-result acceptance using selected per-event metadata end to end.
 Production Message-ID domain, durable route revisions, credential integration,
 public review, privacy defaults and real-cluster/relay activation remain pending.
+
+### Selected metadata through owned SMTP retry/restart
+
+The owned frozen submission fixture now begins with a validated rendering tick
+and selected per-event identity/observed Date for both temporary final refusal and
+relay acceptance with a lost child result. Initial preparation occurs at 10,
+completion at 20 and retry becomes due at 25. Reopening preserves exact DATA and
+envelope; assertions check the selected hexadecimal Message-ID and Date at 10.
+
+Recovery deliberately supplies a changed namespace, sender, recipient and job-ID
+disclosure policy. A freshly prepared candidate would differ, and replacing the
+existing snapshot fails. Duplicate reconciliation emits zero new events. The
+retry loads and sends the original snapshot through the verified loopback TLS
+child, completes at 30 and leaves no pending delivery. Final SQL attempt history
+is exactly transient_failure at 20 then success at 30. Server-side fixtures compare
+full DATA/envelope to the snapshot, including for the lost-result path; relay
+acceptance still permits at-least-once resend when the parent loses the result.
+
+Existing missing/corrupt-snapshot local rejection coverage is retained. This
+increment changes acceptance fixtures only; no schema, dependencies, public
+contracts or executable defaults change.
+
+Next: private durable route-revision binding design, preserving prepared snapshots
+and defining how changed routing applies to newly discovered events. Production
+Message-ID domains, credentials, privacy defaults, public review, licensing and
+real-cluster/relay activation remain pending.

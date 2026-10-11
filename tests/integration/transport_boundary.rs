@@ -2041,15 +2041,15 @@ fn owned_frozen_submission_restart() {
         let root = state_directory(&directory);
         let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
 
-        let message = smtp_message::prepare(
-            "frozen@fixture.invalid",
-            "kept@fixture.invalid",
-            "stored_42",
-            "original",
-            "original\n.\n.frozen",
-            123,
-        )
-        .unwrap();
+        let routes = [smtp_routes::Route {
+            name: "smtp",
+            visibility: smtp_render::JobVisibility::Hidden,
+            metadata: smtp_routes::Metadata {
+                sender: "frozen@fixture.invalid",
+                recipient: "kept@fixture.invalid",
+                namespace: "original",
+            },
+        }];
         let settings = polling_cycle::Settings {
             active_program: std::path::Path::new("squeue"),
             accounting_program: std::path::Path::new("sacct"),
@@ -2065,16 +2065,17 @@ fn owned_frozen_submission_restart() {
                 overlap_seconds: 300,
             },
         };
-        let mut frozen_message = Some(message);
         let mut cycles = polling_cycle::Cycles::new(1).unwrap();
         let mut clocks = [10, 10, 20, 20, 20].into_iter();
-        let first = cycles.tick_prepared_fallible(
+        let first = cycles.tick_rendered_fallible(
             &settings,
             &orchestration_maintenance(),
             &mut store,
-            polling_cycle::PreparedHooks {
-                smtp_destinations: &["smtp"],
+            polling_cycle::Rendering {
+                routes: &routes,
                 max_messages: 1,
+            },
+            polling_cycle::Hooks {
                 query: |command: &mut Command, _, _| {
                     Ok(if command.get_program() == "squeue" {
                         ""
@@ -2083,10 +2084,6 @@ fn owned_frozen_submission_restart() {
                     }
                     .into())
                 },
-                prepare: |_: &lifecycle::Event, _: &str| Ok(frozen_message.take().unwrap()),
-            },
-            polling_cycle::Hooks {
-                query: (),
                 send: |item: &storage::DueDelivery| frozen_dispatch(&root, item, first_mode),
                 clock: || clocks.next(),
                 cancelled: || false,
@@ -2109,28 +2106,48 @@ fn owned_frozen_submission_restart() {
         let reloaded = smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap();
         assert!(reloaded.data() == snapshot.data());
         assert!(reloaded.envelope() == snapshot.envelope());
-        let changed = smtp_message::prepare(
-            "changed@fixture.invalid",
-            "kept@fixture.invalid",
-            "stored_42",
-            "changed",
-            "changed",
-            456,
-        )
-        .unwrap();
+        let selected = smtp_metadata::select(&item.event, "smtp", "original", 10).unwrap();
+        let text = std::str::from_utf8(reloaded.data()).unwrap();
+        assert!(text.contains(&format!(
+            "Message-ID: <{}@fixture.invalid>\r\n",
+            selected.identity
+        )));
+        assert!(text.contains("Date: Thu, 01 Jan 1970 00:00:10 +0000\r\n"));
+        assert!(reloaded.envelope() == ("frozen@fixture.invalid", "kept@fixture.invalid"));
+        let changed_routes = [smtp_routes::Route {
+            name: "smtp",
+            visibility: smtp_render::JobVisibility::Identifier,
+            metadata: smtp_routes::Metadata {
+                sender: "changed@fixture.invalid",
+                recipient: "changed@fixture.invalid",
+                namespace: "changed",
+            },
+        }];
+        let changed_plan =
+            smtp_routes::Plan::new(settings.destinations, &changed_routes, 1).unwrap();
+        let changed = changed_plan.prepare(&item.event, "smtp", 25).unwrap();
+        assert!(changed.data() != snapshot.data());
+        assert_ne!(
+            smtp_metadata::select(&item.event, "smtp", "changed", 25)
+                .unwrap()
+                .identity,
+            selected.identity
+        );
         assert!(store
             .freeze_smtp(&item.event_id, &item.destination, &changed)
             .is_err());
         let identity = item.event_id.clone();
         let mut clocks = [25, 25, 30, 30, 30].into_iter();
         let mut restarted = polling_cycle::Cycles::new(1).unwrap();
-        let second = restarted.tick_prepared_fallible(
+        let second = restarted.tick_rendered_fallible(
             &settings,
             &orchestration_maintenance(),
             &mut store,
-            polling_cycle::PreparedHooks {
-                smtp_destinations: &["smtp"],
+            polling_cycle::Rendering {
+                routes: &changed_routes,
                 max_messages: 1,
+            },
+            polling_cycle::Hooks {
                 query: |command: &mut Command, _, _| {
                     Ok(if command.get_program() == "squeue" {
                         ""
@@ -2139,12 +2156,19 @@ fn owned_frozen_submission_restart() {
                     }
                     .into())
                 },
-                prepare: |_: &lifecycle::Event, _: &str| panic!("restart replay must not render"),
-            },
-            polling_cycle::Hooks {
-                query: (),
                 send: |item: &storage::DueDelivery| {
                     assert_eq!(item.event_id, identity);
+                    assert_eq!(item.attempt_number, 2);
+                    let reader = storage::Store::open(
+                        &root.join("state.sqlite3"),
+                        Duration::from_millis(50),
+                    )
+                    .unwrap();
+                    let kept = smtp_frozen_frame::load(&reader, &item.event_id, &item.destination)
+                        .unwrap();
+                    assert!(kept.data() == snapshot.data());
+                    assert!(kept.envelope() == snapshot.envelope());
+                    drop(reader);
                     frozen_dispatch(&root, item, 0)
                 },
                 clock: || clocks.next(),
@@ -2160,6 +2184,19 @@ fn owned_frozen_submission_restart() {
         assert!(second.health.unwrap().is_ok());
         assert!(clocks.next().is_none());
         assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+        drop(store);
+        let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+        let attempts: Vec<(i64, String)> = db
+            .prepare("SELECT attempted_at,outcome FROM delivery_attempts ORDER BY attempt_number")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            attempts,
+            vec![(20, "transient_failure".into()), (30, "success".into())]
+        );
     }
     // Use a fresh pending event to verify local rejection without a network call.
     let other = storage::tests::Directory::new();
