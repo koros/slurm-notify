@@ -83,17 +83,17 @@ impl<'a> Plan<'a> {
         })
     }
 
+    pub(super) fn route(&self, name: &str) -> Option<&Route<'a>> {
+        self.routes.iter().find(|route| route.name == name)
+    }
+
     pub(super) fn prepare(
         &self,
         event: &Event,
         name: &str,
         observed_at: i64,
     ) -> Result<Prepared, Error> {
-        let route = self
-            .routes
-            .iter()
-            .find(|route| route.name == name)
-            .ok_or(Error::Route)?;
+        let route = self.route(name).ok_or(Error::Route)?;
         let selected = smtp_metadata::select(event, name, route.metadata.namespace, observed_at)
             .map_err(Error::Selection)?;
         smtp_render::prepare(

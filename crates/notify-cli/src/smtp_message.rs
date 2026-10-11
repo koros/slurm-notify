@@ -6,6 +6,8 @@ use lettre::{
 use std::time::{Duration, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
+pub(super) const ID_DOMAIN: &str = "fixture.invalid";
+
 const BODY_LIMIT: usize = 4096;
 const MESSAGE_LIMIT: usize = 16384;
 const WIRE_LIMIT: usize = 16384;
@@ -112,7 +114,7 @@ pub(super) fn prepare(
         .from(Mailbox::new(None, sender.clone()))
         .to(Mailbox::new(None, recipient.clone()))
         .date(UNIX_EPOCH + Duration::from_secs(timestamp))
-        .message_id(Some(format!("<{identity}@fixture.invalid>")))
+        .message_id(Some(format!("<{identity}@{ID_DOMAIN}>")))
         .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_owned())

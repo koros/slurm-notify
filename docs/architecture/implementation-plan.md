@@ -2324,3 +2324,38 @@ This milestone changes documentation only. Schema stays 2; dependencies,
 executable behavior and the 80% coverage gate are unchanged. Production domains,
 credentials, privacy defaults, licensing, public review and real-cluster/relay
 activation remain pending.
+
+### Pure rendering descriptor implementation
+
+The first private increment is implemented in smtp_revision. Descriptor::from_plan
+accepts only an immutable validated Plan and an SMTP route lookup. It records
+ordered destination, sender, recipient, namespace, disclosure, renderer version,
+identity-selection version and Message-ID domain fields. Encoding begins with the
+private version marker, then unsigned big-endian u16 tag lengths and u32 value
+lengths followed by UTF-8 bytes. The complete 4,096-byte bound is checked before
+allocation, copying or hashing. Canonical bytes use a zeroizing buffer; the
+container omits Debug/Clone and exposes only borrowed bytes/token. Errors contain
+static Route/Limit categories.
+
+Existing renderer/identity versions are explicit private constants. The message
+builder's fixture domain is centralized without changing generated messages.
+Fingerprints use the already locked ring SHA-256 implementation; dependencies
+remain unchanged. Tokens are exactly 64 lowercase hexadecimal bytes.
+
+Five tests verify independent golden encoding/digest, changes to all route policy
+fields and encoded version/domain inputs, equivalent route ordering and operational
+limits, unknown/plain-route rejection, maximum validated address/name/namespace
+inputs, invalid policy rejection and exact/over-limit encoding boundaries. Typed
+lengths distinguish ambiguous tag/value concatenations. Descriptors exclude event
+identity, observation time, credentials and operational limits.
+
+Schema stays 2. No revision records, outbox bindings, versioned revision-aware
+Message-IDs, provider selection, public contracts or runtime defaults are activated.
+Next: additive private migration and immutable descriptor/binding storage, with
+bounded canonical validation, legacy preservation, conflicts and rollback tests.
+Atomic poll integration and durable provider profiles remain later increments.
+
+Validation: shared checks pass with 228 Rust tests plus one ignored helper,
+custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
+coverage is 97.38% (10,836/11,127), above the unchanged 80% gate. No real-cluster
+or real-relay tests were run.

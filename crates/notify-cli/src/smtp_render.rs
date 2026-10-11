@@ -4,6 +4,8 @@ use super::{
     smtp_message::{self, Prepared},
 };
 
+pub(super) const VERSION: &str = "allowlist-v1";
+
 // Every caller must choose disclosure explicitly. Cluster and attempt contexts
 // are always omitted; no arbitrary scheduler text enters headers or body.
 #[derive(Clone, Copy)]

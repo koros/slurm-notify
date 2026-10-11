@@ -2,6 +2,8 @@
 use super::lifecycle::Event;
 use ring::digest::{Context, SHA256};
 
+pub(super) const VERSION: &str = "sha256-event-route-v1";
+
 pub(super) struct Selected {
     pub(super) identity: String,
     pub(super) timestamp: u64,

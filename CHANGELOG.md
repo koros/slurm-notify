@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded canonical SMTP rendering descriptors and SHA-256 revision fingerprints from validated plans, with golden encoding/digest, policy/version changes, route-order stability, limits and invalid-policy tests. No durable binding yet.
+
 - Private durable SMTP route-revision design covering canonical rendering fingerprints, atomic outbox bindings, legacy handling, explicit pending-revision permission, cleanup and the required later relay/TLS/auth profile binding. Implementation is pending.
 
 - Owned TLS retry/lost-child-result acceptance through validated rendering ticks, checking selected Message-ID/Date headers, original snapshots despite changed route policy, completion-based retries and exact durable attempt history.

@@ -14,6 +14,8 @@ mod smtp_metadata;
 mod smtp_poll;
 #[path = "../../crates/notify-cli/src/smtp_render.rs"]
 mod smtp_render;
+#[path = "../../crates/notify-cli/src/smtp_revision.rs"]
+mod smtp_revision;
 #[path = "../../crates/notify-cli/src/smtp_routes.rs"]
 mod smtp_routes;
 #[path = "../../crates/notify-cli/src/storage.rs"]
