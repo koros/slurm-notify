@@ -271,3 +271,8 @@ Private TLS errors now distinguish certificate, local TLS configuration, handsha
 I/O, and other TLS protocol failures without retaining raw diagnostics. Supervised
 STARTTLS fixtures also bound stalled/drip-fed handshakes and check disconnects after
 ClientHello. Worker outcome mapping and authenticated submission remain pending.
+
+Private SMTP negotiation diagnostics now cross the supervised boundary through
+strict, bounded acknowledgments. Certificate, configuration, I/O, protocol, reply,
+and upgrade categories survive; READY means negotiation only. No token means relay
+acceptance, and worker retry/block bookkeeping remains pending.

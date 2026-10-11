@@ -133,7 +133,6 @@ pub(super) fn send_fields(
         .map_err(|_| Error::InvalidInput)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn supervise(
     command: &mut Command,
     input: Vec<u8>,
@@ -141,6 +140,25 @@ pub(super) fn supervise(
     input_limit: usize,
     output_limit: usize,
 ) -> Result<ProviderOutcome, Error> {
+    supervise_with(
+        command,
+        input,
+        timeout,
+        input_limit,
+        output_limit,
+        parse_result,
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn supervise_with<T>(
+    command: &mut Command,
+    input: Vec<u8>,
+    timeout: Duration,
+    input_limit: usize,
+    output_limit: usize,
+    decode: fn(&[u8]) -> Result<T, Error>,
+) -> Result<T, Error> {
     use std::os::unix::process::CommandExt;
     if input.len() > input_limit || timeout.is_zero() || output_limit == 0 {
         return Err(Error::InvalidInput);
@@ -201,7 +219,7 @@ pub(super) fn supervise(
                 if !status.success() {
                     return Err(Error::ChildExit);
                 }
-                return parse_result(&output.unwrap());
+                return decode(&output.unwrap());
             }
             thread::sleep(Duration::from_millis(2));
         }
@@ -223,13 +241,14 @@ pub(super) fn supervise(
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub(super) fn supervise(
+pub(super) fn supervise_with<T>(
     _command: &mut Command,
     _input: Vec<u8>,
     _timeout: Duration,
     _input_limit: usize,
     _output_limit: usize,
-) -> Result<ProviderOutcome, Error> {
+    _decode: fn(&[u8]) -> Result<T, Error>,
+) -> Result<T, Error> {
     Err(Error::UnsupportedPlatform)
 }
 

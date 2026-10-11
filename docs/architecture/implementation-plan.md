@@ -1419,3 +1419,34 @@ relay acceptance, preserving certificate policy and transient handshake evidence
 across the supervised child boundary. Then test blocked versus retry bookkeeping
 before implementing AUTH or message submission. Message construction, public
 review, licensing, cluster validation, and activation remain pending.
+
+## Subsequent increment: private SMTP negotiation acknowledgment
+
+The supervisor now accepts a private typed decoder while its existing HTTP wrapper
+retains the same provider-outcome decoder. Deadline, pipe limits, cleared environment,
+exit-status validation, and process cleanup remain shared. SMTP uses exact static
+SMTP_NEGOTIATION tokens for READY, INPUT, CERTIFICATE, CONFIGURATION, IO, PROTOCOL,
+REPLY, and UPGRADE. Every token fits the 32-byte output limit. READY is only a
+negotiation diagnostic and has no conversion to relay acceptance or Delivered.
+Only successful child exit plus complete canonical output establishes a diagnostic.
+
+The loopback-only child writes sanitized diagnostics after negotiation or local
+validation. Input size/EOF validation and empty trust roots remain in force. Complete
+upgrade refusal and malformed input now preserve their categories rather than
+collapsing into child exit; handshake disconnect preserves IO. Real self-signed TLS
+rejection produces CERTIFICATE with no secure SMTP command, and a malformed TLS
+handshake produces PROTOCOL. Two hostile child controls verify HTTP delivery tokens
+are invalid under the SMTP decoder and a valid certificate token is ignored after
+nonzero exit. Existing parent deadline fixtures continue returning timeout.
+
+Two unit tests cover all eight canonical tokens and reject delivery tokens,
+truncated acknowledgments, CRLF variants, trailing text, raw-detail additions, and
+invalid UTF-8. The full suite passes: 158 Rust tests plus one ignored helper,
+twenty-nine custom process scenarios, eight SQLite tests, and six hook tests.
+No dependencies, runtime defaults, persistence, or public interfaces changed.
+
+Next: private parent policy and durable blocked-versus-retry bookkeeping using the
+negotiation evidence, proving pending rows survive certificate/input blocks while
+transient errors schedule bounded retries. READY must remain excluded from delivery
+success. AUTH, message construction/submission, public review, licensing, cluster
+validation, and activation remain pending.
