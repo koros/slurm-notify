@@ -2139,3 +2139,37 @@ Validation: shared checks pass with 212 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests and six hook tests. Fresh Rust line
 coverage passes the unchanged 80% gate at 97.23% (9,882/10,164). No real-cluster
 or real-relay tests were run.
+
+### Mixed-route disclosure and rendering-failure acceptance
+
+A mixed-route poll fixture starts with an existing committed event and two frozen
+SMTP snapshots. A subsequent two-event poll renders three messages successfully,
+then fails the fourth with invalid explicit metadata. Candidate reconciliation is
+not published and no new jobs, ledger, outbox, snapshots or checkpoint are written.
+Reopen verifies the earlier ledger/checkpoint, two snapshots and three pending
+routes remain intact. Recovery commits both new events, producing nine mixed-route
+outbox rows; plain routes have no SMTP snapshot, route a hides job IDs and route b
+includes validated numeric/array IDs. Exact per-route bytes and recipient addresses
+are checked, earlier frozen content remains unchanged, and replay never renders.
+
+Owned prepared-tick acceptance fails a later SMTP route after the first has
+rendered, then reopens empty durable poll state. Recovery renders one hidden and
+one disclosed snapshot, delivers both through verified loopback TLS children and
+completes a synthetic plain provider route. It verifies first attempt numbers,
+health recovery and exactly three durable attempts. Another reopen/poll suppresses
+both preparation and delivery replay and preserves two frozen messages. Rendering
+failure occurs before the SQLite transaction; existing transactional rollback
+fixtures remain responsible for failures during SQL writes.
+
+This increment changes tests only: schema, dependencies, production behavior,
+privacy defaults and public interfaces remain unchanged.
+
+Next: private per-route rendering policy validation before scheduler polling, with
+explicit disclosure and bounded route metadata. Production identity/domain,
+credential integration, route revisions, public review, licensing and real-cluster
+or relay activation remain pending.
+
+Validation: shared checks pass with 213 Rust tests plus one ignored helper,
+expanded custom process acceptance, eight SQLite tests and six hook tests. Fresh
+Rust line coverage is 97.23% (10,012/10,297), above the unchanged 80% gate.
+No real-cluster or real-relay tests were run.

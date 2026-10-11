@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Mixed-route SMTP disclosure and late rendering-failure acceptance, preserving earlier poll state and frozen snapshots, recovering through owned TLS delivery after reopen and suppressing duplicate preparation/sends.
+
 - Private bounded SMTP lifecycle rendering with fixed state labels, explicit hidden/numeric job-ID disclosure, omitted cluster/attempt context, static rejection diagnostics and atomic preparation/reopen recovery tests.
 
 - Owned prepared SMTP tick acceptance for temporary refusal and lost-result retries, frozen-byte replay after reopen, deduplicated polling, and partial delivery recovery after helper spawn failure.

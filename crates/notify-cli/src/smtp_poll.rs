@@ -333,6 +333,167 @@ mod tests {
         );
         assert_eq!(store.due_deliveries("cluster", 10, 10).unwrap().len(), 3);
     }
+    fn rendered(event: &Event, route: &str, invalid: bool) -> Result<Prepared, ()> {
+        use super::super::smtp_render::{self, JobVisibility, Metadata};
+        smtp_render::prepare(
+            event,
+            &Metadata {
+                sender: "s@fixture.invalid",
+                recipient: &format!("{route}@fixture.invalid"),
+                identity: if invalid {
+                    "invalid\r\nfixture"
+                } else {
+                    "render_fixture"
+                },
+                timestamp: 123,
+            },
+            if route == "a" {
+                JobVisibility::Hidden
+            } else {
+                JobVisibility::Identifier
+            },
+        )
+        .map_err(|_| ())
+    }
+
+    #[test]
+    fn later_mixed_route_render_failure_preserves_existing_state_and_reopen_recovers() {
+        let directory = super::super::storage::tests::Directory::new();
+        let mut store = store(&directory);
+        let mut reconciler = Reconciler::with_capacity(10);
+        poll_with(
+            &request(),
+            &mut reconciler,
+            &mut store,
+            &settings(),
+            10,
+            query,
+            |event, route| rendered(event, route, false),
+        )
+        .unwrap();
+        let before = reconciler.clone();
+        let existing = store.due_deliveries("cluster", 10, 10).unwrap();
+        let saved = store
+            .frozen_smtp(&existing[0].event_id, "a")
+            .unwrap()
+            .unwrap();
+        let mut next_request = request();
+        next_request.history_end = "2026-10-11T01:00:00";
+        let next_query = |command: &mut Command, _: Duration, _: usize| {
+            Ok(if command.get_program() == "squeue" {
+                ""
+            } else {
+                "cluster|2_3|alice|s|actual|FAILED|1:0\ncluster|3|alice|s|actual|COMPLETED|0:0"
+            }
+            .into())
+        };
+        let mut calls = 0;
+        let result = poll_with(
+            &next_request,
+            &mut reconciler,
+            &mut store,
+            &settings(),
+            20,
+            next_query,
+            |event, route| {
+                calls += 1;
+                rendered(event, route, calls == 4)
+            },
+        );
+        assert!(matches!(result, Err(Error::Preparation)));
+        assert_eq!(calls, 4);
+        assert_eq!(reconciler.latest, before.latest);
+        assert_eq!(reconciler.emitted, before.emitted);
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert_eq!(restored.latest, before.latest);
+        assert_eq!(restored.emitted, before.emitted);
+        assert_eq!(checkpoint.as_deref(), Some(request().history_end));
+        assert_eq!(store.due_deliveries("cluster", 20, 10).unwrap().len(), 3);
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM smtp_messages", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        calls = 0;
+        assert_eq!(
+            poll_with(
+                &next_request,
+                &mut restored,
+                &mut store,
+                &settings(),
+                20,
+                next_query,
+                |event, route| {
+                    calls += 1;
+                    rendered(event, route, false)
+                }
+            )
+            .unwrap()
+            .len(),
+            2
+        );
+        assert_eq!(calls, 4);
+        let due = store.due_deliveries("cluster", 20, 10).unwrap();
+        assert_eq!(due.len(), 9);
+        for item in &due {
+            let snapshot = store
+                .frozen_smtp(&item.event_id, &item.destination)
+                .unwrap();
+            if item.destination == "plain" {
+                assert!(snapshot.is_none());
+                continue;
+            }
+            let snapshot = snapshot.unwrap();
+            let text = std::str::from_utf8(snapshot.data()).unwrap();
+            assert!(snapshot.envelope().1 == format!("{}@fixture.invalid", item.destination));
+            assert!(!text.contains("cluster") && !text.contains("actual"));
+            assert_eq!(text.contains("Job: [redacted]"), item.destination == "a");
+            assert_eq!(
+                text.contains(&format!("Job: {}\r\n", item.event.identity.job)),
+                item.destination == "b"
+            );
+            let expected = rendered(&item.event, &item.destination, false).unwrap();
+            assert!(snapshot.data() == expected.data());
+        }
+        let kept = store
+            .frozen_smtp(&existing[0].event_id, "a")
+            .unwrap()
+            .unwrap();
+        assert!(kept.data() == saved.data());
+        drop(store);
+        let mut store = Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert_eq!(checkpoint.as_deref(), Some(next_request.history_end));
+        assert!(poll_with(
+            &next_request,
+            &mut restored,
+            &mut store,
+            &settings(),
+            30,
+            next_query,
+            |_, _| panic!("replay must preserve frozen disclosure and metadata")
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(store.due_deliveries("cluster", 30, 10).unwrap().len(), 9);
+        let kept = store
+            .frozen_smtp(&existing[0].event_id, "a")
+            .unwrap()
+            .unwrap();
+        assert!(kept.data() == saved.data());
+    }
+
     #[test]
     fn invalid_settings_query_parse_and_suppression_do_not_prepare() {
         let directory = super::super::storage::tests::Directory::new();

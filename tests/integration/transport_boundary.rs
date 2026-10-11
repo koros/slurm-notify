@@ -242,6 +242,7 @@ fn acceptance() {
     owned_smtp_auth_progress_restart();
     owned_frozen_submission_restart();
     orchestrated_frozen_blocked_restart();
+    orchestrated_mixed_render_failure_restart();
     owned_smtp_submission_restart();
     owned_smtp_lost_result_replay();
     smtp_submit_boundary::acceptance();
@@ -251,7 +252,7 @@ fn acceptance() {
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
     owned_smtp_upgrade_policy_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart and mixed-route rendering-failure recovery passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1682,6 +1683,189 @@ fn owned_smtp_lost_result_replay() {
     let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
     assert_eq!(
         db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn orchestrated_mixed_render_failure_restart() {
+    use polling_cycle::{Cycles, Hooks, PreparedHooks, StageError};
+    use smtp_render::{JobVisibility, Metadata};
+    let directory = storage::tests::Directory::new();
+    let root = state_directory(&directory);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let settings = orchestration_settings(&["a", "b", "plain"]);
+    let mut cycles = Cycles::new(1).unwrap();
+    let mut prepared = 0;
+    let failed = cycles.tick_prepared_fallible(
+        &settings,
+        &orchestration_maintenance(),
+        &mut store,
+        PreparedHooks {
+            smtp_destinations: &["a", "b"],
+            max_messages: 2,
+            query: orchestration_query,
+            prepare: |event: &lifecycle::Event, route: &str| {
+                prepared += 1;
+                smtp_render::prepare(
+                    event,
+                    &Metadata {
+                        sender: "s@fixture.invalid",
+                        recipient: &format!("{route}@fixture.invalid"),
+                        identity: if route == "b" {
+                            "invalid\r\nfixture"
+                        } else {
+                            "mixed_fixture"
+                        },
+                        timestamp: 123,
+                    },
+                    JobVisibility::Hidden,
+                )
+                .map_err(|_| ())
+            },
+        },
+        Hooks {
+            query: (),
+            send: |_: &storage::DueDelivery| panic!("failed poll exposed partial outbox"),
+            clock: || Some(7200),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(prepared, 2);
+    assert_eq!(failed.poll.unwrap().unwrap_err(), StageError::Poll);
+    assert_eq!(
+        failed.delivery.unwrap().unwrap(),
+        delivery::BatchReport::default()
+    );
+    assert_eq!(failed.cleanup.unwrap().unwrap(), 0);
+    let health = failed.health.unwrap().unwrap();
+    assert_eq!(
+        health.poll.last_failure,
+        Some(polling_cycle::Failure::Preparation)
+    );
+    assert!(health.poll.checkpoint_age_seconds.is_none());
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let (restored, checkpoint) = store.restore("cluster", 10).unwrap();
+    assert!(restored.latest.is_empty() && restored.emitted.is_empty() && checkpoint.is_none());
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM smtp_messages", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    drop(db);
+    let mut restarted = Cycles::new(2).unwrap();
+    let mut clocks = [7210, 7210, 7220, 7221, 7222, 7222, 7222].into_iter();
+    let mut sent = Vec::new();
+    let recovered = restarted.tick_prepared_fallible(
+        &settings,
+        &orchestration_maintenance(),
+        &mut store,
+        PreparedHooks {
+            smtp_destinations: &["a", "b"],
+            max_messages: 2,
+            query: orchestration_query,
+            prepare: |event: &lifecycle::Event, route: &str| {
+                smtp_render::prepare(
+                    event,
+                    &Metadata {
+                        sender: "s@fixture.invalid",
+                        recipient: &format!("{route}@fixture.invalid"),
+                        identity: "mixed_fixture",
+                        timestamp: 123,
+                    },
+                    if route == "a" {
+                        JobVisibility::Hidden
+                    } else {
+                        JobVisibility::Identifier
+                    },
+                )
+                .map_err(|_| ())
+            },
+        },
+        Hooks {
+            query: (),
+            send: |item: &storage::DueDelivery| {
+                assert_eq!(item.attempt_number, 1);
+                let reader =
+                    storage::Store::open(&root.join("state.sqlite3"), Duration::from_millis(50))
+                        .unwrap();
+                let snapshot = reader
+                    .frozen_smtp(&item.event_id, &item.destination)
+                    .unwrap();
+                if item.destination == "plain" {
+                    assert!(snapshot.is_none());
+                } else {
+                    let snapshot = snapshot.unwrap();
+                    let text = std::str::from_utf8(snapshot.data()).unwrap();
+                    assert_eq!(text.contains("Job: [redacted]"), item.destination == "a");
+                    assert_eq!(text.contains("Job: 1\r\n"), item.destination == "b");
+                    assert!(!text.contains("cluster") && !text.contains("actual"));
+                    assert!(
+                        snapshot.envelope().1 == format!("{}@fixture.invalid", item.destination)
+                    );
+                }
+                drop(reader);
+                sent.push(item.destination.clone());
+                if item.destination == "plain" {
+                    Ok(delivery::ProviderOutcome::Delivered)
+                } else {
+                    frozen_dispatch(&root, item, 0)
+                }
+            },
+            clock: || clocks.next(),
+            cancelled: || false,
+        },
+    );
+    assert_eq!(sent, vec!["a", "b", "plain"]);
+    assert!(clocks.next().is_none());
+    assert!(matches!(
+        recovered.poll,
+        Some(Ok(polling_cycle::Outcome::Committed { events: 1, .. }))
+    ));
+    assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 3);
+    assert_eq!(recovered.cleanup.unwrap().unwrap(), 0);
+    assert_eq!(recovered.health.unwrap().unwrap().poll.last_failure, None);
+    drop(store);
+    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let replay = restarted.tick_prepared_fallible(
+        &settings,
+        &orchestration_maintenance(),
+        &mut store,
+        PreparedHooks {
+            smtp_destinations: &["a", "b"],
+            max_messages: 2,
+            query: orchestration_query,
+            prepare: |_: &lifecycle::Event, _: &str| panic!("replay changed disclosure"),
+        },
+        Hooks {
+            query: (),
+            send: |_: &storage::DueDelivery| panic!("replay resent completed delivery"),
+            clock: || Some(7223),
+            cancelled: || false,
+        },
+    );
+    assert!(matches!(
+        replay.poll,
+        Some(Ok(polling_cycle::Outcome::Committed { events: 0, .. }))
+    ));
+    assert_eq!(
+        replay.delivery.unwrap().unwrap(),
+        delivery::BatchReport::default()
+    );
+    let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM delivery_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM smtp_messages", [], |row| row
             .get::<_, i64>(0))
             .unwrap(),
         2
