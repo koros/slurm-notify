@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private composed status snapshots read bounded health/checkpoint metadata in one transaction, report freshness and capacity pressure without lookup/send hooks, and preserve pending frozen work; static-error, privacy and restart tests.
+
 - Private composed cycles apply independent retained-identity/event budgets through reconciliation, bounded restore, preflight and health; atomic overflow and owned-state boundary/restart recovery acceptance, preserving shared-limit adapters.
 
 - Private composed owned-state acquisition checks exact storage-path compatibility and reuses guarded SQLite ownership; creation/mode/contention/unsafe-path acceptance and file-backed retry/restart recovery through owned state.

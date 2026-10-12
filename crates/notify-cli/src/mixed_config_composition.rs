@@ -94,6 +94,27 @@ impl Plan {
             .ok_or(crate::storage::StorageError::InvalidInput)?;
         crate::storage::Store::open_private(parent, lock_timeout)
     }
+    pub(super) fn status(
+        &self,
+        cycles: &crate::polling_cycle::Cycles,
+        store: &mut crate::storage::Store,
+        now: i64,
+    ) -> Result<crate::polling_cycle::HealthReport, crate::polling_cycle::ReportError> {
+        cycles.status(
+            crate::polling_cycle::StatusPolicy {
+                cluster: self.common.observation.cluster(),
+                capacities: (
+                    self.common.controls.identity_limit,
+                    self.common.controls.event_limit,
+                ),
+                stale_after: self.common.controls.maintenance.stale_after,
+                retain_seconds: self.common.controls.maintenance.retain_seconds,
+                sample_limit: self.common.controls.maintenance.health_sample_limit,
+            },
+            store,
+            now,
+        )
+    }
     pub(super) fn permissions(&self) -> Vec<Permission<'_>> {
         self.permissions
             .iter()
@@ -1340,6 +1361,142 @@ mod tests {
             .restore_with_capacities("research-cluster", (2, 3))
             .unwrap();
         assert_eq!((restored.latest.len(), restored.emitted.len()), (2, 3));
+    }
+
+    #[test]
+    fn composed_status_reads_fresh_stale_and_pressure_snapshots_without_resources_or_writes() {
+        use crate::polling_cycle::{Cycles, Hooks, ReportError};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["monitor"]["retained_identity_limit"] = json!(1);
+        v["monitor"]["retained_event_limit"] = json!(2);
+        let plan = prepare_file_fixture(&v, &config_path(&d));
+        let mut store = open_owned_fixture(&plan);
+        let mut cycles = Cycles::new(2).unwrap();
+        let cold = plan.status(&cycles, &mut store, 7200).unwrap();
+        assert!(cold.poll.stale);
+        assert_eq!(cold.poll.checkpoint_age_seconds, None);
+        for (state, now) in [("RUNNING", 7200), ("COMPLETED", 7260)] {
+            let mut samples = 0;
+            let report = plan
+                .tick_with(
+                    (Path::new("squeue"), Path::new("sacct")),
+                    &mut cycles,
+                    &mut store,
+                    Hooks {
+                        query: |cmd: &mut std::process::Command, _, _| {
+                            Ok(if cmd.get_program() == "squeue" {
+                                String::new()
+                            } else {
+                                format!("research-cluster|1|alice|s|actual|{state}|0:0")
+                            })
+                        },
+                        send: (
+                            |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                                panic!("status credentials")
+                            },
+                            |_: &crate::storage::DueDelivery| -> std::process::Command {
+                                panic!("status helper")
+                            },
+                            |_: &crate::storage::DueDelivery| panic!("status ordinary"),
+                        ),
+                        clock: || Some(now),
+                        cancelled: || {
+                            samples += 1;
+                            samples > 1
+                        },
+                    },
+                )
+                .unwrap();
+            assert!(report.cancelled);
+        }
+        let pending = store.due_deliveries("research-cluster", 7260, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        let frozen = store
+            .frozen_smtp(&pending[0].event_id, "research_email")
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        drop(store);
+        let restarted = Cycles::new(1).unwrap();
+        v["monitor"]["retained_event_limit"] = json!(1);
+        let reduced = prepare_file_fixture(&v, &config_path(&d));
+        let mut store = open_owned_fixture(&reduced);
+        for (now, age, stale) in [(7260, 0, false), (7439, 179, false), (7440, 180, true)] {
+            let report = reduced.status(&restarted, &mut store, now).unwrap();
+            assert_eq!(
+                (report.poll.checkpoint_age_seconds, report.poll.stale),
+                (Some(age), stale)
+            );
+            assert!(!report.storage.jobs_over_capacity && report.storage.events_over_capacity);
+            let printed = format!("{report:?}");
+            for private in [
+                "alice",
+                "researcher",
+                "research-cluster",
+                "smtp.example.invalid",
+                "Bearer fixture",
+                "SLURM_NOTIFY",
+                config_path(&d).to_str().unwrap(),
+            ] {
+                assert!(!printed.contains(private));
+            }
+        }
+        assert!(matches!(
+            reduced.status(&restarted, &mut store, 7259),
+            Err(ReportError::ClockRegressed)
+        ));
+        assert!(matches!(
+            reduced.status(&restarted, &mut store, -1),
+            Err(ReportError::InvalidInput)
+        ));
+        let after = store.due_deliveries("research-cluster", 7440, 10).unwrap();
+        assert_eq!(after.len(), pending.len());
+        assert_eq!(
+            (&after[0].event_id, after[0].attempt_number),
+            (&pending[0].event_id, pending[0].attempt_number)
+        );
+        assert_eq!(
+            store
+                .frozen_smtp(&pending[0].event_id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
+    }
+    #[test]
+    fn composed_status_rejects_corrupt_checkpoint_and_invalid_policy_statically() {
+        use crate::polling_cycle::{Cycles, ReportError};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let mut plan = prepare_file_fixture(&v, &config_path(&d));
+        let mut store = open_owned_fixture(&plan);
+        let cycles = Cycles::new(1).unwrap();
+        plan.common.controls.event_limit = 0;
+        assert!(matches!(
+            plan.status(&cycles, &mut store, 7200),
+            Err(ReportError::InvalidInput)
+        ));
+        plan.common.controls.event_limit = 20000;
+        let db = rusqlite::Connection::open(owned_path(&d)).unwrap();
+        db.execute(
+            "INSERT INTO checkpoints(cluster,history_through) VALUES (?1,?2)",
+            rusqlite::params!["research-cluster", "synthetic corrupt checkpoint"],
+        )
+        .unwrap();
+        assert!(matches!(
+            plan.status(&cycles, &mut store, 7200),
+            Err(ReportError::Storage)
+        ));
+        db.execute("DROP TABLE checkpoints", []).unwrap();
+        assert!(matches!(
+            plan.status(&cycles, &mut store, 7200),
+            Err(ReportError::Storage)
+        ));
     }
     #[test]
     fn changed_trust_after_restart_rejects_old_bound_profile_before_credentials() {

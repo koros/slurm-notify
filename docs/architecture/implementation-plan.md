@@ -3370,3 +3370,21 @@ pressure evidence, without credential lookup. Public and installed gates remain.
 Validation: shared checks pass with 341 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (20,105/20,613), above the 80% gate.
+
+
+### Private composed health/status snapshots
+
+Prepared plans now map status controls into one transaction's bounded health and
+checkpoint snapshot without callbacks. Status remains readable under capacity
+pressure, calculates fresh/stale boundaries after reopen and preserves pending
+attempts/frozen bytes. Two tests cover clocks, invalid policy/corrupt storage,
+resource-free reads and reports without identifying metadata. ADR 0033 records
+checkpoint projection bounds, ephemeral failure counters and existing eager
+preparation limitations. No public status output or installed command is introduced.
+
+Next: private metadata-only status preparation from protected files, independent
+of provider resource availability. Public and installed gates remain.
+
+Validation: shared checks pass with 343 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (20,294/20,806), above the 80% gate.

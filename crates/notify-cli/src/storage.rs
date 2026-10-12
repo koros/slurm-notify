@@ -247,6 +247,35 @@ impl Store {
         capacities: (usize, usize),
         sample_limit: usize,
     ) -> Result<StorageHealth, HealthError> {
+        self.health_snapshot_using(
+            cluster,
+            now,
+            retain_seconds,
+            capacities,
+            sample_limit,
+            false,
+        )
+        .map(|(health, _)| health)
+    }
+    pub(super) fn health_snapshot(
+        &mut self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        capacities: (usize, usize),
+        sample_limit: usize,
+    ) -> Result<(StorageHealth, Option<String>), HealthError> {
+        self.health_snapshot_using(cluster, now, retain_seconds, capacities, sample_limit, true)
+    }
+    fn health_snapshot_using(
+        &mut self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        capacities: (usize, usize),
+        sample_limit: usize,
+        include_checkpoint: bool,
+    ) -> Result<(StorageHealth, Option<String>), HealthError> {
         let (capacity, event_capacity) = capacities;
         if cluster.is_empty()
             || now < 0
@@ -270,7 +299,7 @@ impl Store {
             .and_then(|n| n.checked_add(1))
             .ok_or(HealthError::InvalidInput)?;
         let cutoff = now.checked_sub(retain_seconds).unwrap_or(-1);
-        let report = (|| -> Result<StorageHealth, rusqlite::Error> {
+        let report = (|| -> Result<(StorageHealth, Option<String>), rusqlite::Error> {
             let tx = self.db.transaction()?;
             let jobs: usize = tx.query_row(
                 "SELECT count(*) FROM (SELECT 1 FROM jobs WHERE cluster=?1 LIMIT ?2)",
@@ -352,8 +381,22 @@ impl Store {
                 }
             }
             drop(statement);
+            let checkpoint = if include_checkpoint {
+                tx
+                .query_row(
+                    "SELECT length(history_through),CASE WHEN length(history_through)=19 THEN history_through ELSE '' END FROM checkpoints WHERE cluster=?1",
+                    [cluster],
+                    |row| {
+                        if row.get::<_, i64>(0)? != 19 { return Err(rusqlite::Error::InvalidQuery); }
+                        row.get(1)
+                    },
+                )
+                .optional()?
+            } else {
+                None
+            };
             tx.commit()?;
-            Ok(health)
+            Ok((health, checkpoint))
         })();
         report.map_err(|_| HealthError::Database)
     }

@@ -77,6 +77,14 @@ pub(super) struct HealthReport {
     pub(super) storage: super::storage::StorageHealth,
 }
 
+pub(super) struct StatusPolicy<'a> {
+    pub(super) cluster: &'a str,
+    pub(super) capacities: (usize, usize),
+    pub(super) stale_after: i64,
+    pub(super) retain_seconds: i64,
+    pub(super) sample_limit: usize,
+}
+
 impl PollHealth {
     fn report(&self, now: i64, stale_after: i64) -> Result<PollReport, ReportError> {
         if now < 0 || stale_after <= 0 {
@@ -923,6 +931,40 @@ impl Cycles {
             }),
         );
         report
+    }
+
+    // One read transaction supplies checkpoint and bounded health, even under pressure.
+    pub(super) fn status(
+        &self,
+        policy: StatusPolicy<'_>,
+        store: &mut Store,
+        now: i64,
+    ) -> Result<HealthReport, ReportError> {
+        self.health.report(now, policy.stale_after)?;
+        let (storage, checkpoint) = store
+            .health_snapshot(
+                policy.cluster,
+                now,
+                policy.retain_seconds,
+                policy.capacities,
+                policy.sample_limit,
+            )
+            .map_err(|error| match error {
+                super::storage::HealthError::InvalidInput => ReportError::InvalidInput,
+                super::storage::HealthError::Database => ReportError::Storage,
+            })?;
+        let checkpoint = checkpoint
+            .as_deref()
+            .map(accounting_window::parse_timestamp)
+            .transpose()
+            .map_err(|_| ReportError::Storage)?;
+        let poll = PollHealth {
+            checkpoint,
+            consecutive_failures: self.health.consecutive_failures,
+            last_failure: self.health.last_failure,
+        }
+        .report(now, policy.stale_after)?;
+        Ok(HealthReport { poll, storage })
     }
 
     fn report(
