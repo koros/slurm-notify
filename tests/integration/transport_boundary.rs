@@ -117,6 +117,8 @@ mod mixed_config_composition;
 #[allow(unused_imports)]
 #[path = "../../crates/notify-cli/src/observation_mapping.rs"]
 mod observation_mapping;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod startup_boundary;
 
 #[allow(unused_imports)]
 #[path = "../../crates/notify-cli/src/foreground_report.rs"]
@@ -129,7 +131,11 @@ use std::time::{Duration, Instant};
 
 fn main() {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    if active_tick_boundary::child() || foreground_boundary::child() || status_boundary::child() {
+    if startup_boundary::child()
+        || active_tick_boundary::child()
+        || foreground_boundary::child()
+        || status_boundary::child()
+    {
         return;
     }
     if matches!(
@@ -343,6 +349,7 @@ fn acceptance() {
     status_boundary::acceptance();
     foreground_boundary::acceptance();
     active_tick_boundary::acceptance();
+    startup_boundary::acceptance();
     owned_pipeline_restart();
     orchestrated_owned_http_restart();
     orchestrated_cleanup_failure_and_post_delivery_cancellation();

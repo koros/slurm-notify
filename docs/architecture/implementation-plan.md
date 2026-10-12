@@ -3615,3 +3615,20 @@ and cancellation failures. Public and installed gates remain.
 Validation: shared checks pass with 369 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.40% (21,696/22,276), above the 80% gate.
+
+
+### Private startup report process acceptance
+
+Trusted children call reported startup and emit bounded exact fixture diagnostics.
+Parent acceptance covers absent/malformed/symlinked/unsafe config, cancellation,
+invalid budgets, unsafe state and cross-process owner contention. Failures create
+no absent state, repair no unsafe paths/modes and preserve existing file contents.
+Successful acquisition follows owner release. ADR 0047 retains private-only scope.
+No public contracts, dependencies or defaults change.
+
+Next: combined private reported-startup/shared-tick/shutdown-report lifecycle
+acceptance with durable recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 369 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.41% (21,698/22,276), above the 80% gate.

@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private process startup reporting tests cover missing/malformed/unsafe protected config, cancellation, invalid budgets, unsafe state and owner contention; exact bounded diagnostics and unchanged-state reacquisition are verified.
+
 - Private bounded startup reports classify cancellation, limits, preparation and ownership failures without nested diagnostics; failure-ordering, malformed input, contention and successful reacquisition tests preserve session behavior.
 
 - Private process-boundary shutdown reporting covers shared-signal cancellation, exhausted blocked replay and wait failure; exact bounded diagnostics, ownership release and unchanged durable work are verified.
