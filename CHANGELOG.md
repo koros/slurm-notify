@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground process acceptance covers cancellation while waiting, forced owner termination and wait failure after committed blocked SMTP work; bounded static diagnostics and child replay verify unchanged frozen bindings, attempts and deduplication.
+
 - Private foreground scheduling uses monotonic completion-relative delays, finite tick/wake budgets and interruptible injected waits; delayed/blocked tick, cancellation, clock/error and owner-release/restart acceptance.
 
 - Private foreground sessions own a protected mixed plan, guarded state and cycle health; startup/active cancellation, stop, ownership, live status and frozen pending-work restart tests, without scheduling or installed activation.

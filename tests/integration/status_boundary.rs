@@ -75,7 +75,7 @@ fn ready() {
     std::io::stdout().flush().unwrap();
 }
 #[derive(Debug, PartialEq, Eq)]
-enum Ack {
+pub(super) enum Ack {
     Fresh,
     Stale,
     Owned,
@@ -97,7 +97,7 @@ fn command(mode: &str, path: &Path) -> Command {
     command.args([std::ffi::OsStr::new(mode), path.as_os_str()]);
     command
 }
-fn inspect(mode: &str, path: &Path) -> Ack {
+pub(super) fn inspect(mode: &str, path: &Path) -> Ack {
     crate::transport::supervise_with(
         &mut command(mode, path),
         Vec::new(),
@@ -109,13 +109,13 @@ fn inspect(mode: &str, path: &Path) -> Ack {
     .unwrap()
 }
 // Reap even if an assertion fails. The fixture never spawns descendants.
-struct Running {
+pub(super) struct Running {
     child: Child,
     messages: mpsc::Receiver<Vec<u8>>,
     reader: Option<thread::JoinHandle<()>>,
 }
 impl Running {
-    fn start(mode: &str, path: &Path) -> Self {
+    pub(super) fn start(mode: &str, path: &Path) -> Self {
         let mut child = command(mode, path)
             .env_clear()
             .stdin(Stdio::piped())
@@ -150,7 +150,7 @@ impl Running {
         );
         running
     }
-    fn finish(&mut self, kill: bool, expected: &[u8]) {
+    pub(super) fn finish(&mut self, kill: bool, expected: &[u8]) {
         if kill {
             self.child.kill().unwrap();
         } else {
@@ -181,7 +181,7 @@ impl Drop for Running {
         }
     }
 }
-fn files(path: &Path) -> Vec<(String, Vec<u8>)> {
+pub(super) fn files(path: &Path) -> Vec<(String, Vec<u8>)> {
     let mut entries: Vec<_> = std::fs::read_dir(path)
         .unwrap()
         .map(|entry| {

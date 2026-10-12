@@ -3477,3 +3477,21 @@ acceptance, with pending-work recovery. Public and installed gates remain.
 Validation: shared checks pass with 357 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.43% (21,177/21,736), above the 80% gate.
+
+
+### Private foreground process acceptance
+
+Trusted child fixtures compose protected configuration, ownership, scheduled ticks
+and selected blocked SMTP work. Parent acceptance checks contention, cancellation
+while waiting, forced termination and wait failure; idle state bytes remain unchanged
+and child replay preserves the event, attempt, frozen bytes, binding and checkpoint.
+Status becomes readable and fresh after exit. Existing bounded child coordination
+and static stdout handling are reused. ADR 0039 records idle-termination and injected
+wait limits. No public contracts, defaults or dependencies change.
+
+Next: private bounded interruptible wait adapter with a caller-owned cancellation
+signal and scheduled-session acceptance. Public and installed gates remain.
+
+Validation: shared checks pass with 357 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.43% (21,178/21,736), above the 80% gate.
