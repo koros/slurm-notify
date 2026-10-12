@@ -3046,3 +3046,23 @@ parser/configuration mapping and activation still require explicit public review
 Validation: shared checks pass with 305 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (16,670/17,090), above the 80% gate.
+
+### Private identity and initial-observation mapping
+
+Added test-only observation_mapping with user-only/cluster/emit-suppress preflight
+before injected identity lookup. Validated scheduler metadata is owned and zeroizing;
+source errors are static. No effective-user adapter, override, dependency, default
+or public contract is introduced. ADR 0022 records the unverified effective-user
+association and private ASCII/length limitations.
+
+Three tests cover rejected policy without lookup, owned/bounded/invalid identities
+and durable polling under both initial choices. Synthetic queries verify current-user
+arguments and ignore another user's job. Reopening with the opposite initial policy
+preserves deduplication, pending work and checkpoint rather than replaying terminals.
+
+Next: private lifecycle-event routing selection. Installed lookup/configuration,
+parser, CLI and runtime activation still require explicit contract review.
+
+Validation: shared checks pass with 308 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.53% (16,802/17,228), above the 80% gate.

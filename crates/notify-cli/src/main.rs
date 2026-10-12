@@ -18,6 +18,9 @@ mod webhook_resolution;
 mod runtime_mapping;
 
 #[cfg(test)]
+mod observation_mapping;
+
+#[cfg(test)]
 mod smtp_frozen_frame;
 
 #[cfg(test)]

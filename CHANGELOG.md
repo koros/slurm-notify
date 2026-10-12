@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private injected scheduler identity and initial-observation mapping with user-only preflight, owned zeroizing metadata, static failures and three policy/identity/durable emit-suppress tests; no effective-user adapter or installed activation.
+
 - Private mapped-control runtime-cycle acceptance verifies query budgets, deterministic retry due time, persisted event/attempt recovery, stale health after poll failure and delayed retention cleanup without replay.
 
 - Private typed operational-control mapping into accounting, retry and maintenance settings, with explicit numeric ceilings, cross-field checks, lossless jitter-seed conversion and three boundary/failure tests; no JSON parser, defaults or installed activation.
