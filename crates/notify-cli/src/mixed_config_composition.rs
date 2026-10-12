@@ -118,7 +118,7 @@ impl Plan {
             .map(|s| s.timeout)
             .ok_or(Error::Profile)
     }
-    // Existing bound cycles have one transport timeout; reject differing values.
+    // Each SMTP destination retains its configured transport deadline.
     pub(super) fn tick_with<Q, L, H, O, C, X>(
         &self,
         programs: (&std::path::Path, &std::path::Path),
@@ -145,9 +145,11 @@ impl Plan {
     {
         use crate::polling_cycle::{BoundSmtp, Hooks, MixedBoundSmtp, Rendering, Settings};
         let timeout = self.smtp.first().ok_or(Error::NoSmtp)?.timeout;
-        if self.smtp.iter().any(|s| s.timeout != timeout) {
-            return Err(Error::Profile);
-        }
+        let deadlines: Vec<_> = self
+            .smtp
+            .iter()
+            .map(|s| (s.name.as_str(), s.timeout))
+            .collect();
         let ordinary: Vec<_> = self
             .common
             .webhooks
@@ -179,22 +181,25 @@ impl Plan {
             clock,
             cancelled,
         } = hooks;
-        Ok(cycles.tick_selected_mixed_bound_smtp(
+        Ok(cycles.tick_selected_mixed_bound_smtp_deadlines(
             &settings,
             &self.common.controls.maintenance,
             store,
-            MixedBoundSmtp {
-                ordinary_destinations: &ordinary,
-                smtp: BoundSmtp {
-                    rendering: Rendering {
-                        routes: &routes,
-                        max_messages: self.max_messages,
+            (
+                MixedBoundSmtp {
+                    ordinary_destinations: &ordinary,
+                    smtp: BoundSmtp {
+                        rendering: Rendering {
+                            routes: &routes,
+                            max_messages: self.max_messages,
+                        },
+                        profiles: &profiles,
+                        permissions: &permissions,
+                        timeout,
                     },
-                    profiles: &profiles,
-                    permissions: &permissions,
-                    timeout,
                 },
-            },
+                Some(&deadlines),
+            ),
             Hooks {
                 query,
                 send: (
@@ -788,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn composed_cycle_rejects_incompatible_timeouts_before_hooks_or_storage() {
+    fn composed_cycle_rejects_invalid_deadlines_before_query_or_storage() {
         use crate::{
             polling_cycle::{Cycles, Hooks},
             storage::DueDelivery,
@@ -799,6 +804,8 @@ mod tests {
         v["providers"]["second_email"]["request_timeout_milliseconds"] = json!(2000);
         let mut plan = prepare_fixture(&v);
         let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        // Corrupt only private fixture state to exercise the runtime preflight.
+        plan.smtp[0].timeout = Duration::from_nanos(1);
         for empty in [false, true] {
             if empty {
                 plan.smtp.clear();
@@ -816,19 +823,105 @@ mod tests {
                         |_: &DueDelivery| -> std::process::Command { panic!("unsupported helper") },
                         |_: &DueDelivery| panic!("unsupported ordinary"),
                     ),
-                    clock: || panic!("unsupported clock"),
-                    cancelled: || panic!("unsupported cancellation"),
+                    clock: || Some(7200),
+                    cancelled: || false,
                 },
             );
-            assert!(matches!(
-                (empty, result),
-                (false, Err(Error::Profile)) | (true, Err(Error::NoSmtp))
-            ));
+            if empty {
+                assert!(matches!(result, Err(Error::NoSmtp)));
+            } else {
+                assert_eq!(
+                    result.unwrap().preflight,
+                    Some(Err(crate::polling_cycle::StageError::Policy))
+                );
+            }
         }
         assert!(store
             .due_deliveries("research-cluster", 7200, 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn composed_distinct_deadlines_retry_short_destination_and_preserve_binding_on_restart() {
+        use crate::{
+            polling_cycle::{Cycles, Hooks},
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["providers"]["second_email"] = v["providers"]["research_email"].clone();
+        v["providers"]["research_email"]["request_timeout_milliseconds"] = json!(40);
+        v["providers"]["second_email"]["request_timeout_milliseconds"] = json!(2000);
+        v["routes"][0]["send_to"] = json!(["research_email", "second_email"]);
+        v["delivery"]["jitter_seconds"] = json!(0);
+        let provisional = prepare_fixture(&v);
+        v["delivery"]["smtp_permissions"] = json!(provisional.revisions().iter().map(|(name,rendering,provider)| json!({
+            "cluster_id":"research-cluster","destination":name,"rendering_revision":rendering,"provider_revision":provider
+        })).collect::<Vec<_>>());
+        let plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let run = |plan: &Plan, store: &mut Store, now| {
+            plan.tick_with((Path::new("squeue"),Path::new("sacct")),&mut Cycles::new(1).unwrap(),store,Hooks {
+                query: |cmd: &mut std::process::Command,_,_| Ok(if cmd.get_program()=="squeue" {""} else {"research-cluster|1|alice|s|actual|COMPLETED|0:0"}.into()),
+                send: (|name: &str,_| Ok(Zeroizing::new(if name.ends_with("USERNAME") {b"researcher".to_vec()} else {b"fixture".to_vec()})),
+                    |_: &DueDelivery| {let mut cmd = std::process::Command::new("/bin/sh");cmd.args(["-c","cat >/dev/null; sleep 0.2; printf 'SMTP_SUBMIT FINAL ACCEPTED RA\\n'"]);cmd},
+                    |_: &DueDelivery| panic!("unselected ordinary")),
+                clock: || Some(now),cancelled: || false,
+            }).unwrap()
+        };
+        let batch = run(&plan, &mut store, 7200).delivery.unwrap().unwrap();
+        assert_eq!((batch.delivered, batch.retrying), (1, 1));
+        let pending = store
+            .due_deliveries("research-cluster", 7205, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(pending.destination, "research_email");
+        assert_eq!(pending.attempt_number, 2);
+        let frozen = store
+            .frozen_smtp(&pending.event_id, &pending.destination)
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        let bound = store
+            .bound_smtp_provider(&pending.event_id, &pending.destination)
+            .unwrap()
+            .unwrap();
+        drop(store);
+        // Operational timeout edits do not change identity, trust or frozen bytes.
+        v["providers"]["research_email"]["request_timeout_milliseconds"] = json!(2000);
+        let recovered = prepare_fixture(&v);
+        assert_eq!(
+            recovered
+                .revisions()
+                .iter()
+                .find(|(name, _, _)| *name == "research_email")
+                .unwrap()
+                .2,
+            bound.token()
+        );
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(
+            run(&recovered, &mut store, 7205)
+                .delivery
+                .unwrap()
+                .unwrap()
+                .delivered,
+            1
+        );
+        assert!(store
+            .due_deliveries("research-cluster", 7206, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .frozen_smtp(&pending.event_id, &pending.destination)
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
     }
     #[test]
     fn changed_trust_after_restart_rejects_old_bound_profile_before_credentials() {

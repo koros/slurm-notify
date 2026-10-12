@@ -154,6 +154,35 @@ pub(super) struct BoundSmtp<'a> {
     pub(super) timeout: Duration,
 }
 
+// Exact current SMTP destination membership; never fall back on an incomplete map.
+fn valid_deadlines(
+    routes: &[super::smtp_routes::Route<'_>],
+    shared: Duration,
+    entries: Option<&[(&str, Duration)]>,
+) -> bool {
+    let valid = |timeout: Duration| {
+        !timeout.is_zero()
+            && timeout <= Duration::from_secs(30)
+            && timeout == Duration::from_millis(timeout.as_millis() as u64)
+    };
+    match entries {
+        None => valid(shared),
+        Some(entries) => {
+            entries.len() <= 64
+                && entries.len() == routes.len()
+                && entries.iter().all(|(name, timeout)| {
+                    valid(*timeout) && routes.iter().any(|r| r.name == *name)
+                })
+                && entries
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == entries.len()
+        }
+    }
+}
+
 pub(super) struct MixedBoundSmtp<'a> {
     pub(super) smtp: BoundSmtp<'a>,
     pub(super) ordinary_destinations: &'a [&'a str],
@@ -486,6 +515,45 @@ impl Cycles {
         store: &mut Store,
         mixed: MixedBoundSmtp<'_>,
         hooks: Hooks<Q, (R, H, O), C, X>,
+        select: S,
+    ) -> TickReport
+    where
+        S: FnMut(&super::lifecycle::Event) -> Vec<&'s str>,
+        Q: FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        R: FnMut(
+            &super::smtp_provider_revision::Descriptor,
+        ) -> Result<
+            super::smtp_provider_delivery::Resolved,
+            super::smtp_provider_delivery::Error,
+        >,
+        H: FnMut(&super::storage::DueDelivery) -> Command,
+        O: FnMut(
+            &super::storage::DueDelivery,
+        ) -> Result<
+            super::delivery::ProviderOutcome,
+            super::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        self.tick_selected_mixed_bound_smtp_deadlines(
+            settings,
+            maintenance,
+            store,
+            (mixed, None),
+            hooks,
+            select,
+        )
+    }
+
+    // Event-specific private routing; selection applies only to newly emitted events.
+    pub(super) fn tick_selected_mixed_bound_smtp_deadlines<'s, Q, R, H, O, C, X, S>(
+        &mut self,
+        settings: &Settings<'_>,
+        maintenance: &Maintenance,
+        store: &mut Store,
+        mixed: (MixedBoundSmtp<'_>, Option<&[(&str, Duration)]>),
+        hooks: Hooks<Q, (R, H, O), C, X>,
         mut select: S,
     ) -> TickReport
     where
@@ -507,6 +575,7 @@ impl Cycles {
         C: FnMut() -> Option<i64>,
         X: FnMut() -> bool,
     {
+        let (mixed, deadlines) = mixed;
         let bound = mixed.smtp;
         let ordinary = mixed.ordinary_destinations;
         let Hooks {
@@ -549,9 +618,7 @@ impl Cycles {
                         .collect::<std::collections::HashSet<_>>()
                         .len()
                         != ordinary.len()
-                    || bound.timeout.is_zero()
-                    || bound.timeout > Duration::from_secs(30)
-                    || bound.timeout != Duration::from_millis(bound.timeout.as_millis() as u64)
+                    || !valid_deadlines(bound.rendering.routes, bound.timeout, deadlines)
                 {
                     return None;
                 }
@@ -597,11 +664,18 @@ impl Cycles {
                                    _: &super::smtp_revision::Descriptor,
                                    message: &super::storage::FrozenMessage,
                                    resolved| {
+                                let timeout = match deadlines {
+                                    None => bound.timeout,
+                                    Some(entries) => entries.iter().find(|(name, _)| *name == item.destination)
+                                        .map(|(_, timeout)| *timeout)
+                                        .ok_or(super::supervised_provider::Diagnostic::SmtpProviderResolution(
+                                            super::smtp_provider_delivery::Error::Profile))?,
+                                };
                                 super::smtp_bound_transport::dispatch(
                                     &mut helper(item),
                                     resolved,
                                     message,
-                                    bound.timeout,
+                                    timeout,
                                 )
                             },
                             clock,
@@ -1048,6 +1122,57 @@ impl Cycles {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deadline_map_requires_exact_destinations_and_bounded_milliseconds() {
+        let routes = [render_route(crate::smtp_render::JobVisibility::Hidden)];
+        for timeout in [
+            Duration::ZERO,
+            Duration::from_nanos(1),
+            Duration::from_secs(31),
+        ] {
+            assert!(!super::valid_deadlines(&routes, timeout, None));
+            assert!(!super::valid_deadlines(
+                &routes,
+                Duration::from_secs(1),
+                Some(&[("primary", timeout)])
+            ));
+        }
+        let good = Duration::from_millis(1);
+        assert!(super::valid_deadlines(&routes, good, None));
+        assert!(super::valid_deadlines(
+            &routes,
+            Duration::ZERO,
+            Some(&[("primary", good)])
+        ));
+        for entries in [
+            vec![],
+            vec![("unknown", good)],
+            vec![("primary", good), ("primary", good)],
+        ] {
+            assert!(!super::valid_deadlines(&routes, good, Some(&entries)));
+        }
+        assert!(!super::valid_deadlines(
+            &routes,
+            good,
+            Some(&vec![("primary", good); 65])
+        ));
+        let mut second = render_route(crate::smtp_render::JobVisibility::Hidden);
+        second.name = "secondary";
+        let routes = [
+            render_route(crate::smtp_render::JobVisibility::Hidden),
+            second,
+        ];
+        assert!(!super::valid_deadlines(
+            &routes,
+            good,
+            Some(&[("primary", good), ("primary", good)])
+        ));
+        assert!(super::valid_deadlines(
+            &routes,
+            good,
+            Some(&[("secondary", Duration::from_secs(30)), ("primary", good)])
+        ));
+    }
     use super::*;
     use crate::storage::tests::Directory;
 

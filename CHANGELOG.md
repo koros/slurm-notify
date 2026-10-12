@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private per-destination SMTP cycle deadlines retain each composed timeout, reject incomplete/invalid maps before I/O and preserve frozen bindings through timeout edits and restart; controlled child acceptance verifies distinct retry/completion budgets.
+
 - Private composed mixed runtime cycles map validated controls and exact permissions into supervised SMTP dispatch; cancellation, retry/ordinary progress, denied restart and rotated-credential recovery acceptance, with explicit rejection of differing SMTP timeouts.
 
 - Private mixed draft composition owns protected SMTP trust, rendering/provider bindings and explicit permission tuples; four failure-ordering, credential/reference/trust rotation and durable selected-poll restart tests, without installed activation.

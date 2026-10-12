@@ -3299,3 +3299,21 @@ with distinct budgets. Public contract and installed activation gates remain.
 Validation: shared checks pass with 333 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.50% (19,524/20,024), above the 80% gate.
+
+
+### Private per-destination SMTP deadlines
+
+Selected mixed cycles now accept an exact validated SMTP destination/deadline map;
+shared-timeout adapters retain their behavior. Composed plans pass distinct configured
+timeouts. Controlled child acceptance verifies a short destination retries while
+a longer destination completes, then a timeout-only edit recovers pending work
+through reopen with unchanged provider binding and frozen bytes. Map boundary and
+preflight tests cover malformed/incomplete inputs before I/O. ADR 0029 records
+current operational deadlines versus immutable delivery identity.
+
+Next: protected configuration snapshot-to-composition/runtime acceptance with
+replacement/read failure and reopened pending work. Public and installed gates remain.
+
+Validation: shared checks pass with 335 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (19,713/20,211), above the 80% gate.

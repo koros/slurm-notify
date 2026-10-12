@@ -28,14 +28,14 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 333 Rust tests plus one ignored helper,
+The latest implementation milestone passed 335 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.50% (19,524/20,024); the gate is 80%.
+Python tests. Rust line coverage was 97.54% (19,713/20,211); the gate is 80%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private evidence | Location | Remaining integration gap |
 | --- | --- | --- |
-| Protected configuration and DER trust reads | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Private bounded Rust decoding and draft-shape/control validation exist; Webhook and mixed SMTP injected composition exist; Composed runtime acceptance exists with a common SMTP timeout; per-destination deadlines and installed parsing remain pending |
+| Protected configuration and DER trust reads | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Private bounded Rust decoding and draft-shape/control validation exist; Webhook and mixed SMTP injected composition exist; Composed runtime acceptance supports per-destination SMTP deadlines; protected snapshot-to-runtime acceptance and installed parsing remain pending |
 | Owned secret/provider resources | [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs), [process acceptance](../../tests/integration/transport_boundary.rs) | Lookups/helpers remain injected; installed explicit environment resolution must enforce bounds and redaction |
 | Operational and observation policy mapping | [Controls](../../crates/notify-cli/src/runtime_mapping.rs), [identity mapping](../../crates/notify-cli/src/observation_mapping.rs) | No effective-user OS adapter or installed configuration mapping |
 | Selected mixed poll/dispatch/reopen | [Route selection](../../crates/notify-cli/src/route_selection.rs), [runtime cycles](../../crates/notify-cli/src/polling_cycle.rs) | Caller-driven ticks; no foreground loop, signal handling or blocked-batch scheduling acceptance |
