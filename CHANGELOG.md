@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Changed
 
+- Update commit-pinned CI actions to checkout 7.0.1, upload-artifact 7.0.2 and dependency-review-action 5.0.0; retain existing inputs/gates and document Node 24 runner compatibility and all nine Dependabot assessments.
+
 - Update private prototypes to url 2.5.8, time 0.3.55, powerfmt 0.2.1, base64 0.23.1, rusqlite 0.40.2 and rcgen 0.14.10 on the existing Rust 1.88.0 pin. Migrate checked SQLite count decoding and certificate fixture APIs; retain scalar Base64 and DER/ring-only certificate generation.
 
 - Patch private prototype dependencies to lettre 0.11.22, url 2.5.4 and time 0.3.47; pin development/CI Rust 1.88.0 to compile their fixes, remove obsolete stacker/psm constraints and reject advisory Punycode examples before webhook access. Product support/MSRV remains undecided. Coverage startup clears previous generated profiles for each measurement.

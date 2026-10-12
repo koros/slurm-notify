@@ -3230,3 +3230,18 @@ Validation: shared checks pass with 322 Rust tests plus one ignored helper, cust
 process acceptance, eight SQLite, six hook and 11 draft configuration tests. Rust
 line coverage is 97.59% (18,509/18,966), above the 80% gate. Existing restart,
 rollback, capacity, TLS identity/expiry and AUTH/submission tests cover the migrations.
+
+### Dependabot GitHub Actions compatibility updates
+
+Verified upstream tag commits and updated checkout 7.0.1, upload-artifact 7.0.2
+and dependency-review-action 5.0.0 with full SHA pins. Existing triggers, inputs,
+permissions, coverage and review gates are retained. Node 24 runner requirements
+are compatible with the hosted-runner scope; self-hosted compatibility is not
+claimed. The dated operations review records all nine updates, required Rust
+migrations, earlier stale PR failure evidence and the PR-only review limitation.
+
+Validation: checksum-verified Actionlint 1.7.7 passes. Shared checks and coverage
+passed for the combined changes. Hosted execution is checked after pushing;
+PR-only dependency review cannot be verified by a push run.
+
+Next: resume validated-draft private adapter composition after dependency review.
