@@ -89,20 +89,19 @@ cargo test --workspace --locked
 python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
-The executable prints its development status and exits with code 1. Ninety-five Rust
-tests exercise private scheduler parsing, command execution, lifecycle reconciliation,
-SQLite commit/reopen recovery, private Unix state permissions/ownership, and a mock-provider outbox worker with durable provider-requested retry delays.
-A private webhook adapter is exercised against loopback mock servers; its
-[transport decision](docs/adr/0003-private-webhook-transport.md) records dependencies
-and timeout limitations. A private Linux/macOS transport supervisor is tested
-with child-process fixtures and a custom harness that sends HTTP from the child.
-Ten process-boundary acceptance scenarios run separately, including owned-state
-polling, restart recovery, and acceptance-before-commit replay. One subprocess helper is intentionally ignored
-in the main suite and invoked by runner tests. Eight Python/SQLite schema tests and
-six Git-hook tests run separately. The integrated pipeline persists deduplication
-history and checkpoints, but remains test-only and is not exposed by the executable.
-The proposed CLI commands are not implemented. See [contributor guidance](CONTRIBUTING.md)
-and the [implementation plan](docs/architecture/implementation-plan.md).
+The executable prints its development status and exits with code 1. The latest
+implementation milestone passed 314 Rust tests plus one intentionally ignored
+subprocess helper, custom process acceptance, eight Python/SQLite tests, six hook
+tests and 11 draft-configuration tests. Measured Rust line coverage was 97.57%; the
+CI gate requires at least 80%. These are local results, not a hosted CI status claim.
+
+Private tests cover scheduler discovery, durable lifecycle/outbox state, supervised
+webhook/SMTP delivery, protected resource snapshots, injected resource resolution,
+policy mapping and selected mixed-route runtime cycles. Installed CLI commands,
+configuration parsing, public webhook payload persistence and a foreground loop
+remain pending. See the [product readiness assessment](docs/architecture/product-readiness.md)
+for evidence, limits and the proposed activation sequence, and
+[contributor guidance](CONTRIBUTING.md) for development instructions.
 
 Install local pre-commit/pre-push checks with `sh scripts/install-hooks.sh`.
 Run the shared verification suite with `sh scripts/check.sh`. See
@@ -124,17 +123,21 @@ Run the shared verification suite with `sh scripts/check.sh`. See
 6. **Stable release:** freeze contracts, validate packaging and compatibility,
    complete security and operational documentation, and obtain release approval.
 
-The scaffold, minimal workspace, guidance, architecture decision, and basic CI
-definition are present. Phase 0 still needs governance decisions and repository
-configuration; hosted CI has not run.
+The repository, workspace, hooks, CI workflow and private engine are implemented.
+Public lifecycle/provider milestones remain incomplete until installed runtime,
+onboarding and required acceptance are verified. Governance, support and release
+decisions remain open. Historical increments are recorded in the implementation
+plan; the product readiness assessment describes current status.
 
 ## Development and validation
 
 Ordinary development tests should run without a Slurm cluster using scheduler
 fixtures, mock providers, temporary databases, and controlled failure scenarios.
-Later CI gates will cover formatting, strict linting, unit/integration tests,
-contract compatibility, dependency and secret checks, and supported-target
-build/install smoke tests. Real-cluster tests require authorized resources and
+The current workflow runs formatting, strict linting, unit/integration tests,
+tracked-file checks, documentation checks, coverage and workflow validation, with
+PR dependency review and a development placeholder build artifact. Approved
+contract compatibility, supported-product install tests and release gates remain
+pending. Real-cluster tests require authorized resources and
 compliance with local policy.
 
 CLI, configuration, events, intentional Rust APIs, and persistence guarantees

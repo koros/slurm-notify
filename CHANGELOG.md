@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Consolidated source-linked prototype readiness and contract review gates, distinguished installed resource/payload gaps and documented the activation sequence; refreshed README validation and CI descriptions.
+
 - Private event-selected mixed runtime cycles reuse bounded poll/dispatch/maintenance stages; controlled helper acceptance covers cancellation, denied permission, retry/reopen and edited rules without retargeting frozen SMTP work or backfilling unmatched events.
 
 - Private selected mixed-route dispatch acceptance covers ordinary delivery alongside SMTP retry, permission denial after reopen and rotated-credential recovery with unchanged frozen bytes and bindings.

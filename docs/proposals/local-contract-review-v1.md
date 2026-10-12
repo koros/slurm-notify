@@ -62,3 +62,23 @@ Approval may accept individual documents with edits; it must identify the agreed
 semantics. A generic request to continue implementing the prototype is not treated
 as approval of newly proposed public surfaces. No approved snapshots are written by
 this package, and compatibility guarantees begin only with reviewed baselines.
+
+## Review completion checklist
+
+Reviewers should record acceptance or requested edits for the CLI, base config,
+SMTP extension, event payload and limits documents above. The recommendation is
+JSON with explicit operational values, local foreground mode, minimal frozen
+webhook payloads and required STARTTLS SMTP, with no public Rust API.
+
+Acceptance must also identify deferred items and who will settle them. Public job
+identity widths/source timestamps, exact CLI snapshots, parser/UUID dependencies,
+blocked-work scheduling and pending-resource reconciliation need decisions or
+reviewed acceptance before the affected behavior is activated. A document review
+is not proof those implementation gates pass.
+
+The [readiness evidence and activation sequence](../architecture/product-readiness.md)
+now separates protected/injected private resource work from installed resolution,
+and frozen SMTP work from the outstanding public webhook payload transaction.
+Schema fixtures, production parsing, event persistence, installed commands and
+foreground acceptance are distinct milestones after review. Keep licensing,
+supported clusters/platforms and release authorization visible as separate gates.

@@ -3159,3 +3159,22 @@ Installed mapping and activation still require explicit public contract review.
 Validation: shared checks pass with 314 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.57% (17,768/18,210), above the 80% gate.
+
+### Private integration readiness consolidation
+
+Updated product readiness with source-linked evidence for protected snapshots,
+injected owned resources, typed policy mapping and selected mixed runtime cycles.
+Separated installed parser/identity/resource composition gaps from implemented
+private boundaries, and public webhook ID/byte persistence from frozen SMTP work.
+Corrected README's obsolete test counts and scaffold/CI descriptions. Extended the
+contract package with a review completion checklist and explicit deferred gates.
+No code, dependencies, runtime behavior or approved public contracts change.
+
+Next: explicit review of the prepared CLI/config/event/limits package, then reviewed
+baselines and private Rust configuration decoding/resource composition. Public
+activation is gated by AGENTS.md; generic continuation does not approve contracts.
+
+Validation: checked changed local Markdown links and tracked-file policy. Latest
+implementation evidence remains 314 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite, six hook and 11 draft configuration tests; Rust
+line coverage 97.57% (17,768/18,210). Commit/push hooks rerun shared checks.
