@@ -28,6 +28,16 @@ minimum/maximum settings, maximum u64 seed preservation, runtime retry/cycle
 compatibility, below/above-ceiling and u64::MAX failures across every numeric control,
 all five invalid relationships and invalid decimal seed forms.
 
+An additional runtime-cycle acceptance test uses mapped query/output/window,
+capacity, retry, health and retention settings with a temporary SQLite store.
+Query callbacks receive a remaining deadline no greater than the mapped timeout.
+A retry becomes due at the configured backoff, survives reopen with the same event
+and attempt, and recovers while a poll fails. The persisted checkpoint makes health
+stale at the configured threshold; completed work stays retained until its interval
+elapses, then cleanup removes it without replay. Remapping the same explicit controls
+after reopen preserves behavior. Send/query callbacks are synthetic; there is no
+Slurm, external network access or installed schedule.
+
 There is no JSON parsing, file/environment access, polling loop, scheduler command,
 state creation, provider selection or resource resolution. The mapping does not
 establish supported paths, source/user identity, initial observation, event filters,
@@ -36,6 +46,5 @@ preparation/review tasks. Poll duration is a value, not an activated schedule.
 
 ## Next
 
-Exercise the private mapped controls through existing runtime cycles and persistence
-acceptance. Installed parser/configuration mapping and activation still require
-explicit public contract review.
+Prepare the remaining private identity/observation and routing mapping boundaries.
+Installed parser/configuration mapping and activation still require explicit review.

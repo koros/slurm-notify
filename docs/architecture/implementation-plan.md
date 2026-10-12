@@ -3027,3 +3027,22 @@ parser/configuration mapping and activation still require explicit public review
 Validation: shared checks pass with 304 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.52% (16,554/16,975), above the 80% gate.
+
+### Mapped controls in runtime-cycle persistence acceptance
+
+One additional acceptance test drives actual private cycles and a temporary SQLite
+store with mapped query/output/window/capacity/retry/health/retention settings. It
+verifies remaining query deadlines, exact deterministic backoff due time, event and
+attempt preservation after reopen/remapping, recovery during a poll failure, stale
+health from the persisted checkpoint and retention cleanup without replay.
+
+Callbacks are synthetic; no Slurm, external network or installed schedule is used.
+ADR 0021 records this evidence. No implementation behavior, dependency, default or
+public contract changes.
+
+Next: private identity/initial-observation and routing mapping preparation. Installed
+parser/configuration mapping and activation still require explicit public review.
+
+Validation: shared checks pass with 305 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (16,670/17,090), above the 80% gate.

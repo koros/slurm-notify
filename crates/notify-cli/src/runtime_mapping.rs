@@ -321,4 +321,149 @@ mod tests {
         .unwrap();
         assert!(minimum.maintenance.retry.valid_at(0));
     }
+
+    #[test]
+    fn mapped_controls_drive_retry_staleness_and_retention_across_reopen() {
+        use crate::{delivery::ProviderOutcome, scheduler::QueryError, storage::Store};
+        use std::{path::Path, process::Command};
+        let input = Controls {
+            jitter: 0,
+            ..fixture()
+        };
+        let plan = map(input).unwrap();
+        let directory = crate::storage::tests::Directory::new();
+        let open = || Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open();
+        let settings = polling_cycle::Settings {
+            active_program: Path::new("/fixture/squeue"),
+            accounting_program: Path::new("/fixture/sacct"),
+            cluster: "cluster",
+            user: "alice",
+            timeout: plan.query_timeout,
+            output_limit: plan.output_limit,
+            emit_discovered: true,
+            capacity: plan.identity_limit,
+            destinations: &["primary"],
+            window: plan.window,
+        };
+        let query = |command: &mut Command, timeout: Duration, output: usize| {
+            assert!(!timeout.is_zero() && timeout <= Duration::from_secs(10));
+            assert_eq!(output, 1048576);
+            Ok(if command.get_program() == "/fixture/squeue" {
+                ""
+            } else {
+                "cluster|1|alice|s|actual|COMPLETED|0:0"
+            }
+            .into())
+        };
+        let mut cycles = polling_cycle::Cycles::new(plan.event_limit).unwrap();
+        let mut times = [7200, 7200, 7210, 7210, 7210].into_iter();
+        let retry = cycles.tick(
+            &settings,
+            &plan.maintenance,
+            &mut store,
+            polling_cycle::Hooks {
+                query,
+                send: |due: &crate::storage::DueDelivery| {
+                    assert_eq!(due.attempt_number, 1);
+                    ProviderOutcome::Retry
+                },
+                clock: || times.next(),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(retry.delivery.unwrap().unwrap().retrying, 1);
+        let health = retry.health.unwrap().unwrap();
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(10));
+        assert!(!health.poll.stale);
+        assert!(store
+            .due_deliveries("cluster", 7214, plan.maintenance.delivery_limit)
+            .unwrap()
+            .is_empty());
+        let pending = store
+            .due_deliveries("cluster", 7215, plan.maintenance.delivery_limit)
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        let id = pending[0].event_id.clone();
+        assert_eq!(pending[0].attempt_number, 2);
+        let checkpoint = store.restore("cluster", plan.identity_limit).unwrap().1;
+        drop(store);
+
+        let restored_plan = map(input).unwrap();
+        let mut store = open();
+        assert_eq!(
+            store
+                .restore("cluster", restored_plan.identity_limit)
+                .unwrap()
+                .1,
+            checkpoint
+        );
+        assert_eq!(
+            store
+                .due_deliveries("cluster", 7215, restored_plan.maintenance.delivery_limit)
+                .unwrap()[0]
+                .event_id,
+            id
+        );
+        let mut cycles = polling_cycle::Cycles::new(restored_plan.event_limit).unwrap();
+        let recovered = cycles.tick(
+            &settings,
+            &restored_plan.maintenance,
+            &mut store,
+            polling_cycle::Hooks {
+                query: |_: &mut Command, _, _| Err(QueryError::Timeout),
+                send: |due: &crate::storage::DueDelivery| {
+                    assert_eq!(due.event_id, id);
+                    assert_eq!(due.attempt_number, 2);
+                    ProviderOutcome::Delivered
+                },
+                clock: || Some(7400),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(
+            recovered.poll.unwrap().unwrap_err(),
+            polling_cycle::StageError::Poll
+        );
+        assert_eq!(recovered.delivery.unwrap().unwrap().delivered, 1);
+        assert_eq!(recovered.cleanup.unwrap().unwrap(), 0);
+        let health = recovered.health.unwrap().unwrap();
+        assert_eq!(health.poll.checkpoint_age_seconds, Some(200));
+        assert!(health.poll.stale);
+        assert_eq!(
+            store
+                .restore("cluster", restored_plan.identity_limit)
+                .unwrap()
+                .1,
+            checkpoint
+        );
+        drop(store);
+
+        let mut store = open();
+        assert!(store
+            .due_deliveries("cluster", 7400, restored_plan.maintenance.delivery_limit)
+            .unwrap()
+            .is_empty());
+        let cleaned = cycles.tick(
+            &settings,
+            &restored_plan.maintenance,
+            &mut store,
+            polling_cycle::Hooks {
+                query,
+                send: |_: &crate::storage::DueDelivery| panic!("completed delivery replayed"),
+                clock: || Some(7400 + 604801),
+                cancelled: || false,
+            },
+        );
+        assert_eq!(cleaned.cleanup.unwrap().unwrap(), 1);
+        assert!(!cleaned.health.unwrap().unwrap().poll.stale);
+        assert!(store
+            .due_deliveries(
+                "cluster",
+                7400 + 604801,
+                restored_plan.maintenance.delivery_limit
+            )
+            .unwrap()
+            .is_empty());
+    }
 }
