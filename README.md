@@ -90,9 +90,9 @@ python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
 ```
 
 The executable prints its development status and exits with code 1. The latest
-implementation milestone passed 335 Rust tests plus one intentionally ignored
+implementation milestone passed 337 Rust tests plus one intentionally ignored
 subprocess helper, custom process acceptance, eight Python/SQLite tests, six hook
-tests and 11 draft-configuration tests. Measured Rust line coverage was 97.54%; the
+tests and 11 draft-configuration tests. Measured Rust line coverage was 97.52%; the
 CI gate requires at least 80%. These are local results, not a hosted CI status claim.
 
 Private tests cover scheduler discovery, durable lifecycle/outbox state, supervised

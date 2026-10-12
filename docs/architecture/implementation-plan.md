@@ -3317,3 +3317,20 @@ replacement/read failure and reopened pending work. Public and installed gates r
 Validation: shared checks pass with 335 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (19,713/20,211), above the 80% gate.
+
+
+### Private protected snapshot-to-runtime acceptance
+
+Mixed plans can now prepare from one protected bounded configuration-file snapshot.
+Two tests reject missing, oversized, unsafe, symlinked and malformed inputs before
+lookup and prove replacement/deletion cannot change an owned plan. Existing composed
+cycle retry/restart acceptance now loads initial, denied and recovered plans from
+atomically replaced protected files. ADR 0030 records explicit re-preparation and
+platform/activation limits. No default path, ambient lookup or public contract changes.
+
+Next: private composed storage acquisition and recovery, with ownership contention
+and unsafe paths. Installed activation and public baselines remain review gates.
+
+Validation: shared checks pass with 337 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.52% (19,812/20,315), above the 80% gate.

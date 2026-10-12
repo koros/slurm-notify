@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private protected-file mixed configuration preparation reads one bounded snapshot before validation/lookups; read-failure and replacement ownership tests, with file-backed composed retry/permission-denial/restart acceptance.
+
 - Private per-destination SMTP cycle deadlines retain each composed timeout, reject incomplete/invalid maps before I/O and preserve frozen bindings through timeout edits and restart; controlled child acceptance verifies distinct retry/completion budgets.
 
 - Private composed mixed runtime cycles map validated controls and exact permissions into supervised SMTP dispatch; cancellation, retry/ordinary progress, denied restart and rotated-credential recovery acceptance, with explicit rejection of differing SMTP timeouts.

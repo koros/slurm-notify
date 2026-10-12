@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    Snapshot(crate::config_snapshot::Error),
     Validation(config_validate::Error),
     Shape,
     NoSmtp,
@@ -263,6 +264,16 @@ impl Plan {
         )
     }
 }
+// Read once; owned composition survives subsequent path replacement. No ambient lookups.
+pub(super) fn prepare_path(
+    path: &std::path::Path,
+    identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+    lookup: impl FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+) -> Result<Plan, Error> {
+    let snapshot = crate::config_snapshot::read(path).map_err(Error::Snapshot)?;
+    prepare(snapshot.bytes(), identity, lookup)
+}
+
 pub(super) fn prepare(
     bytes: &[u8],
     identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
@@ -439,6 +450,127 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn replace_config(path: &Path, bytes: &[u8]) {
+        let next = path.with_extension("next");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&next)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+        std::fs::rename(next, path).unwrap();
+    }
+    fn config_path(d: &crate::storage::tests::Directory) -> PathBuf {
+        d.path()
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .join("config.json")
+    }
+    fn prepare_file_fixture(v: &Value, path: &Path) -> Plan {
+        replace_config(path, &serde_json::to_vec(v).unwrap());
+        prepare_path(
+            path,
+            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            |name, _| {
+                assert!(!name.contains("SMTP"));
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+        )
+        .unwrap()
+    }
+    #[test]
+    fn protected_config_failures_stop_before_composition_lookups() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = crate::storage::tests::Directory::new();
+        let v = fixture(&d);
+        let path = config_path(&d);
+        let rejected = || {
+            prepare_path(
+                &path,
+                |_| panic!("rejected identity"),
+                |_, _| panic!("rejected lookup"),
+            )
+        };
+        assert!(matches!(
+            rejected(),
+            Err(Error::Snapshot(crate::config_snapshot::Error::Io))
+        ));
+        replace_config(&path, b"{");
+        assert!(matches!(rejected(), Err(Error::Validation(_))));
+        replace_config(&path, &vec![b' '; 65537]);
+        assert!(matches!(
+            rejected(),
+            Err(Error::Snapshot(crate::config_snapshot::Error::Limit))
+        ));
+        replace_config(&path, &serde_json::to_vec(&v).unwrap());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            rejected(),
+            Err(Error::Snapshot(
+                crate::config_snapshot::Error::UnsafePermissions
+            ))
+        ));
+        std::fs::remove_file(&path).unwrap();
+        symlink("root.der", &path).unwrap();
+        assert!(matches!(
+            rejected(),
+            Err(Error::Snapshot(crate::config_snapshot::Error::Io))
+        ));
+    }
+    #[test]
+    fn config_replacement_during_lookup_keeps_one_owned_validated_snapshot() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        let path = config_path(&d);
+        replace_config(&path, &serde_json::to_vec(&v).unwrap());
+        let old = prepare_path(
+            &path,
+            |_| {
+                // The protected read and validation have finished before this hook.
+                replace_config(&path, b"invalid replacement");
+                Ok(Zeroizing::new(b"alice".to_vec()))
+            },
+            |name, _| {
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+        )
+        .unwrap();
+        assert_eq!(old.common.observation.user(), "alice");
+        assert!(matches!(
+            prepare_path(
+                &path,
+                |_| panic!("invalid replacement identity"),
+                |_, _| panic!("invalid replacement lookup")
+            ),
+            Err(Error::Validation(_))
+        ));
+        v["providers"]["research_email"]["request_timeout_milliseconds"] = json!(1234);
+        let new = prepare_file_fixture(&v, &path);
+        assert_eq!(
+            old.timeout("research_email").unwrap(),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            new.timeout("research_email").unwrap(),
+            Duration::from_millis(1234)
+        );
+        assert_eq!(old.revisions(), new.revisions());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(old.permissions()[0].provider, "b".repeat(64));
     }
     #[test]
     fn validation_and_trust_failure_precede_all_injected_lookups() {
@@ -640,7 +772,8 @@ mod tests {
             "cluster_id":"research-cluster","destination":"research_email",
             "rendering_revision":rendering,"provider_revision":provider
         }]);
-        let plan = prepare_fixture(&v);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
         let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
         let mut cycles = Cycles::new(1).unwrap();
         let query = |command: &mut std::process::Command, timeout, limit| {
@@ -733,7 +866,7 @@ mod tests {
         v["routes"] = json!([{"events":["JOB_COMPLETED","JOB_TIMEOUT"],"send_to":["primary"]}]);
         let allowed_source = v.clone();
         v["delivery"]["smtp_permissions"] = json!([]);
-        let denied = prepare_fixture(&v);
+        let denied = prepare_file_fixture(&v, &path);
         let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
         let (blocked, ordinary, secrets) = run(
             &denied,
@@ -748,7 +881,7 @@ mod tests {
         assert_eq!((ordinary, secrets), (0, 0));
         assert!(blocked.cleanup.is_none());
         drop(store);
-        let recovered = prepare_fixture(&allowed_source);
+        let recovered = prepare_file_fixture(&allowed_source, &path);
         let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
         assert_eq!(
             store
