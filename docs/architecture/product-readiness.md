@@ -1,6 +1,6 @@
 # Product readiness assessment
 
-Assessment after unified private runtime process acceptance (`bc81d27`).
+Assessment after private explicit environment lookup and unified runtime process acceptance.
 Historical increments remain in the implementation plan; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
 
@@ -27,15 +27,15 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 371 Rust tests plus one ignored helper,
+The latest implementation milestone passed 375 Rust tests plus two ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.37% (21,812/22,401); the gate is 80%.
+Python tests. Rust line coverage was 97.34% (21,910/22,508); the gate is 80%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
 | --- | --- | --- |
 | Protected config and trust | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [Rust decoder](../../crates/notify-cli/src/config_decode.rs), [draft validator](../../crates/notify-cli/src/config_validate.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Reviewed schema baselines and installed bindings; decoding and validation already exist privately |
-| Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Effective-user OS lookup and explicit bounded environment lookup; current hooks are injected |
+| Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private explicit environment adapter exists; effective-user OS lookup and installed resource bindings remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
 | Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | OS signal binding and installed lifecycle/exit acceptance; cancellation currently uses an injected shared signal |
@@ -98,10 +98,11 @@ The following implementation sequence reuses the completed private pipeline:
 5. Complete setup/test/doctor UX and authorized cluster/provider acceptance. Settle
    license and support baselines, then installation/upgrade and release gates.
 
-Next private milestone: bounded explicit environment lookup, integrated with the
-existing injected resource boundary. It does not require activating a public command
-or choosing a public schema. Effective-user lookup and OS signal handling follow as
-separate increments with platform-specific acceptance.
+The [private environment adapter](../../crates/notify-cli/src/environment_resolution.rs)
+now composes with the injected resource boundary. Its accepted-value cap does not
+bound the initial standard-library OS allocation. Next private milestone:
+effective-user lookup; OS signal handling follows separately with platform-specific
+acceptance. Neither activates a public command or chooses a public schema.
 
 No percentage-complete estimate is assigned: unresolved product decisions and
 external acceptance are substantial work. This sequence approves no public contract,

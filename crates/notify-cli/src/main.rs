@@ -30,6 +30,9 @@ mod config_snapshot;
 mod trust_snapshot;
 
 #[cfg(test)]
+mod environment_resolution;
+
+#[cfg(test)]
 mod credential_resolution;
 
 #[cfg(test)]

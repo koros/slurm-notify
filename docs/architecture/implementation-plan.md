@@ -3699,3 +3699,21 @@ requires explicit contract review. No source, dependencies or defaults change.
 Validation: documentation-only milestone; shared checks run through required commit
 and push hooks. Latest source coverage remains the recorded `bc81d27` measurement:
 97.37% (21,812/22,401), above the 80% gate.
+
+
+### Private explicit environment lookup
+
+Added a private OS source for the existing injected resource lookup boundary.
+Reference/ceiling validation precedes access; owned encoded bytes are zeroizing,
+UTF-8 checked and capped without trimming or fallback. Static errors reveal no
+values. Unit boundary cases and a cleared-environment, bounded/reaped child verify
+actual SMTP/webhook composition without sending. ADR 0051 records the initial OS
+allocation and synchronous lookup limitations. No dependencies/defaults/contracts
+change; installed behavior remains unavailable.
+
+Next: private effective-user resolution with bounded identity validation and static
+failures; OS signal binding follows separately. Public contract review remains a gate.
+
+Validation: shared checks pass with 375 Rust tests plus two ignored child helpers,
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
+tests. Rust line coverage is 97.34% (21,910/22,508), above the 80% gate.
