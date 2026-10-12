@@ -56,7 +56,7 @@ universal deadline from the foreground scheduler.
 
 | Area | Current gap | Required evidence or decision |
 | --- | --- | --- |
-| Public contracts | Help/version CLI baseline approved; broader CLI/config/event proposals remain unapproved | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
+| Public contracts | Help/version CLI baseline approved; broader local MVP proposals adopted; schema snapshots and installed acceptance pending | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
 | Installed runtime | Implementation modules are test-only; executable exits with unavailable status | Activate reviewed contracts, bounded foreground runtime, owned state and supervised child dispatch; fresh-install acceptance |
 | Resource resolution | Protected reads and owned injected resources are tested, but installed resource mapping is absent | Reviewed parser/config-to-profile mapping, explicit bounded lookup and installed permission/error acceptance |
 | Onboarding | No usable setup wizard, test, doctor or status commands | Reviewed flows, safe opt-in test delivery, accessible/noninteractive behavior and newcomer acceptance |
@@ -72,8 +72,8 @@ rotation, host-key, reconnect and platform acceptance remain outstanding.
 ## Next sequence and activation decisions
 
 The [contract review package](../proposals/local-contract-review-v1.md) contains
-concrete CLI, config, SMTP, limits and payload proposals. Its recommendations remain
-unapproved. Before installed activation, record acceptance or edits for:
+concrete CLI, config, SMTP, limits and payload proposals. Its local MVP recommendations were adopted on 2026-10-13. Before further installed
+activation, record schemas/snapshots and implement acceptance for:
 
 - Strict JSON and explicit operational values, including limits, initial observation
   and catch-up policy.

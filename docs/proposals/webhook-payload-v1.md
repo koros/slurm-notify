@@ -1,5 +1,9 @@
 # Webhook payload v1 proposal
 
+> Adopted for the local MVP on 2026-10-13. Statements below describing this proposal
+> as unapproved are historical draft context. The [adoption record](local-contract-review-v1.md)
+> defines scope; installed implementation and acceptance remain separate milestones.
+
 Status: draft for review. These fields and examples are not supported interfaces,
 approved contract baselines, or outputs of the current executable. No serializer,
 public schema, database migration, or runtime behavior is introduced here.

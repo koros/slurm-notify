@@ -2,7 +2,9 @@
 
 These directories reserve reviewed baselines for CLI, configuration, events, and
 any deliberately supported Rust library API. The [finite help/version CLI](cli/README.md)
-is approved; configuration, events and library APIs have no approved baselines.
+is approved. The local MVP configuration, event, SMTP, CLI and limits proposals
+were adopted on 2026-10-13; schema/snapshot baselines and implementation acceptance
+remain pending. No public Rust library API is approved.
 The handoff examples remain proposals and must not be copied as final contracts.
 
 Before introducing a public surface, document its semantics and version policy,

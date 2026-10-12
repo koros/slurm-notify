@@ -1,5 +1,9 @@
 # Local SMTP configuration v1 extension proposal
 
+> Adopted for the local MVP on 2026-10-13. Statements below describing this proposal
+> as unapproved are historical draft context. The [adoption record](local-contract-review-v1.md)
+> defines scope; installed implementation and acceptance remain separate milestones.
+
 Status: draft for review. This extends the [local configuration proposal](local-webhook-config-v1.md)
 to describe the SMTP portion of the required MVP. No accepted schema, file loader,
 credential lookup or installed transport is introduced by this document.

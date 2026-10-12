@@ -13,6 +13,9 @@ the design handoff; no release has been published.
   acceptance for invalid arguments, non-Unicode input and resource-free execution.
 
 ### Changed
+
+- Record maintainer adoption of the local MVP contracts (strict JSON, foreground
+  CLI, HTTPS webhook, required STARTTLS SMTP, frozen events and explicit limits).
 - Empty and invalid installed invocations now exit 2; help/version exit 0. Shared
   checks and release-build CI smoke checks enforce the approved CLI baseline.
 

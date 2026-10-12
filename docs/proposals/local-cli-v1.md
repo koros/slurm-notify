@@ -1,5 +1,9 @@
 # Local CLI v1 proposal
 
+> Adopted for the local MVP on 2026-10-13. Statements below describing this proposal
+> as unapproved are historical draft context. The [adoption record](local-contract-review-v1.md)
+> defines scope; installed implementation and acceptance remain separate milestones.
+
 Status: draft for explicit review. No command, flag, exit code or output below is
 implemented or approved except the separately approved finite help/version slice.
 The installed executable supports exactly that slice; empty/invalid invocations exit 2.

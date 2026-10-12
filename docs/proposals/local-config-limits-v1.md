@@ -1,5 +1,9 @@
 # Local configuration limits v1 proposal
 
+> Adopted for the local MVP on 2026-10-13. Statements below describing this proposal
+> as unapproved are historical draft context. The [adoption record](local-contract-review-v1.md)
+> defines scope; installed implementation and acceptance remain separate milestones.
+
 Status: draft for review, not enforced by the executable and not an approved
 configuration schema. Values below are proposed resource ceilings, not defaults,
 cluster polling recommendations or supported platform guarantees. Required values

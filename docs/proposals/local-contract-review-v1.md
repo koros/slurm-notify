@@ -1,8 +1,10 @@
 # Local MVP contract review package
 
-Status: proposed, awaiting explicit review. These documents are review artifacts;
-they are not approved contracts and do not alter installed behavior. The next
-implementation must preserve this distinction until review is complete.
+Status: local MVP contract proposals adopted by the maintainer on 2026-10-13.
+Approval covers strict JSON/explicit settings, local foreground CLI, generic HTTPS
+webhook plus required STARTTLS SMTP, minimal frozen events and the proposed limits.
+Implementation/installed acceptance and remaining support/source-data decisions are
+still required; approval does not imply those capabilities are installed.
 
 ## Documents to review together
 
@@ -15,9 +17,9 @@ implementation must preserve this distinction until review is complete.
 - [Product readiness](../architecture/product-readiness.md): implemented evidence and remaining product gates.
 
 The separate finite help/version slice was approved on 2026-10-12 and implemented.
-All broader decisions below remain unapproved.
+The broader local MVP recommendations below were adopted on 2026-10-13.
 
-## Recommended broader decisions, still unapproved
+## Adopted local MVP decisions
 
 | Decision | Recommendation | Alternative / consequence |
 | --- | --- | --- |
@@ -40,13 +42,12 @@ or release is authorized by approving these drafts.
 The [limits draft](local-config-limits-v1.md) now proposes concrete bounds and
 cross-field validation, with a machine-readable review manifest and updated
 synthetic examples. It adds explicit stale/preparation/maintenance fields to the
-configuration draft. These choices still need acceptance or edits before schema
-freeze; they are ceilings, not defaults or cluster policy recommendations.
+configuration draft. These adopted choices are ceilings, not defaults or cluster policy recommendations.
+Record schema baselines and retain the existing bounded validator acceptance.
 
 Current private SMTP evidence supports 64 permission entries, descriptors up to
 4096 bytes, at most 32 trust roots/65,536 DER bytes, DATA up to 16,384 bytes and
-1..30,000 ms supervised requests. These are implementation bounds, not approval of
-all product resource limits. Public job-ID widths and source timestamp/timezone
+1..30,000 ms supervised requests. The proposed product limits are now adopted; implementation acceptance remains. Public job-ID widths and source timestamp/timezone
 semantics depend on the Slurm support baseline. Do not fabricate occurrence times.
 
 ## Private evidence available for reuse
@@ -107,6 +108,7 @@ is not proof those implementation gates pass.
 
 The [first installed CLI proposal](finite-cli-activation-v1.md) is intentionally
 independent: approving it does not accept the broader config/event/SMTP drafts.
-Record acceptance or edits per document and identify deferred decisions. The
+The adopted scope excludes unsupported source metadata, a public Rust API and
+real-cluster/provider runs or release publication. The
 [readiness sequence](../architecture/product-readiness.md) reuses completed private
 OS composition while retaining public payload and installed acceptance gates.

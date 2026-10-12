@@ -1,5 +1,9 @@
 # Local webhook configuration v1 proposal
 
+> Adopted for the local MVP on 2026-10-13. Statements below describing this proposal
+> as unapproved are historical draft context. The [adoption record](local-contract-review-v1.md)
+> defines scope; installed implementation and acceptance remain separate milestones.
+
 Status: draft for review, not accepted configuration. The executable cannot read
 this file, validate it, monitor jobs, or deliver notifications. Numeric example
 values are review examples, not operational defaults or cluster recommendations.

@@ -9,8 +9,8 @@ preserves past increments without treating their next steps as current instructi
 
 The target is a local foreground MVP with generic HTTPS webhook and required
 STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
-setup/test/doctor/status workflows. Broader public contracts are awaiting the
-maintainer's decision; help/version is approved. MIT licensing, refreshed guidance,
+setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
+help/version is already installed. MIT licensing, refreshed guidance,
 90% coverage and accurate badges are complete.
 
 Continuous scheduling and first-signal reason retention are now implemented
