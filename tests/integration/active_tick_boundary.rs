@@ -12,15 +12,49 @@ use std::{
     time::Duration,
 };
 use zeroize::Zeroizing;
-fn cancel_from_parent(signal: &Signal) {
+fn cancel_from_parent(signal: &Signal, os_signal: bool) {
     println!("READY");
     std::io::stdout().flush().unwrap();
-    let _ = std::io::stdin().read_exact(&mut [0]);
-    signal.cancel().unwrap();
+    if os_signal {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("signal callback deadline");
+            if matches!(
+                signal.wait(remaining).unwrap(),
+                crate::foreground_schedule::Wake::Cancelled
+            ) {
+                break;
+            }
+        }
+    } else {
+        let _ = std::io::stdin().read_exact(&mut [0]);
+        signal.cancel().unwrap();
+    }
 }
 pub(super) fn child() -> bool {
     let requested = std::env::args().nth(1);
-    let mode = requested.map(|value| value.replace("--lifecycle-", "--active-"));
+    let os_signal = requested.as_deref().is_some_and(|value| {
+        matches!(
+            value,
+            "--signal-query-int"
+                | "--signal-query-term"
+                | "--signal-send-int"
+                | "--signal-send-term"
+        )
+    });
+    let mode = requested.map(|value| {
+        if os_signal {
+            if value.contains("query") {
+                "--active-query".to_owned()
+            } else {
+                "--active-send".to_owned()
+            }
+        } else {
+            value.replace("--lifecycle-", "--active-")
+        }
+    });
     if !matches!(
         mode.as_deref(),
         Some("--active-query" | "--active-send" | "--active-query-replay" | "--active-send-replay")
@@ -32,6 +66,11 @@ pub(super) fn child() -> bool {
         return true;
     };
     let signal = Signal::new();
+    let binding = if os_signal {
+        Some(crate::foreground_signals::bind(&signal).unwrap())
+    } else {
+        None
+    };
     let send_case = mode.as_deref().is_some_and(|value| value.contains("send"));
     let replay = mode
         .as_deref()
@@ -59,7 +98,7 @@ pub(super) fn child() -> bool {
                 let report = session.tick_interruptible((Path::new("squeue"), Path::new("sacct")), Hooks {
             query: |command: &mut Command, _, _| {
                 if command.get_program() == "squeue" { return Ok(String::new()); }
-                if !send_case && !replay { cancel_from_parent(signal); }
+                if !send_case && !replay { cancel_from_parent(signal, os_signal); }
                 Ok(if send_case {
                     "research-cluster|1|alice|s|actual|FAILED|1:0\nresearch-cluster|2|alice|s|actual|FAILED|1:0"
                 } else { "research-cluster|1|alice|s|actual|COMPLETED|0:0" }.into())
@@ -71,7 +110,7 @@ pub(super) fn child() -> bool {
                     assert_eq!(due.destination, "primary");
                     sends += 1;
                     assert_eq!(sends, 1);
-                    if !replay { cancel_from_parent(signal); }
+                    if !replay { cancel_from_parent(signal, os_signal); }
                     Ok(crate::delivery::ProviderOutcome::Delivered)
                 }),
             clock: || Some(7200), cancelled: signal,
@@ -116,6 +155,12 @@ pub(super) fn child() -> bool {
             },
         },
     );
+    if let Some(binding) = binding {
+        drop(binding);
+        let fresh = Signal::new();
+        drop(crate::foreground_signals::bind(&fresh).unwrap());
+        assert!(!fresh.cancelled().unwrap());
+    }
     print!("{}", summary.render());
     true
 }
@@ -171,10 +216,22 @@ pub(super) fn acceptance() {
         .unwrap()
         .write_all(certificate.cert.der())
         .unwrap();
-    for send_case in [false, true] {
+    for (send_case, number) in [
+        (false, None),
+        (true, None),
+        (false, Some(libc::SIGINT)),
+        (false, Some(libc::SIGTERM)),
+        (true, Some(libc::SIGINT)),
+        (true, Some(libc::SIGTERM)),
+    ] {
         let name = if send_case { "send" } else { "query" };
-        let state = root.join(name);
-        let config = root.join(format!("{name}.json"));
+        let suffix = match number {
+            Some(libc::SIGINT) => "int",
+            Some(libc::SIGTERM) => "term",
+            _ => "injected",
+        };
+        let state = root.join(format!("{name}-{suffix}"));
+        let config = root.join(format!("{name}-{suffix}.json"));
         let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
             "../../docs/proposals/examples/local-mixed-config.json"
         ))
@@ -195,14 +252,12 @@ pub(super) fn acceptance() {
             .unwrap()
             .write_all(&serde_json::to_vec(&source).unwrap())
             .unwrap();
-        let mut running = crate::status_boundary::Running::start(
-            if send_case {
-                "--lifecycle-send"
-            } else {
-                "--lifecycle-query"
-            },
-            &config,
-        );
+        let mode = if number.is_some() {
+            format!("--signal-{name}-{suffix}")
+        } else {
+            format!("--lifecycle-{name}")
+        };
+        let mut running = crate::status_boundary::Running::start(&mode, &config);
         assert_eq!(
             crate::status_boundary::inspect("--status-inspect", &config),
             crate::status_boundary::Ack::Owned
@@ -210,7 +265,11 @@ pub(super) fn acceptance() {
         // Replace the protected source while the prepared callback is paused.
         let source_bytes = serde_json::to_vec(&source).unwrap();
         replace(&config, b"{invalid replacement fixture");
-        running.finish(false, b"foreground outcome=cancelled ticks=1\n");
+        if let Some(number) = number {
+            running.finish_signal(number, b"foreground outcome=cancelled ticks=1\n");
+        } else {
+            running.finish(false, b"foreground outcome=cancelled ticks=1\n");
+        }
         let mut store = Store::open_private(&state, Duration::from_millis(50)).unwrap();
         let due = store.due_deliveries("research-cluster", 7200, 10).unwrap();
         assert_eq!(due.len(), 1);

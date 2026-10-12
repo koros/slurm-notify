@@ -3770,3 +3770,21 @@ and frozen-work recovery. Installed activation remains review-gated.
 Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
 extended custom process acceptance, eight SQLite tests, six hook tests and 11
 draft-config tests. Rust line coverage is 97.23% (22,171/22,803), above the 80% gate.
+
+
+### Private active-callback OS signal acceptance
+
+Extended unified process fixtures with SIGINT/SIGTERM during cooperative query and
+first-send callbacks. Each signal/callback pair has independent state; protected
+source replacement, bounded shutdown, bridge rebind, invalid restart and restored
+recovery are verified. Query completion commits frozen pending work; known send
+success commits before cancellation and replay processes only the remaining item.
+ADR 0055 records synthetic callback/preemption limits. No dependencies, defaults
+or public contracts change.
+
+Next: compose private effective-user/environment sources with unified runtime
+startup and static failure/recovery acceptance. Installed activation remains gated.
+
+Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
+extended custom process acceptance, eight SQLite tests, six hook tests and 11
+draft-config tests. Rust line coverage is 97.24% (22,173/22,803), above the 80% gate.
