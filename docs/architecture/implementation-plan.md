@@ -1,7 +1,7 @@
 # Current implementation plan
 
 The private engine and OS resource/signal lifecycle are implemented and tested.
-The installed executable remains a placeholder. [Product readiness](product-readiness.md)
+The installed executable supports the approved help/version slice. [Product readiness](product-readiness.md)
 contains current capability evidence and limitations; [implementation history](implementation-history.md)
 preserves past increments without treating their next steps as current instructions.
 
@@ -13,9 +13,8 @@ reflect current status; the build artifact and Cargo metadata include MIT licens
 
 ## Next product milestones
 
-1. Implement the reviewed first installed CLI slice: help/version with exact output,
-   invocation errors, stream/exit behavior and installed-binary acceptance. The
-   [proposal](../proposals/finite-cli-activation-v1.md) remains pending review.
+1. Completed: the approved [help/version slice](../proposals/finite-cli-activation-v1.md)
+   has exact output/exit snapshots and installed-binary acceptance.
 2. Settle config/status semantics and baselines; connect existing protected Rust
    preparation and OS resources to installed commands, with no hidden sending.
 3. Complete public event persistence: opaque IDs, frozen webhook bytes, immutable

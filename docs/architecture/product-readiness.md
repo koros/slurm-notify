@@ -2,7 +2,8 @@
 
 Assessment after combined private OS resources and signal-driven unified runtime
 lifecycle acceptance.
-Historical increments remain in the implementation plan; this assessment groups
+The installed help/version slice is approved and tested.
+Historical increments remain in the implementation history; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
 
 ## Verified private prototype
@@ -28,9 +29,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 379 Rust tests plus four ignored child helpers,
+The latest implementation milestone passed 379 private Rust tests plus four installed
+CLI acceptance tests and four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.25% (22,176/22,803); the gate is 90%.
+Python tests. Rust line coverage was 97.25% (22,188/22,815); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -54,7 +56,7 @@ universal deadline from the foreground scheduler.
 
 | Area | Current gap | Required evidence or decision |
 | --- | --- | --- |
-| Public contracts | CLI/config/event examples remain proposals; contract baselines are unapproved | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
+| Public contracts | Help/version CLI baseline approved; broader CLI/config/event proposals remain unapproved | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
 | Installed runtime | Implementation modules are test-only; executable exits with unavailable status | Activate reviewed contracts, bounded foreground runtime, owned state and supervised child dispatch; fresh-install acceptance |
 | Resource resolution | Protected reads and owned injected resources are tested, but installed resource mapping is absent | Reviewed parser/config-to-profile mapping, explicit bounded lookup and installed permission/error acceptance |
 | Onboarding | No usable setup wizard, test, doctor or status commands | Reviewed flows, safe opt-in test delivery, accessible/noninteractive behavior and newcomer acceptance |
@@ -86,7 +88,7 @@ The following implementation sequence reuses the completed private pipeline:
 
 1. Record reviewed contracts and positive/negative/version compatibility fixtures.
    Assess opaque-ID dependencies; do not silently turn draft examples into baselines.
-2. Activate the independently reviewed help/version slice first. Bind later reviewed
+2. Help/version activation is complete. Bind later reviewed
    finite commands to existing private protected preparation, OS resource adapters
    and status inspection; verify installed failures, privacy and side effects.
 3. Implement the reviewed public event transaction: opaque ID and frozen webhook
@@ -107,10 +109,9 @@ lifecycle and cooperative active-callback recovery are tested privately.
 
 The [updated activation review](../proposals/local-contract-review-v1.md) identifies
 remaining signal-reason/130-vs-143 mapping, finite-budget renewal, webhook-only
-composition, live-status contention and public payload transaction gaps. The next
-review is the [exact help/version slice](../proposals/finite-cli-activation-v1.md).
-It can be approved independently; no broader draft is silently accepted. Installed
-commands, approved snapshots and public schema choices remain pending.
+composition, live-status contention and public payload transaction gaps. The
+[help/version slice](../proposals/finite-cli-activation-v1.md) is approved and
+implemented; further installed commands and public schema choices remain pending.
 
 No percentage-complete estimate is assigned: unresolved product decisions and
 external acceptance are substantial work. This sequence approves no public contract,

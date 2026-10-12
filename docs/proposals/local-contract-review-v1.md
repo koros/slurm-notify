@@ -14,7 +14,10 @@ implementation must preserve this distinction until review is complete.
 - [Configuration limits](local-config-limits-v1.md): proposed structural/resource bounds and boundary acceptance.
 - [Product readiness](../architecture/product-readiness.md): implemented evidence and remaining product gates.
 
-## Recommended decisions, still unapproved
+The separate finite help/version slice was approved on 2026-10-12 and implemented.
+All broader decisions below remain unapproved.
+
+## Recommended broader decisions, still unapproved
 
 | Decision | Recommendation | Alternative / consequence |
 | --- | --- | --- |
@@ -57,7 +60,7 @@ There is no installed config parser or supported CLI/event baseline yet.
 
 | Activation gap | Concrete decision or implementation needed |
 | --- | --- |
-| First finite CLI | Accept/edit the exact help/version slice independently; later finite commands require config/output review |
+| First finite CLI | Help/version approved and implemented; later finite commands require config/output review |
 | Config validation/status | Decide exact public output and error mapping; support both webhook-only and mixed configs without relying on the mixed runtime's SMTP requirement |
 | Status while monitoring | Current inspection requires exclusive ownership and closed rollback-journal state; decide contention UX or implement a separately tested live inspection path |
 | Signal exit policy | Draft proposes 130/143; current bridge stores only a cancellation boolean. Retain the first signal reason and define repeated/concurrent signal precedence before mapping exits |

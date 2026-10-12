@@ -1,8 +1,10 @@
 # First installed CLI activation proposal
 
-Status: proposed for explicit review. No installed behavior or approved baseline
-changes in this document. Approval applies only to the grammar/outputs below;
+Status: approved by the maintainer in this conversation on 2026-10-12 and implemented.
+Approval covers only the exact help/version grammar, streams and exits below.
 CLI/config/SMTP/payload/limits drafts remain separate review decisions.
+The baseline and installed-binary tests are under `contracts/cli/` and
+`crates/notify-cli/tests/cli.rs`.
 
 ## Recommended first slice
 
@@ -12,7 +14,7 @@ payloads, foreground exit reasons, scheduling renewal or configuration schemas.
 The full local CLI proposal remains the intended later scope; SMTP remains required
 for the MVP. This changes the recommended implementation order, not MVP scope.
 
-## Exact grammar and snapshots proposed for approval
+## Approved grammar and snapshots
 
 Accept exactly one argument: `--help` or `--version`. No short aliases, positional
 commands, combined options, implicit configuration path or environment defaults.
@@ -46,17 +48,16 @@ exit 2. Every other argument sequence: stdout empty, stderr exactly
 `Invalid invocation. Use --help for usage.\n`, exit 2. Do not echo rejected arguments,
 paths, environment values or parser error detail. Output has no ANSI sequences.
 
-## Acceptance after explicit review
+## Acceptance
 
-Record approval scope and any edits before creating approved CLI snapshots under
-`contracts/cli/`. Test exact bytes/streams/exits through the installed executable:
+Approved CLI snapshots are recorded under `contracts/cli/`. Test exact bytes/streams/exits through the installed executable:
 help, version, no arguments, unknown commands/options, duplicates, conflicting
 flags, positional values and non-Unicode arguments on supported Unix hosts.
 Verify cleared/invalid environment and inaccessible or absent config/state cause
 no different output or creation. Update the placeholder smoke expectation and
 shared checks deliberately; do not regenerate snapshots to hide changes.
 
-The existing placeholder exits 1. This proposal deliberately changes only these
+The previous placeholder exited 1. This approved slice changes only these
 invocations to the specified exits and outputs; it creates no monitoring capability.
 No new parser dependency is required for this two-option grammar. Later additions
 need their own reviewed snapshots and version/compatibility assessment. Dependency notices,

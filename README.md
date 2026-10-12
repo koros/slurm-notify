@@ -12,7 +12,8 @@ It aims to discover the current user's jobs and send lifecycle alerts without ro
 access or changes to batch scripts.
 
 **Current status: tested private engine; installed monitoring is unavailable.**
-The executable prints its development status and exits with code 1. No supported
+The executable supports `--help` and `--version` (exit 0). Empty or invalid
+invocations exit 2; monitoring commands remain unavailable. No supported
 monitoring release is available yet.
 
 ## Implemented
@@ -49,7 +50,7 @@ sh scripts/check-coverage.sh
 ```
 
 See [contributing](CONTRIBUTING.md) and [CI/coverage details](docs/operations/ci-and-coverage.md).
-CI artifacts contain the development placeholder, not a supported agent.
+CI artifacts contain the finite development CLI.
 
 ## Remaining work
 

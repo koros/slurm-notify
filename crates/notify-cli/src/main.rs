@@ -1,4 +1,4 @@
-//! Repository foundation executable; monitoring is not implemented.
+//! Finite help/version CLI; monitoring is not implemented.
 #[cfg(test)]
 mod foreground_report;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
@@ -143,7 +143,27 @@ mod smtp_submit_frame;
 #[cfg(test)]
 mod smtp_submit_dispatch;
 
-fn main() {
-    eprintln!("Slurm Notify is under development; monitoring is not implemented.");
-    std::process::exit(1);
+const HELP: &str = "Usage: slurm-notify --help | --version\n\nOptions:\n  --help     Show this help\n  --version  Show the package version\n\nMonitoring commands are not available in this build.\n";
+
+fn main() -> std::process::ExitCode {
+    let mut args = std::env::args_os().skip(1);
+    let first = args.next();
+    match (first.as_deref(), args.next()) {
+        (Some(arg), None) if arg == "--help" => {
+            print!("{HELP}");
+            std::process::ExitCode::SUCCESS
+        }
+        (Some(arg), None) if arg == "--version" => {
+            println!("slurm-notify {}", env!("CARGO_PKG_VERSION"));
+            std::process::ExitCode::SUCCESS
+        }
+        (None, None) => {
+            eprintln!("Usage: slurm-notify --help | --version");
+            std::process::ExitCode::from(2)
+        }
+        _ => {
+            eprintln!("Invalid invocation. Use --help for usage.");
+            std::process::ExitCode::from(2)
+        }
+    }
 }

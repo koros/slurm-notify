@@ -12,5 +12,10 @@ set +e
 output=$("${CARGO_TARGET_DIR:-target}/debug/slurm-notify" 2>&1)
 status=$?
 set -e
-test "$status" -eq 1
-test "$output" = "Slurm Notify is under development; monitoring is not implemented."
+test "$status" -eq 2
+test "$output" = "Usage: slurm-notify --help | --version"
+mkdir -p target
+"${CARGO_TARGET_DIR:-target}/debug/slurm-notify" --help > target/cli-help.stdout
+cmp contracts/cli/help.stdout target/cli-help.stdout
+"${CARGO_TARGET_DIR:-target}/debug/slurm-notify" --version > target/cli-version.stdout
+cmp contracts/cli/version.stdout target/cli-version.stdout

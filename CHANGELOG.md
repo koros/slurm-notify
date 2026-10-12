@@ -5,6 +5,15 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+### Added
+- Approved installed `--help`/`--version` CLI, exact stream/exit snapshots and binary
+  acceptance for invalid arguments, non-Unicode input and resource-free execution.
+
+### Changed
+- Empty and invalid installed invocations now exit 2; help/version exit 0. Shared
+  checks and release-build CI smoke checks enforce the approved CLI baseline.
+
+
 ### Changed
 
 - Enforce 90% minimum Rust workspace line coverage in CI/shared tooling; refresh badges and current documentation, archive chronological implementation notes and simplify active agent guidance.

@@ -1,7 +1,8 @@
 # Contract governance
 
 These directories reserve reviewed baselines for CLI, configuration, events, and
-any deliberately supported Rust library API. No baselines are approved yet.
+any deliberately supported Rust library API. The [finite help/version CLI](cli/README.md)
+is approved; configuration, events and library APIs have no approved baselines.
 The handoff examples remain proposals and must not be copied as final contracts.
 
 Before introducing a public surface, document its semantics and version policy,

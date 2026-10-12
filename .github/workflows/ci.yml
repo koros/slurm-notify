@@ -86,7 +86,7 @@ jobs:
           license-check: false
 
   development-build:
-    name: Development build artifact
+    name: Development CLI artifact
     needs: [rust, coverage, workflow-lint]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-22.04
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned development compiler
         run: rustup toolchain install 1.88.0 --profile minimal
-      - name: Build and smoke-check development placeholder
+      - name: Build and smoke-check development CLI
         shell: bash
         run: |
           cargo build --workspace --release --locked
@@ -103,8 +103,12 @@ jobs:
           output=$(target/release/slurm-notify 2>&1)
           status=$?
           set -e
-          test "$status" -eq 1
-          test "$output" = "Slurm Notify is under development; monitoring is not implemented."
+          test "$status" -eq 2
+          test "$output" = "Usage: slurm-notify --help | --version"
+          target/release/slurm-notify --help > target/cli-help.stdout
+          cmp contracts/cli/help.stdout target/cli-help.stdout
+          target/release/slurm-notify --version > target/cli-version.stdout
+          cmp contracts/cli/version.stdout target/cli-version.stdout
           mkdir -p target/development-artifact
           cp target/release/slurm-notify target/development-artifact/
           cp README.md LICENSE target/development-artifact/
@@ -112,7 +116,7 @@ jobs:
           sha256sum slurm-notify > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: development-placeholder-linux-x86_64
+          name: development-cli-linux-x86_64
           path: target/development-artifact/
           if-no-files-found: error
           retention-days: 7

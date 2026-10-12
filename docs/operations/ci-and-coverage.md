@@ -53,10 +53,10 @@ their existing shared checks without requiring contributors to install LLVM tool
 
 ## Build artifacts and release boundary
 
-Successful main pushes produce a checksummed Linux x86_64 **development placeholder**
+Successful main pushes produce a checksummed Linux x86_64 **development CLI**
 artifact after platform checks, coverage, and workflow validation pass. It is
-retained for seven days and smoke-tested to report unimplemented monitoring with
-exit status 1. This artifact is not a supported notification binary or a release.
+retained for seven days and smoke-tested against approved help/version snapshots
+(exit 0) and empty-invocation usage (exit 2). This artifact is not a supported notification binary or a release.
 Release publication and deployment are not automated while public contracts and release acceptance remain unresolved. Development
 artifacts include the MIT LICENSE; dependency license policy is a separate concern.
 

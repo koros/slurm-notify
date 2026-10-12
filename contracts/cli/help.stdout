@@ -1,0 +1,7 @@
+Usage: slurm-notify --help | --version
+
+Options:
+  --help     Show this help
+  --version  Show the package version
+
+Monitoring commands are not available in this build.
