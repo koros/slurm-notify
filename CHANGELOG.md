@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Changed
 
+- Refresh installed activation review with completed private OS evidence and concrete signal-reason, continuous scheduling, live-status and webhook-only gaps; propose an independently reviewable help/version slice with exact grammar/output/exit snapshots.
+
 - Consolidate foreground readiness evidence, correct completed private Rust preparation gaps and document concrete contract/installed activation decisions and the next bounded environment adapter milestone.
 
 - Update commit-pinned CI actions to checkout 7.0.1, upload-artifact 7.0.2 and dependency-review-action 5.0.0; retain existing inputs/gates and document Node 24 runner compatibility and all nine Dependabot assessments.

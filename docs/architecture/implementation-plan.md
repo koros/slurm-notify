@@ -3824,3 +3824,22 @@ evidence before choosing an activation slice. Public contract review remains a g
 Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
 extended custom process acceptance, eight SQLite tests, six hook tests and 11
 draft-config tests. Rust line coverage is 97.24% (22,174/22,803), above the 80% gate.
+
+
+### Installed activation review refresh
+
+Updated the review package to reuse completed private OS lifecycle evidence and
+identify actual remaining implementation gaps: signal reason, continuous scheduling
+renewal, live-status contention, webhook-only preparation and public event persistence.
+Proposed exact help/version grammar/output/exit snapshots as an independently
+reviewable first installed slice. Corrected stale adapter work in readiness sequence.
+No installed behavior or approved baselines change.
+
+Next: explicit review of `docs/proposals/finite-cli-activation-v1.md`; after approval,
+record reviewed CLI snapshots and implement/test only that help/version slice.
+Broader config/event/SMTP decisions remain separate. AGENTS.md requires explicit
+public contract review; a generic continuation does not establish acceptance.
+
+Validation: documentation-only milestone; required staged/push hooks run the shared
+suite. Latest source coverage remains the recorded `a94e6e8` result: 97.24%
+(22,174/22,803), above the 80% gate.

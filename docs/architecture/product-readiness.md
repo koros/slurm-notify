@@ -39,7 +39,7 @@ These are recorded local results, not a claim that hosted checks currently pass.
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private environment and effective-UID adapters exist; installed bindings and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
-| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Owned-runtime and cooperative active-callback SIGINT/SIGTERM recovery are tested; Combined OS resource/signal lifecycle and recovery are tested; installed lifecycle/exit bindings remain pending |
+| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; signal-reason exit mapping, continuous scheduling and installed bindings remain pending |
 | Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
 | Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public opaque IDs and frozen webhook JSON; authorized real-provider acceptance |
 
@@ -86,9 +86,9 @@ The following implementation sequence reuses the completed private pipeline:
 
 1. Record reviewed contracts and positive/negative/version compatibility fixtures.
    Assess opaque-ID dependencies; do not silently turn draft examples into baselines.
-2. Add private effective-user and bounded explicit environment adapters, with static
-   failures, missing/non-Unicode/oversized-value acceptance and secret redaction.
-   Bind OS signals to the existing shared cancellation adapter with process tests.
+2. Activate the independently reviewed help/version slice first. Bind later reviewed
+   finite commands to existing private protected preparation, OS resource adapters
+   and status inspection; verify installed failures, privacy and side effects.
 3. Implement the reviewed public event transaction: opaque ID and frozen webhook
    bytes committed with routes/outbox; test collisions, rollback, suppression,
    restart and edited destinations. Establish source timestamps without fabrication.
@@ -100,15 +100,17 @@ The following implementation sequence reuses the completed private pipeline:
    license and support baselines, then installation/upgrade and release gates.
 
 The [private environment adapter](../../crates/notify-cli/src/environment_resolution.rs)
-now composes with the injected resource boundary. Its accepted-value cap does not
-bound the initial standard-library OS allocation. The
-[private effective-user adapter](../../crates/notify-cli/src/effective_user.rs) uses bounded scratch storage; OS account lookup duration remains unbounded. Next
-milestone: consolidate the concrete installed activation review from combined OS
-lifecycle evidence. Private OS resource startup, signal shutdown and restored
-replay/status recovery are tested. Cooperative active-callback OS
-signal and partial-delivery recovery are tested; see
-[signal bridge limitations](../adr/0053-private-foreground-signal-bridge.md).
-Neither activates a public command or chooses a public schema.
+composes with the resource boundary; its accepted-value cap does not bound the
+initial OS allocation. The [effective-user adapter](../../crates/notify-cli/src/effective_user.rs)
+has bounded scratch storage but synchronous NSS duration. Combined signal/resource
+lifecycle and cooperative active-callback recovery are tested privately.
+
+The [updated activation review](../proposals/local-contract-review-v1.md) identifies
+remaining signal-reason/130-vs-143 mapping, finite-budget renewal, webhook-only
+composition, live-status contention and public payload transaction gaps. The next
+review is the [exact help/version slice](../proposals/finite-cli-activation-v1.md).
+It can be approved independently; no broader draft is silently accepted. Installed
+commands, approved snapshots and public schema choices remain pending.
 
 No percentage-complete estimate is assigned: unresolved product decisions and
 external acceptance are substantial work. This sequence approves no public contract,
