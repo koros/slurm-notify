@@ -3084,3 +3084,23 @@ preservation. Installed mapping and activation still require explicit review.
 Validation: shared checks pass with 311 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.56% (17,000/17,426), above the 80% gate.
+
+### Private atomic event-specific enqueueing
+
+Added a private routed polling adapter and shared storage selection builder. New
+deliverable events select destinations before the existing atomic transaction;
+in-memory reconciliation publishes only after commit. Existing uniform/SMTP paths
+retain their selections through the builder. Unmatched events remain in the ledger.
+
+One injected outbox-trigger acceptance test verifies transaction rollback and
+unpublished candidate state, successful retry, per-event destinations and reopen
+with edited routes without retargeting pending work or backfilling unmatched events.
+ADR 0023 records ordinary-outbox scope and callback/payload/SMTP limitations.
+No dependency, runtime default or public contract changes.
+
+Next: private selected routes alongside mixed SMTP preparation. Installed mapping
+and activation still require explicit public contract review.
+
+Validation: shared checks pass with 312 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.58% (17,171/17,596), above the 80% gate.

@@ -32,6 +32,34 @@ fn event(name: &str) -> Result<usize, Error> {
     }
 }
 impl Plan {
+    pub(super) fn poll_with(
+        &self,
+        request: &crate::scheduler::PollRequest<'_>,
+        reconciler: &mut crate::lifecycle::Reconciler,
+        store: &mut crate::storage::Store,
+        observed_at: i64,
+        query: impl FnMut(
+            &mut std::process::Command,
+            std::time::Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+    ) -> Result<Vec<crate::lifecycle::Event>, crate::scheduler::DurablePollError> {
+        let mut candidate = reconciler.clone();
+        let events = crate::scheduler::poll_with(request, &mut candidate, query)
+            .map_err(crate::scheduler::DurablePollError::Poll)?;
+        store
+            .persist_routed_reconciler(
+                &candidate,
+                &events,
+                request.cluster,
+                request.history_end,
+                observed_at,
+                |event| self.destinations(&event.state),
+            )
+            .map_err(crate::scheduler::DurablePollError::Storage)?;
+        *reconciler = candidate;
+        Ok(events)
+    }
     pub(super) fn new(providers: &[&str], rules: &[Rule<'_>]) -> Result<Self, Error> {
         if providers.is_empty()
             || providers.len() > 64
@@ -238,5 +266,101 @@ mod tests {
             destinations: &["x"],
         });
         assert!(matches!(Plan::new(&["x"], &rules), Err(Error::Limit)));
+    }
+    #[test]
+    fn event_routes_commit_atomically_and_do_not_retarget_pending_work_after_reopen() {
+        use crate::{lifecycle::Reconciler, scheduler::PollRequest, storage::Store};
+        use std::{path::Path, time::Duration};
+        let directory = crate::storage::tests::Directory::new();
+        let open = || Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open();
+        let plan = Plan::new(
+            &["success", "failure"],
+            &[
+                Rule {
+                    events: &["JOB_COMPLETED"],
+                    destinations: &["success"],
+                },
+                Rule {
+                    events: &["JOB_FAILED"],
+                    destinations: &["failure"],
+                },
+            ],
+        )
+        .unwrap();
+        let request = PollRequest {
+            active_program: Path::new("squeue"),
+            accounting_program: Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let query = |command: &mut std::process::Command, _, _| {
+            Ok(if command.get_program()=="squeue" {""}
+            else {"cluster|1|alice|s|actual|COMPLETED|0:0\ncluster|2|alice|s|actual|FAILED|1:0\ncluster|3|alice|s|actual|TIMEOUT|1:0"}.into())
+        };
+        let mut reconciler = Reconciler::with_capacity(10);
+        let fault = rusqlite::Connection::open(directory.path()).unwrap();
+        fault
+            .execute_batch(
+                "CREATE TRIGGER block_route BEFORE INSERT ON outbox
+            WHEN NEW.destination='failure' BEGIN SELECT RAISE(ABORT,'fixture route block'); END;",
+            )
+            .unwrap();
+        assert!(plan
+            .poll_with(&request, &mut reconciler, &mut store, 10, query)
+            .is_err());
+        assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+        assert!(store.restore("cluster", 10).unwrap().1.is_none());
+        assert!(store.due_deliveries("cluster", 10, 10).unwrap().is_empty());
+        fault.execute_batch("DROP TRIGGER block_route;").unwrap();
+        assert_eq!(
+            plan.poll_with(&request, &mut reconciler, &mut store, 10, query)
+                .unwrap()
+                .len(),
+            3
+        );
+        let pending = store.due_deliveries("cluster", 10, 10).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending
+            .iter()
+            .any(|due| due.event.identity.job == "1" && due.destination == "success"));
+        assert!(pending
+            .iter()
+            .any(|due| due.event.identity.job == "2" && due.destination == "failure"));
+        let ids: Vec<_> = pending
+            .iter()
+            .map(|due| (due.event_id.clone(), due.destination.clone()))
+            .collect();
+        drop(store);
+        store = open();
+        let (mut reconciler, checkpoint) = store.restore("cluster", 10).unwrap();
+        assert_eq!(reconciler.emitted.len(), 3);
+        assert_eq!(checkpoint.as_deref(), Some(request.history_end));
+        let changed = Plan::new(
+            &["replacement"],
+            &[Rule {
+                events: &["JOB_COMPLETED", "JOB_FAILED", "JOB_TIMEOUT"],
+                destinations: &["replacement"],
+            }],
+        )
+        .unwrap();
+        assert!(changed
+            .poll_with(&request, &mut reconciler, &mut store, 11, query)
+            .unwrap()
+            .is_empty());
+        let after = store.due_deliveries("cluster", 11, 10).unwrap();
+        assert_eq!(
+            after
+                .iter()
+                .map(|due| (due.event_id.clone(), due.destination.clone()))
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert!(after.iter().all(|due| due.attempt_number == 1));
     }
 }

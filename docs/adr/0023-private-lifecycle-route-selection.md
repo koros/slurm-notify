@@ -23,12 +23,26 @@ nine lifecycle kinds, no-match/empty rules, all 64 destination bits, 128-rule
 acceptance, exceeded ceilings, duplicates and unknown references. No filesystem,
 scheduler, resource lookup or network access is required.
 
-This selects destinations only. It does not alter durable event preparation,
-pending-route bindings, permissions, disclosure or sending. A later persistence
-adapter must select destinations before atomically enqueueing an event; applying
-current rules to already pending work is not authorized by this experiment.
+The private polling adapter now selects each newly deliverable event's destinations
+before the existing atomic storage transaction. Candidate reconciliation publishes
+only after commit. The existing uniform-destination and SMTP paths delegate through
+the same storage builder with their original destination selections.
+
+An additional temporary-SQLite acceptance test routes completed and failed events
+separately while retaining an unmatched timeout in the deduplication ledger. A
+synthetic outbox trigger rejects one destination; jobs, event ledger, outbox and
+checkpoint changes roll back and the in-memory candidate remains unpublished.
+Removing the trigger allows recovery. Reopening with replacement rules preserves
+the original pending destinations and attempts; it neither retargets those records
+nor backfills the previously unmatched event.
+
+This prepares private ordinary outbox routes, without payload freezing, SMTP
+rendering/profile composition, permission grants, disclosure changes or sending.
+The storage selector callback is private and caller-managed; the route plan bounds
+its own output, without certifying arbitrary callbacks. Current rules must not be
+applied to already pending work to retarget it.
 
 ## Next
 
-Prepare private atomic event-specific enqueueing with route-selection acceptance
-and restart preservation. Installed mapping and activation require explicit review.
+Prepare private route selection alongside mixed SMTP preparation and failure/restart
+acceptance. Installed mapping and activation require explicit contract review.

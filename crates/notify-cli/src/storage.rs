@@ -822,6 +822,36 @@ impl Store {
         )
     }
 
+    pub(super) fn persist_routed_reconciler<'a>(
+        &mut self,
+        candidate: &super::lifecycle::Reconciler,
+        deliverable: &[super::lifecycle::Event],
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+        select: impl FnMut(&super::lifecycle::Event) -> Vec<&'a str>,
+    ) -> Result<(), StorageError> {
+        self.persist_selected(
+            PollPreparation {
+                candidate,
+                deliverable,
+                destinations: &[],
+                smtp_destinations: &[],
+                messages: &[],
+            },
+            cluster,
+            through,
+            observed_at,
+            SmtpPlan {
+                providers: std::collections::HashMap::new(),
+                revisions: std::collections::HashMap::new(),
+                destinations: &[],
+                messages: std::collections::HashMap::new(),
+            },
+            select,
+        )
+    }
+
     // Rendering occurs before this call; all eligible new pairs commit together.
     // Historical events retain their routes and never consume new preparations.
     pub(super) fn persist_prepared_reconciler(
@@ -974,10 +1004,23 @@ impl Store {
         observed_at: i64,
         smtp: SmtpPlan<'_>,
     ) -> Result<(), StorageError> {
+        let destinations = preparation.destinations;
+        self.persist_selected(preparation, cluster, through, observed_at, smtp, |_| {
+            destinations.to_vec()
+        })
+    }
+    fn persist_selected<'a>(
+        &mut self,
+        preparation: PollPreparation<'_>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+        smtp: SmtpPlan<'_>,
+        mut select: impl FnMut(&super::lifecycle::Event) -> Vec<&'a str>,
+    ) -> Result<(), StorageError> {
         let PollPreparation {
             candidate,
             deliverable,
-            destinations,
             ..
         } = preparation;
         let jobs: Vec<_> = candidate
@@ -993,10 +1036,21 @@ impl Store {
             .collect();
         let ledger: Vec<_> = candidate.emitted.iter().collect();
         let ids: Vec<_> = ledger.iter().map(|event| event_id(event)).collect();
+        let selected: Vec<_> = ledger
+            .iter()
+            .map(|event| {
+                if deliverable.contains(event) {
+                    select(event)
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
         let events: Vec<_> = ledger
             .iter()
             .zip(&ids)
-            .map(|(event, id)| Event {
+            .zip(&selected)
+            .map(|((event, id), destinations)| Event {
                 id,
                 job: Job {
                     cluster: &event.identity.cluster,
@@ -1006,11 +1060,7 @@ impl Store {
                     state: event.state.code(),
                 },
                 kind: event.state.code(),
-                destinations: if deliverable.contains(event) {
-                    destinations
-                } else {
-                    &[]
-                },
+                destinations,
             })
             .collect();
         self.record_poll_with_smtp(&jobs, &events, cluster, through, observed_at, smtp)

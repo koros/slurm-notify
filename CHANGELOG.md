@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private event-specific routed polling commits selected outbox pairs with the existing jobs/event/checkpoint transaction; injected enqueue failure and restart tests verify rollback, unmatched-event deduplication and unchanged pending destinations after route edits.
+
 - Private bounded lifecycle route selection with owned aliases, per-event destination unions, duplicate/reference rejection and three boundary tests; no installed routing or public event contract.
 
 - Private injected scheduler identity and initial-observation mapping with user-only preflight, owned zeroizing metadata, static failures and three policy/identity/durable emit-suppress tests; no effective-user adapter or installed activation.
