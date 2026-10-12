@@ -3495,3 +3495,21 @@ signal and scheduled-session acceptance. Public and installed gates remain.
 Validation: shared checks pass with 357 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.43% (21,178/21,736), above the 80% gate.
+
+
+### Private interruptible foreground wait
+
+A shared sticky cancellation signal uses one mutex/condition variable for checking,
+wait registration and wake-all cancellation. Bounded waits tolerate spurious wakes
+through the existing finite scheduler. Sessions can combine real Instant time and
+the signal while retaining shutdown semantics. Five tests cover duration/sticky
+policy, timeout, multiple waiters, poison and owned cancellation/restart/reacquisition.
+ADR 0040 records fail-closed poisoning, tick-hook cooperation and OS latency limits.
+No public contracts, dependencies or executable defaults change.
+
+Next: real wait/monotonic adapter process-boundary acceptance for cancellation,
+forced termination and pending-work replay. Public and installed gates remain.
+
+Validation: shared checks pass with 362 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.44% (21,334/21,894), above the 80% gate.

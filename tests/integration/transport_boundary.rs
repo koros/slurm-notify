@@ -107,6 +107,9 @@ mod foreground_schedule;
 #[path = "../../crates/notify-cli/src/foreground_session.rs"]
 mod foreground_session;
 #[allow(unused_imports)]
+#[path = "../../crates/notify-cli/src/foreground_wait.rs"]
+mod foreground_wait;
+#[allow(unused_imports)]
 #[path = "../../crates/notify-cli/src/mixed_config_composition.rs"]
 mod mixed_config_composition;
 #[allow(unused_imports)]

@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private caller-owned sticky cancellation wakes bounded condition-variable waits; owned sessions combine it with real monotonic scheduling, with timeout, shared cancellation, poison and cancelled restart/lock-release acceptance.
+
 - Private foreground process acceptance covers cancellation while waiting, forced owner termination and wait failure after committed blocked SMTP work; bounded static diagnostics and child replay verify unchanged frozen bindings, attempts and deduplication.
 
 - Private foreground scheduling uses monotonic completion-relative delays, finite tick/wake budgets and interruptible injected waits; delayed/blocked tick, cancellation, clock/error and owner-release/restart acceptance.

@@ -848,6 +848,50 @@ mod tests {
         }
     }
     #[test]
+    fn interruptible_session_cancels_between_ticks_and_reopens_owned_state() {
+        use crate::{foreground_schedule::Exit, foreground_wait::Signal};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let signal = Signal::new();
+        let mut session = start_session(&path);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_signal = signal.clone();
+        let worker = std::thread::spawn(move || {
+            let result = session.run_interruptible(2, &worker_signal, |session| {
+                assert!(session.status(7200).unwrap().poll.stale);
+                ready_tx.send(()).unwrap();
+                Ok(crate::polling_cycle::TickReport::default())
+            });
+            let closed = matches!(
+                session.status(7200),
+                Err(crate::foreground_session::Error::Closed)
+            );
+            done_tx.send((result, closed)).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        signal.cancel().unwrap();
+        let (result, closed) = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(result, Ok(Exit::Cancelled { ticks: 1 }));
+        assert!(closed);
+        worker.join().unwrap();
+        drop(open_owned_fixture(&plan));
+        // A fresh session sharing the sticky signal runs no tick and releases ownership.
+        let mut restarted = start_session(&path);
+        assert_eq!(
+            restarted.run_interruptible(2, &signal, |_| panic!("cancelled tick")),
+            Ok(Exit::Cancelled { ticks: 0 })
+        );
+        drop(open_owned_fixture(&plan));
+        assert_eq!(
+            restarted.run_interruptible(1, &Signal::new(), |_| panic!("closed tick")),
+            Err(crate::foreground_schedule::Error::Tick)
+        );
+    }
+    #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;
         let d = crate::storage::tests::Directory::new();
