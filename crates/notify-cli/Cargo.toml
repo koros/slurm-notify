@@ -16,7 +16,7 @@ serde_core = "=1.0.229"
 rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
-url = "=2.5.4"
+url = "=2.5.8"
 httpdate = "=1.0.3"
 # Explicit zeroization version for the private prototypes.
 zeroize = "=1.8.1"
