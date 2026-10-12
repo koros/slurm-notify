@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private process-boundary shutdown reporting covers shared-signal cancellation, exhausted blocked replay and wait failure; exact bounded diagnostics, ownership release and unchanged durable work are verified.
+
 - Private foreground shutdown reports classify cancellation, budget exhaustion and static failures with bounded counts/unknown error counts and 96-byte ASCII summaries; owned shutdown and metadata-exclusion acceptance.
 
 - Private active-tick process acceptance cancels accounting-query and ordinary-send callbacks; owner release, frozen pending-work replay and exactly remaining partial-delivery recovery are verified with static child diagnostics.

@@ -3583,3 +3583,19 @@ Public and installed gates remain.
 Validation: shared checks pass with 367 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.41% (21,601/22,176), above the 80% gate.
+
+
+### Private shutdown report process acceptance
+
+Trusted foreground children render bounded reports after shared-signal cancellation,
+exhaustion and wait failure. Exact bounded decoding rejects arbitrary/oversized text;
+parent checks ownership release and unchanged pending work after reported replay.
+ADR 0045 retains the distinction between exhaustion and delivery completion.
+No public output contracts, defaults or dependencies change.
+
+Next: private bounded startup failure reports for protected configuration and
+owner-acquisition failures. Public and installed gates remain.
+
+Validation: shared checks pass with 367 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.42% (21,604/22,176), above the 80% gate.

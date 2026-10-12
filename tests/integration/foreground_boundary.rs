@@ -13,7 +13,16 @@ use std::{
 use zeroize::Zeroizing;
 
 pub(super) fn child() -> bool {
-    let mode = std::env::args().nth(1);
+    let requested = std::env::args().nth(1);
+    let report_output = requested
+        .as_deref()
+        .is_some_and(|value| value.starts_with("--report-"));
+    let mode = match requested.as_deref() {
+        Some("--report-cancelled") => Some("--foreground-real-wait".to_owned()),
+        Some("--report-exhausted") => Some("--foreground-replay".to_owned()),
+        Some("--report-failed") => Some("--foreground-wait-error".to_owned()),
+        _ => requested,
+    };
     if !matches!(
         mode.as_deref(),
         Some(
@@ -117,6 +126,13 @@ pub(super) fn child() -> bool {
         session.status(7200),
         Err(crate::foreground_session::Error::Closed)
     ));
+    if report_output {
+        print!(
+            "{}",
+            crate::foreground_report::Report::classify(&result).render()
+        );
+        return true;
+    }
     println!(
         "{}",
         match result {
@@ -187,6 +203,36 @@ pub(super) fn one_shot(mode: &str, path: &Path, expected: &[u8]) {
     )
     .unwrap();
     assert_eq!(output, expected);
+}
+fn decode_report(bytes: &[u8]) -> Result<Vec<u8>, crate::transport::Error> {
+    if bytes.len() <= crate::foreground_report::MAX_BYTES
+        && matches!(
+            bytes,
+            b"foreground outcome=cancelled ticks=1\n"
+                | b"foreground outcome=exhausted ticks=2\n"
+                | b"foreground outcome=failed_wait ticks=unknown\n"
+        )
+    {
+        Ok(bytes.to_vec())
+    } else {
+        Err(crate::transport::Error::InvalidInput)
+    }
+}
+fn reported_exhaustion(path: &Path) {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args([std::ffi::OsStr::new("--report-exhausted"), path.as_os_str()]);
+    let output = crate::transport::supervise_with(
+        &mut command,
+        Vec::new(),
+        Duration::from_secs(2),
+        0,
+        crate::foreground_report::MAX_BYTES,
+        decode_report,
+    )
+    .unwrap();
+    assert_eq!(output, b"foreground outcome=exhausted ticks=2\n");
+    assert!(decode_report(b"foreground outcome=failed_wait ticks=private-path\n").is_err());
+    assert!(decode_report(&[b'x'; 97]).is_err());
 }
 fn pending(state: &Path) -> (String, i64, Vec<u8>, String, Option<String>) {
     let mut store = crate::storage::Store::open_private(state, Duration::from_millis(50)).unwrap();
@@ -267,6 +313,16 @@ pub(super) fn acceptance() {
         ),
         ("--foreground-wait", true, b"".as_slice()),
         (
+            "--report-cancelled",
+            false,
+            b"foreground outcome=cancelled ticks=1\n".as_slice(),
+        ),
+        (
+            "--report-failed",
+            false,
+            b"foreground outcome=failed_wait ticks=unknown\n".as_slice(),
+        ),
+        (
             "--foreground-real-wait",
             false,
             b"FOREGROUND CANCELLED\n".as_slice(),
@@ -293,6 +349,7 @@ pub(super) fn acceptance() {
             assert_eq!(&durable, previous);
         }
         one_shot("--foreground-replay", &config, b"FOREGROUND EXHAUSTED\n");
+        reported_exhaustion(&config);
         assert_eq!(pending(&state), durable);
         previous = Some(durable);
         let report = crate::status_composition::prepare_path(&config)
