@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Changed
 
+- Enforce 90% minimum Rust workspace line coverage in CI/shared tooling; refresh badges and current documentation, archive chronological implementation notes and simplify active agent guidance.
+
 - Refresh installed activation review with completed private OS evidence and concrete signal-reason, continuous scheduling, live-status and webhook-only gaps; propose an independently reviewable help/version slice with exact grammar/output/exit snapshots.
 
 - Consolidate foreground readiness evidence, correct completed private Rust preparation gaps and document concrete contract/installed activation decisions and the next bounded environment adapter milestone.
@@ -18,6 +20,8 @@ the design handoff; no release has been published.
 - Patch private prototype dependencies to lettre 0.11.22, url 2.5.4 and time 0.3.47; pin development/CI Rust 1.88.0 to compile their fixes, remove obsolete stacker/psm constraints and reject advisory Punycode examples before webhook access. Product support/MSRV remains undecided. Coverage startup clears previous generated profiles for each measurement.
 
 ### Added
+
+- MIT project license and Cargo SPDX metadata; development artifacts now include LICENSE instead of the pending-license placeholder.
 
 - Private foreground lifecycle fixtures combine effective-UID/environment resources with SIGINT/SIGTERM cancellation; bounded shutdown, bridge cleanup, unchanged frozen pending work and fresh-resource replay/status recovery are verified.
 

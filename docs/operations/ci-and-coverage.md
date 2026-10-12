@@ -12,7 +12,7 @@ compiler compatibility and existing dependency pins still require review.
 
 ## Coverage gate
 
-The coverage job fails below **80% aggregate Rust workspace line coverage** using
+The coverage job fails below **90% aggregate Rust workspace line coverage** using
 cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.88.0 compiler.
 The prebuilt coverage tool keeps the coverage installation reproducible. Third-party Actions are commit-pinned;
 installation disables fallback and retains checksum verification.
@@ -32,10 +32,9 @@ when the threshold fails. A failed test fails the job even without a report.
 There is no external coverage service or upload secret. The README coverage badge
 states the enforced minimum, not a claimed live measurement.
 
-The measured local baseline after the 2026-10-12 Dependabot updates is **97.59%**
-(18,509 of 18,966 lines), using macOS and Rust 1.88.0 with prior raw profiles cleared.
-Compiler/report counting changes mean these counts are not directly comparable to
-earlier measurements. Counts can also vary between platforms and runs.
+Current local counts and coverage are recorded in
+[product readiness](../architecture/product-readiness.md). Counts can vary between
+platforms/runs; hosted results must be checked separately.
 The denominator is cargo-llvm-cov's default workspace report: crate source,
 including embedded unit-test/fixture code. Dependency code, bundled SQLite C,
 Python/shell tooling, and integration harness source files excluded by the tool's
@@ -49,7 +48,7 @@ previous runs or mixing LLVM formats after a compiler upgrade.
 There are no project-specific filename exclusions or suppressed uncovered modules.
 This metric describes the private prototypes; it does not certify working product
 notifications. Python and shell behavior have separate CI checks, not a claim of
-80% measured coverage. Coverage is authoritative in CI; local Git hooks retain
+90% measured coverage. Coverage is authoritative in CI; local Git hooks retain
 their existing shared checks without requiring contributors to install LLVM tools.
 
 ## Build artifacts and release boundary
@@ -58,12 +57,12 @@ Successful main pushes produce a checksummed Linux x86_64 **development placehol
 artifact after platform checks, coverage, and workflow validation pass. It is
 retained for seven days and smoke-tested to report unimplemented monitoring with
 exit status 1. This artifact is not a supported notification binary or a release.
-Release publication and deployment are not automated while licensing, public
-contracts, and release acceptance remain unresolved.
+Release publication and deployment are not automated while public contracts and release acceptance remain unresolved. Development
+artifacts include the MIT LICENSE; dependency license policy is a separate concern.
 
 Repository branch protection is a separate GitHub administrator setting. To enforce
 these checks before merging, require `Checks (ubuntu-22.04)`, `Checks (macos-14)`,
-`Rust coverage (at least 80%)`, `Workflow validation`, and `Dependency review` in a
+`Rust coverage (at least 90%)`, `Workflow validation`, and `Dependency review` in a
 ruleset. Workflow files alone do not prevent bypass via direct pushes. This change
 does not alter remote branch-protection settings.
 

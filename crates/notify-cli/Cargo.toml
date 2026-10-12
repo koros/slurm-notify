@@ -3,6 +3,7 @@ name = "slurm-notify"
 version = "0.0.0"
 edition = "2021"
 publish = false
+license = "MIT"
 
 [[bin]]
 name = "slurm-notify"

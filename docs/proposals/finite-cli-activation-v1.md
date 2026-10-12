@@ -59,5 +59,5 @@ shared checks deliberately; do not regenerate snapshots to hide changes.
 The existing placeholder exits 1. This proposal deliberately changes only these
 invocations to the specified exits and outputs; it creates no monitoring capability.
 No new parser dependency is required for this two-option grammar. Later additions
-need their own reviewed snapshots and version/compatibility assessment. License,
+need their own reviewed snapshots and version/compatibility assessment. Dependency notices,
 product support and release authorization are independent of this CLI review.

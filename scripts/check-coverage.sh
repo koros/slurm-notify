@@ -22,4 +22,4 @@ PY_COLLECT
 cargo llvm-cov report --json --output-path target/coverage/rust.json
 cargo llvm-cov report --lcov --output-path target/coverage/lcov.info
 cargo llvm-cov report --html --output-dir target/coverage
-cargo llvm-cov report --fail-under-lines 80
+cargo llvm-cov report --fail-under-lines 90

@@ -82,12 +82,10 @@ review settles semantics; installed acceptance still has to prove implementation
    opaque event IDs and frozen webhook bytes atomically before public sending.
 4. Implement the smallest reviewed runtime slice privately, then activate installed
    commands with fresh-install, no-hidden-side-effect and restart acceptance.
-5. Keep unresolved support, cluster policy, licensing, security and release gates
+5. Keep unresolved support, cluster policy, security and release gates
    visible. Pinning the development toolchain does not set the product support matrix.
 
-Approval may accept individual documents with edits; it must identify the agreed
-semantics. A generic request to continue implementing the prototype is not treated
-as approval of newly proposed public surfaces. No approved snapshots are written by
+Review can accept individual documents with edits and record agreed semantics. No approved snapshots are written by
 this package, and compatibility guarantees begin only with reviewed baselines.
 
 ## Review completion checklist

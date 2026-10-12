@@ -35,7 +35,7 @@ jobs:
         run: cargo doc --workspace --no-deps --locked
 
   coverage:
-    name: Rust coverage (at least 80%)
+    name: Rust coverage (at least 90%)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -107,7 +107,7 @@ jobs:
           test "$output" = "Slurm Notify is under development; monitoring is not implemented."
           mkdir -p target/development-artifact
           cp target/release/slurm-notify target/development-artifact/
-          cp README.md LICENSE.pending.md target/development-artifact/
+          cp README.md LICENSE target/development-artifact/
           cd target/development-artifact
           sha256sum slurm-notify > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

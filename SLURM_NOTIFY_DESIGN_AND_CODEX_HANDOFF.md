@@ -1,9 +1,14 @@
 # Slurm Notify — Product, Architecture & Codex Implementation Specification
 
-**Status:** Proposed design, pre-implementation  
+**Status:** Historical design draft; current status is in README.md
 **Version:** 0.1 design draft  
 **Date:** 2026-10-10  
 **Audience:** Codex, maintainers, contributors, HPC researchers
+
+> **Current guidance:** This document preserves the original design. Its initial
+> execution instructions and open decisions are historical, not current agent
+> instructions. Follow AGENTS.md and the current implementation plan. Licensing
+> is now MIT and the minimum Rust coverage gate is 90%.
 
 > **Codex handoff:** Read this document in full. First inspect the repository and produce a gap analysis and implementation plan. Do not assume a repository already exists. Do not implement every phase at once. Implement one approved milestone at a time with tests and documentation. Treat requirements labeled MUST as release gates, and flag any cluster-specific assumptions for validation.
 

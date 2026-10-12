@@ -19,7 +19,7 @@ current evidence by capability and identifies the remaining activation gates.
   and webhook resources, typed operational controls and injected identity/policy mapping.
 - Event-specific selection, atomic selected SMTP preparation and mixed runtime-cycle
   acceptance with edited rules, unmatched-event deduplication and restart recovery.
-- Shared local checks, staged/pre-push hooks and a Rust coverage gate of at least 80%.
+- Shared local checks, staged/pre-push hooks and a Rust coverage gate of at least 90%.
 
 These results use synthetic scheduler data, temporary owned state and controlled
 process/loopback fixtures. They establish tested prototype behavior, not supported
@@ -30,7 +30,7 @@ the bound supervised SMTP path remains blocked.
 
 The latest implementation milestone passed 379 Rust tests plus four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.24% (22,174/22,803); the gate is 80%.
+Python tests. Rust line coverage was 97.25% (22,176/22,803); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -61,7 +61,7 @@ universal deadline from the foreground scheduler.
 | Scheduler policy | No supported Slurm/site baseline or real-cluster acceptance | Validate command features, accounting lag, job identity and permitted polling/execution at an authorized cluster |
 | Provider scope | Generic webhook/SMTP prototypes exist; Slack/Teams priority remains open | Agree MVP scope, payload compatibility and supported provider setup; test real providers only when authorized |
 | Platform support | Development toolchain is pinned; product MSRV/libc/Slurm matrix remains undecided | Target builds, installation and process/permission/deadline smoke tests; mark unverified targets explicitly |
-| Governance/security | License decision remains in LICENSE.pending.md; release/security governance is incomplete | Choose license, reporting/support policy and required review/check protection; complete threat/dependency review |
+| Governance/security | MIT license selected; release/security governance is incomplete | Complete reporting/support policy and required review/check protection; complete threat/dependency review |
 | Packaging/releases | No published agent binaries or user installation acceptance | Human-approved release plan, checksums/provenance, target smoke tests, upgrade documentation and release gates |
 
 Log monitoring and remote SSH are later design phases. Their discovery, privacy,
@@ -97,7 +97,7 @@ The following implementation sequence reuses the completed private pipeline:
    blocked scheduling without spinning, partial delivery and resource recovery.
    Reuse protected Rust preparation, mixed composition and scheduling already tested.
 5. Complete setup/test/doctor UX and authorized cluster/provider acceptance. Settle
-   license and support baselines, then installation/upgrade and release gates.
+   support baselines and dependency notices, then installation/upgrade and release gates.
 
 The [private environment adapter](../../crates/notify-cli/src/environment_resolution.rs)
 composes with the resource boundary; its accepted-value cap does not bound the
