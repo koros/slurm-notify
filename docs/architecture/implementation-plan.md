@@ -3140,3 +3140,22 @@ Installed mapping and activation still require explicit public contract review.
 Validation: shared checks pass with 313 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.59% (17,543/17,977), above the 80% gate.
+
+### Private selected mixed-route runtime cycles
+
+Added a caller-selected mixed cycle adapter using the existing bounded stages;
+the uniform adapter delegates with its original all-destination selection. A new
+controlled helper acceptance test routes three terminal events into one SMTP pair,
+one ordinary pair and an unmatched ledger entry under a one-message ceiling.
+Cancellation preserves committed work. Reopen and repeated polls with edited rules
+do not retarget pending work or backfill unmatched events. Permission denial,
+ordinary progress alongside SMTP retry, attempt recovery and final delivery retain
+frozen bytes and rendering/provider bindings. No real cluster or SMTP server,
+dependencies, runtime defaults or public contract changes.
+
+Next: consolidate private integration readiness evidence for public contract review.
+Installed mapping and activation still require explicit public contract review.
+
+Validation: shared checks pass with 314 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.57% (17,768/18,210), above the 80% gate.

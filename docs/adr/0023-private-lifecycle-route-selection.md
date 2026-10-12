@@ -64,7 +64,17 @@ attempt uses rotated credentials with the original frozen message and bindings.
 The completed ordinary event is not replayed and the unmatched timeout stays in
 the ledger. These callbacks do not perform network access.
 
+Selected mixed routes now compose with the existing bounded runtime-cycle stages.
+The uniform adapter delegates to this path with all configured destinations.
+Selection is caller-injected and validated by the preparation boundary; only newly
+emitted events can create selected pairs. Existing frozen work stays authoritative.
+A controlled helper acceptance test polls three terminal events with a one-message
+ceiling, cancels before delivery, reopens with edited selection, then exercises
+permission denial, ordinary progress alongside SMTP retry and eventual recovery.
+It verifies attempt numbers, frozen bytes and both bindings after reopen. Scheduler
+data and SMTP result frames are synthetic; no real cluster or SMTP server is used.
+
 ## Next
 
-Exercise selected mixed routes through bounded runtime-cycle dispatch/restart
-acceptance. Installed mapping and activation require explicit contract review.
+Consolidate the private integration readiness evidence before public contract
+review. Installed mapping and activation require explicit contract review.
