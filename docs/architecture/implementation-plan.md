@@ -3066,3 +3066,21 @@ parser, CLI and runtime activation still require explicit contract review.
 Validation: shared checks pass with 308 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.53% (16,802/17,228), above the 80% gate.
+
+### Private lifecycle-event route selection
+
+Added test-only route_selection compiling at most 64 providers and 128 rules into
+nine lifecycle destination masks. Owned aliases survive source removal. Rules
+reject invalid/duplicate references; overlaps union once in provider order. Empty
+rules and pending/unknown states select nothing. No durable preparation changes.
+
+Three tests cover all states and destination bits, ownership/order/overlap, count
+ceilings and invalid references. ADR 0023 records pending-route and atomic enqueue
+limits. No dependencies, runtime defaults or public contracts change.
+
+Next: private atomic event-specific enqueueing with route selection and restart
+preservation. Installed mapping and activation still require explicit review.
+
+Validation: shared checks pass with 311 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.56% (17,000/17,426), above the 80% gate.

@@ -21,6 +21,9 @@ mod runtime_mapping;
 mod observation_mapping;
 
 #[cfg(test)]
+mod route_selection;
+
+#[cfg(test)]
 mod smtp_frozen_frame;
 
 #[cfg(test)]

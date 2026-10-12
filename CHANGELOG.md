@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded lifecycle route selection with owned aliases, per-event destination unions, duplicate/reference rejection and three boundary tests; no installed routing or public event contract.
+
 - Private injected scheduler identity and initial-observation mapping with user-only preflight, owned zeroizing metadata, static failures and three policy/identity/durable emit-suppress tests; no effective-user adapter or installed activation.
 
 - Private mapped-control runtime-cycle acceptance verifies query budgets, deterministic retry due time, persisted event/attempt recovery, stale health after poll failure and delayed retention cleanup without replay.
