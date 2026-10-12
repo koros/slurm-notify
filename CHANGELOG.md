@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground child acceptance uses real monotonic/condition-variable waits for cross-process cancellation, forced termination and timed exhaustion; durable pending messages, bindings and attempts survive replay.
+
 - Private caller-owned sticky cancellation wakes bounded condition-variable waits; owned sessions combine it with real monotonic scheduling, with timeout, shared cancellation, poison and cancelled restart/lock-release acceptance.
 
 - Private foreground process acceptance covers cancellation while waiting, forced owner termination and wait failure after committed blocked SMTP work; bounded static diagnostics and child replay verify unchanged frozen bindings, attempts and deduplication.

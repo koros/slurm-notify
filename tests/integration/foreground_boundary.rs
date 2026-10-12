@@ -21,6 +21,8 @@ pub(super) fn child() -> bool {
                 | "--foreground-wait-error"
                 | "--foreground-replay"
                 | "--foreground-cancel-before"
+                | "--foreground-real-wait"
+                | "--foreground-real-replay"
         )
     ) {
         return false;
@@ -55,62 +57,62 @@ pub(super) fn child() -> bool {
             return true;
         }
     };
-    let now = Cell::new(Duration::ZERO);
-    let result = session.run_with(
-        2,
-        Hooks {
-            tick: |session: &mut Session| {
-                let report = session.tick_with(
-                    (Path::new("squeue"), Path::new("sacct")),
-                    crate::polling_cycle::Hooks {
-                        query: |command: &mut Command, _, _| {
-                            Ok(if command.get_program() == "squeue" {
-                                ""
-                            } else {
-                                "research-cluster|1|alice|s|actual|COMPLETED|0:0"
-                            }
-                            .into())
-                        },
-                        send: (
-                            |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
-                                panic!("blocked credential access")
-                            },
-                            |_: &crate::storage::DueDelivery| -> Command {
-                                panic!("blocked helper access")
-                            },
-                            |_: &crate::storage::DueDelivery| -> Result<
-                                crate::delivery::ProviderOutcome,
-                                crate::supervised_provider::Diagnostic,
-                            > { panic!("unexpected ordinary send") },
-                        ),
-                        clock: || Some(7200),
-                        cancelled: || false,
-                    },
-                )?;
-                assert!(matches!(
-                    report.delivery,
-                    Some(Err(crate::polling_cycle::StageError::DispatchBlocked))
-                ));
-                Ok(report)
-            },
-            monotonic: || Some(now.get()),
-            wait: |remaining| {
-                if mode.as_deref() == Some("--foreground-replay") {
-                    now.set(now.get() + remaining);
-                    return Ok(Wake::Ready);
-                }
+    let result = if matches!(
+        mode.as_deref(),
+        Some("--foreground-real-wait" | "--foreground-real-replay")
+    ) {
+        let signal = crate::foreground_wait::Signal::new();
+        let mut control = None;
+        let mut ticks = 0;
+        let start = std::time::Instant::now();
+        let result = session.run_interruptible(2, &signal, |session| {
+            ticks += 1;
+            let report = blocked_tick(session)?;
+            if mode.as_deref() == Some("--foreground-real-wait") {
+                assert_eq!(ticks, 1, "unexpected tick before cancellation");
                 println!("READY");
                 std::io::stdout().flush().unwrap();
-                let _ = std::io::stdin().read_exact(&mut [0]);
-                if mode.as_deref() == Some("--foreground-wait-error") {
-                    Err(())
-                } else {
-                    Ok(Wake::Cancelled)
-                }
+                let cancelled = signal.clone();
+                control = Some(std::thread::spawn(move || {
+                    let _ = std::io::stdin().read_exact(&mut [0]);
+                    cancelled.cancel().unwrap();
+                }));
+            }
+            Ok(report)
+        });
+        if let Some(control) = control {
+            control.join().unwrap();
+        }
+        if mode.as_deref() == Some("--foreground-real-replay") {
+            assert_eq!(ticks, 2);
+            assert!(start.elapsed() >= Duration::from_secs(2));
+        }
+        result
+    } else {
+        let now = Cell::new(Duration::ZERO);
+        session.run_with(
+            2,
+            Hooks {
+                tick: blocked_tick,
+                monotonic: || Some(now.get()),
+                wait: |remaining| {
+                    if mode.as_deref() == Some("--foreground-replay") {
+                        now.set(now.get() + remaining);
+                        return Ok(Wake::Ready);
+                    }
+                    println!("READY");
+                    std::io::stdout().flush().unwrap();
+                    let _ = std::io::stdin().read_exact(&mut [0]);
+                    if mode.as_deref() == Some("--foreground-wait-error") {
+                        Err(())
+                    } else {
+                        Ok(Wake::Cancelled)
+                    }
+                },
+                cancelled: || false,
             },
-            cancelled: || false,
-        },
-    );
+        )
+    };
     assert!(matches!(
         session.status(7200),
         Err(crate::foreground_session::Error::Closed)
@@ -126,13 +128,47 @@ pub(super) fn child() -> bool {
     );
     true
 }
+fn blocked_tick(
+    session: &mut Session,
+) -> Result<crate::polling_cycle::TickReport, crate::foreground_session::Error> {
+    let report = session.tick_with(
+        (Path::new("squeue"), Path::new("sacct")),
+        crate::polling_cycle::Hooks {
+            query: |command: &mut Command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "research-cluster|1|alice|s|actual|COMPLETED|0:0"
+                }
+                .into())
+            },
+            send: (
+                |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                    panic!("blocked credential access")
+                },
+                |_: &crate::storage::DueDelivery| -> Command { panic!("blocked helper access") },
+                |_: &crate::storage::DueDelivery| -> Result<
+                    crate::delivery::ProviderOutcome,
+                    crate::supervised_provider::Diagnostic,
+                > { panic!("unexpected ordinary send") },
+            ),
+            clock: || Some(7200),
+            cancelled: || false,
+        },
+    )?;
+    assert!(matches!(
+        report.delivery,
+        Some(Err(crate::polling_cycle::StageError::DispatchBlocked))
+    ));
+    Ok(report)
+}
 fn one_shot(mode: &str, path: &Path, expected: &[u8]) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args([std::ffi::OsStr::new(mode), path.as_os_str()]);
     let output = crate::transport::supervise_with(
         &mut command,
         Vec::new(),
-        Duration::from_secs(2),
+        Duration::from_secs(5),
         0,
         64,
         |bytes| {
@@ -231,6 +267,12 @@ pub(super) fn acceptance() {
         ),
         ("--foreground-wait", true, b"".as_slice()),
         (
+            "--foreground-real-wait",
+            false,
+            b"FOREGROUND CANCELLED\n".as_slice(),
+        ),
+        ("--foreground-real-wait", true, b"".as_slice()),
+        (
             "--foreground-wait-error",
             false,
             b"FOREGROUND FAILED\n".as_slice(),
@@ -263,6 +305,25 @@ pub(super) fn acceptance() {
             .unwrap();
         assert!(!report.poll.stale);
     }
+    // Real timeout/exhaustion uses a separate validated two-second fixture interval.
+    source["monitor"]["poll_seconds"] = serde_json::json!(2);
+    source["monitor"]["query_timeout_seconds"] = serde_json::json!(1);
+    let next = config.with_extension("next");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&next)
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source).unwrap())
+        .unwrap();
+    std::fs::rename(next, &config).unwrap();
+    one_shot(
+        "--foreground-real-replay",
+        &config,
+        b"FOREGROUND EXHAUSTED\n",
+    );
+    assert_eq!(pending(&state), previous.unwrap());
     // The fixture output decoder accepts no arbitrary diagnostic text.
     one_shot(
         "--foreground-replay",

@@ -3513,3 +3513,21 @@ forced termination and pending-work replay. Public and installed gates remain.
 Validation: shared checks pass with 362 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.44% (21,334/21,894), above the 80% gate.
+
+
+### Private real-wait process acceptance
+
+Trusted children use the session's real monotonic/wait adapter with shared
+cancellation driven by a control thread. Parent acceptance checks cancellation and
+forced termination after a committed blocked tick, then unchanged files and durable
+replay. A validated two-second interval fixture verifies real timeout and two-tick
+exhaustion. One-shot fixture supervision allows five seconds. ADR 0041 records
+registration-race, idle termination and scheduling latency limits. No product
+defaults, dependencies or public contracts change.
+
+Next: private cancellation propagation through active composed query/delivery
+hooks and pending-work recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 362 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.43% (21,331/21,894), above the 80% gate.
