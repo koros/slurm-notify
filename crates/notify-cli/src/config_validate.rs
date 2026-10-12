@@ -23,13 +23,13 @@ pub(super) struct Draft {
     pub(super) value: Value,
     pub(super) controls: runtime_mapping::Plan,
 }
-fn object(value: &Value) -> Result<&Object, Error> {
+pub(super) fn object(value: &Value) -> Result<&Object, Error> {
     match value {
         Value::Object(fields) => Ok(fields),
         _ => Err(Error::Fields),
     }
 }
-fn get<'a>(fields: &'a Object, key: &str) -> Result<&'a Value, Error> {
+pub(super) fn get<'a>(fields: &'a Object, key: &str) -> Result<&'a Value, Error> {
     fields
         .iter()
         .find(|(name, _)| name.as_str() == key)
@@ -47,7 +47,7 @@ fn fields<'a>(value: &'a Value, required: &[&str], optional: &[&str]) -> Result<
     }
     Ok(values)
 }
-fn text(value: &Value) -> Result<&str, Error> {
+pub(super) fn text(value: &Value) -> Result<&str, Error> {
     match value {
         Value::Text(s) => Ok(s),
         _ => Err(Error::Text),
@@ -91,7 +91,7 @@ fn path(value: &Value) -> Result<(), Error> {
     }
     Ok(())
 }
-fn list(value: &Value, minimum: usize, maximum: usize) -> Result<&[Value], Error> {
+pub(super) fn list(value: &Value, minimum: usize, maximum: usize) -> Result<&[Value], Error> {
     match value {
         Value::Array(a) if (minimum..=maximum).contains(&a.len()) => Ok(a),
         _ => Err(Error::Structure),

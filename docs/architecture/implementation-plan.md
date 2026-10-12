@@ -568,7 +568,7 @@ are private diagnostic data, not proof of missing jobs. Accounting visibility
 later than the overlap and records outside the bounded window may be missed;
 Slurm selection semantics and site accounting latency remain unvalidated.
 
-Four tests cover initial/restart windows, clipping, invalid inputs, clock
+Five tests cover initial/restart windows, clipping, invalid inputs, clock
 regression, UTC leap-day arithmetic, and delayed accounting after database reopen.
 The composed polling test verifies failed queries preserve the checkpoint and
 repeated delayed records produce one durable event/outbox entry. The full suite
@@ -1245,7 +1245,7 @@ or repeatedly interrupted reader; socket and parent deadlines remain mandatory
 for network integration. No SMTP client, AUTH, TLS verification, or public wire
 contract is introduced.
 
-Four tests cover multiline/unread-next behavior, bare codes, malformed/truncated
+Five tests cover multiline/unread-next behavior, bare codes, malformed/truncated
 input, exact boundaries, line/total/count limits, invalid limits, static I/O errors,
 and interrupted reads. The full suite passes: 147 Rust tests plus one ignored
 helper, sixteen custom process scenarios, eight SQLite tests, and six hook tests.
@@ -1763,7 +1763,7 @@ Best-effort QUIT writes do not replace that result; no QUIT reply is awaited.
 Socket timeouts remain caller responsibilities until child integration adds the
 absolute parent deadline. A killed child before acknowledgment can still replay.
 
-Four tests cover temporary/permanent/unexpected/malformed/truncated replies at
+Five tests cover temporary/permanent/unexpected/malformed/truncated replies at
 each transaction phase, exact sequencing and early stop, absent final reply,
 write failure at every stage, QUIT failure after success, and a real verified-TLS
 loopback session. The latter observes fresh EHLO, exactly one AUTH/envelope/DATA,
@@ -1877,7 +1877,7 @@ pending protection remains with existing outbox policy. No credentials or relay
 configuration are stored. Database encryption and authenticated corruption detection
 are not introduced; this private loader is not a general MIME/header parser.
 
-Four tests cover exact frozen bytes/envelope through retry/reopen, idempotent and
+Five tests cover exact frozen bytes/envelope through retry/reopen, idempotent and
 conflicting preparation, missing/attempted legacy rows, version upgrade/failure,
 insert rollback, cascade, corrupt framing/address data and oversized BLOBs even
 when schema checks are bypassed. No dependencies, runtime defaults or public
@@ -1965,7 +1965,7 @@ no network/preparation callbacks execute under the transaction. Missing or unuse
 preparations abort, as do invalid/duplicate routes and event/preparation keys.
 Existing private plain persistence preserves its earlier SQL failure behavior.
 
-Four tests cover mixed plain/two-SMTP routes across two events, per-route recipient
+Five tests cover mixed plain/two-SMTP routes across two events, per-route recipient
 and exact-byte preservation, retry/reopen and historical route/message immutability,
 missing/extra/duplicate/unrequested preparations, incomplete second-route messages,
 late snapshot/checkpoint failures with prior pending job and checkpoint rollback,
@@ -1995,7 +1995,7 @@ before invoking any preparation callback, builds local messages and commits all
 poll state before publishing the candidate in memory. No callback runs under the
 SQLite transaction. Preparation failure is static and excludes raw payloads.
 
-Four tests cover mixed routes/recipients/DATA, restored replay with changed routes
+Five tests cover mixed routes/recipients/DATA, restored replay with changed routes
 without rebuilding, preparation failure and count exhaustion without writes,
 late storage failure preserving a previous pending job and checkpoint in memory
 and SQLite, retry success, invalid settings, scheduler/parser errors and suppressed
@@ -2537,7 +2537,7 @@ receive no SMTP profiles. Changed profiles apply only to new events; restored
 history preserves its original profile and bytes. Suppressed and render-only
 history does not receive inferred provider provenance on replay.
 
-Four tests cover invalid/incomplete/duplicate profiles, reordered valid profiles,
+Five tests cover invalid/incomplete/duplicate profiles, reordered valid profiles,
 new-policy selection with reopened old snapshots, deduplicated replay, late binding
 rollback with unchanged memory/checkpoint and reopen recovery, invalid Date before
 queries, rendering failure and suppressed/render-only history without backfill.
@@ -2890,7 +2890,7 @@ AUTH validation. Owned zeroizing temporary values become owned zeroizing credent
 only on success. Username failures block password lookup; diagnostics stay static.
 No ambient environment lookup, dependencies, defaults or installed contracts change.
 
-Four tests cover exact ownership/rotation, accepted limits, rejected references and
+Five tests cover exact ownership/rotation, accepted limits, rejected references and
 identities without lookup, mismatch/source failure, invalid UTF-8, empty/oversized
 passwords and controls. ADR 0018 records callback allocation/deadline limitations.
 
@@ -2973,7 +2973,7 @@ shared existing endpoint validation precedes authorization lookup. Configured
 authorization errors do not fall back. Consuming preparation checks event/payload
 bounds and produces the existing zeroizing supervised transport frame.
 
-Four tests cover owned exact bytes after source removal, no-lookup preflight,
+Five tests cover owned exact bytes after source removal, no-lookup preflight,
 invalid endpoints before authorization, static failures, configured authorization
 and identifier/payload ceilings. Extracted existing URL/header validators preserve
 transport behavior; no dependencies, runtime defaults or public contracts change.
@@ -3245,3 +3245,23 @@ passed for the combined changes. Hosted execution is checked after pushing;
 PR-only dependency review cannot be verified by a push run.
 
 Next: resume validated-draft private adapter composition after dependency review.
+
+### Private validated webhook draft composition
+
+Composed validated webhook-only drafts into owned observation, controls, compiled
+routes, storage metadata and resolved resources. Full validation/provider scope
+checks precede identity/resource lookup; failures publish no partial plan. A private
+poll adapter builds identity/query/initial-policy fields from the plan while callers
+supply programs, windows, time and owned state. Five tests cover lookup failure
+ordering, ownership/frame preservation and emit/suppress selected-work recovery
+through reopened SQLite. Mixed SMTP drafts fail before lookup pending bound
+composition. No ambient lookup, network dispatch, dependencies, defaults or public
+contracts change. ADR 0026 records scope and eager resolution limitations.
+
+Next: private mixed-draft SMTP profile/rendering/permission composition, with
+trust/credential failure ordering and restart evidence. Installed activation and
+public contract baselines still require explicit review.
+
+Validation: shared checks pass with 327 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.56% (18,836/19,307), above the 80% gate.

@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private webhook draft composition maps validated identity, controls, routes and owned injected resources into durable routed polling; five lookup-order/ownership/emit-suppress restart tests. Mixed SMTP drafts fail before lookup until bound composition is implemented.
+
 - Private Rust draft configuration validation checks fields/types/version, provider and resource references, route and SMTP permission membership, numeric bounds/relationships and canonical seeds before lookup; five mutation/ownership tests, without installed schema adoption.
 
 - Private bounded Rust JSON decoding with pinned test-only serde_json/serde_core, decoded duplicate-key rejection, canonical u64 tokens, static errors and owned zeroizing text; three syntax/structure/boundary tests, without installed schema adoption.
