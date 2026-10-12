@@ -57,6 +57,13 @@ The storage selector callback is private and caller-managed; the route plan boun
 its own output, without certifying arbitrary callbacks. Current rules must not be
 applied to already pending work to retarget it.
 
+The mixed acceptance fixture now also exercises guarded dispatch with synthetic
+provider callbacks. Ordinary delivery completes while SMTP retries. After reopen,
+permission denial leaves the pending SMTP attempt unchanged; a later permitted
+attempt uses rotated credentials with the original frozen message and bindings.
+The completed ordinary event is not replayed and the unmatched timeout stays in
+the ledger. These callbacks do not perform network access.
+
 ## Next
 
 Exercise selected mixed routes through bounded runtime-cycle dispatch/restart

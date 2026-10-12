@@ -391,6 +391,11 @@ mod tests {
             1,
         )
         .unwrap();
+        let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
+            .unwrap()
+            .serialize_der()
+            .unwrap();
+        let trust = crate::smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "mail",
             relay: "relay.fixture.invalid",
@@ -398,7 +403,7 @@ mod tests {
             tls: TlsMode::RequiredStartTls,
             server_name: "smtp.fixture.invalid",
             trust_reference: "fixture-trust",
-            trust_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            trust_fingerprint: &trust,
             authentication_identity: "fixture-user",
             credential_reference: "fixture-secret",
         };
@@ -522,5 +527,162 @@ mod tests {
             bound.token()
         );
         assert_eq!(store.due_deliveries("cluster", 11, 10).unwrap().len(), 2);
+        use crate::{
+            delivery::{ProviderOutcome, RetryPolicy},
+            smtp_provider_delivery::{self, Hooks, MixedHooks, Permission, Permissions, Resolved},
+            supervised_provider::Diagnostic,
+        };
+        let revision = store.bound_smtp_revision(&id, "mail").unwrap().unwrap();
+        let entries = [Permission {
+            cluster: "cluster",
+            destination: "mail",
+            rendering: revision.token(),
+            provider: bound.token(),
+        }];
+        let permissions = Permissions::new(&entries).unwrap();
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_seconds: 5,
+            max_delay_seconds: 20,
+            jitter_seconds: 0,
+            jitter_seed: 0,
+        };
+        let report = smtp_provider_delivery::deliver_due_mixed(
+            &mut store,
+            "cluster",
+            11,
+            10,
+            policy,
+            MixedHooks {
+                ordinary_destinations: &["plain"],
+                ordinary_send: |due: &crate::storage::DueDelivery| {
+                    assert_eq!(due.event.identity.job, "2");
+                    assert_eq!(due.attempt_number, 1);
+                    Ok(ProviderOutcome::Delivered)
+                },
+                smtp: Hooks {
+                    permissions: &permissions,
+                    resolve: |provider: &crate::smtp_provider_revision::Descriptor| {
+                        Resolved::new(
+                            provider,
+                            &provider.profile(),
+                            &[&root],
+                            "fixture-user",
+                            "first-fixture",
+                        )
+                    },
+                    send: |due: &crate::storage::DueDelivery,
+                           actual: &crate::smtp_revision::Descriptor,
+                           message: &crate::storage::FrozenMessage,
+                           resolved: Resolved| {
+                        assert_eq!(due.event_id, id);
+                        assert_eq!(due.attempt_number, 1);
+                        assert_eq!(actual.token(), revision.token());
+                        assert!(message.data() == frozen.data());
+                        assert_eq!(resolved.provider().token(), bound.token());
+                        Ok(ProviderOutcome::Retry)
+                    },
+                    clock: || Some(12),
+                    cancelled: || false,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!((report.delivered, report.retrying), (1, 1));
+        drop(store);
+        store = open();
+        let pending = store.due_deliveries("cluster", 17, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            (
+                pending[0].event_id.as_str(),
+                pending[0].destination.as_str(),
+                pending[0].attempt_number
+            ),
+            (id.as_str(), "mail", 2)
+        );
+        let denied = Permissions::new(&[]).unwrap();
+        let failure = smtp_provider_delivery::deliver_due_mixed(
+            &mut store,
+            "cluster",
+            17,
+            10,
+            policy,
+            MixedHooks {
+                ordinary_destinations: &["plain"],
+                ordinary_send: |_: &crate::storage::DueDelivery| {
+                    panic!("completed ordinary route replayed")
+                },
+                smtp: Hooks {
+                    permissions: &denied,
+                    resolve: |_: &crate::smtp_provider_revision::Descriptor|
+                     -> Result<Resolved, smtp_provider_delivery::Error> {
+                        panic!("denied resolution")
+                    },
+                    send: |_: &crate::storage::DueDelivery,
+                           _: &crate::smtp_revision::Descriptor,
+                           _: &crate::storage::FrozenMessage,
+                           _: Resolved| { panic!("denied send") },
+                    clock: || panic!("denied outcome clock"),
+                    cancelled: || false,
+                },
+            },
+        ).unwrap_err();
+        assert_eq!(failure.diagnostic, Some(Diagnostic::SmtpProviderDenied));
+        drop(store);
+        store = open();
+        assert_eq!(
+            store.due_deliveries("cluster", 17, 10).unwrap()[0].attempt_number,
+            2
+        );
+        let recovered = smtp_provider_delivery::deliver_due_mixed(
+            &mut store,
+            "cluster",
+            17,
+            10,
+            policy,
+            MixedHooks {
+                ordinary_destinations: &["plain"],
+                ordinary_send: |_: &crate::storage::DueDelivery| {
+                    panic!("completed ordinary route replayed")
+                },
+                smtp: Hooks {
+                    permissions: &permissions,
+                    resolve: |provider: &crate::smtp_provider_revision::Descriptor| {
+                        Resolved::new(
+                            provider,
+                            &provider.profile(),
+                            &[&root],
+                            "fixture-user",
+                            "rotated-fixture",
+                        )
+                    },
+                    send: |due: &crate::storage::DueDelivery,
+                           actual: &crate::smtp_revision::Descriptor,
+                           message: &crate::storage::FrozenMessage,
+                           resolved: Resolved| {
+                        assert_eq!(due.event_id, id);
+                        assert_eq!(due.attempt_number, 2);
+                        assert_eq!(actual.token(), revision.token());
+                        assert!(message.data() == frozen.data());
+                        let (provider, _, credentials) = resolved.into_parts();
+                        assert_eq!(provider.token(), bound.token());
+                        assert!(
+                            credentials.into_plain().as_slice()
+                                == b"\0fixture-user\0rotated-fixture"
+                        );
+                        Ok(ProviderOutcome::Delivered)
+                    },
+                    clock: || Some(18),
+                    cancelled: || false,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(recovered.delivered, 1);
+        drop(store);
+        store = open();
+        assert!(store.due_deliveries("cluster", 18, 10).unwrap().is_empty());
+        assert_eq!(store.restore("cluster", 10).unwrap().0.emitted.len(), 3);
     }
 }

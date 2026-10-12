@@ -3124,3 +3124,19 @@ Installed mapping and activation still require explicit public contract review.
 Validation: shared checks pass with 313 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.61% (17,442/17,869), above the 80% gate.
+
+### Private selected mixed-route guarded dispatch
+
+Extended the mixed selection acceptance fixture through guarded dispatch using
+synthetic provider callbacks. Ordinary delivery completes alongside SMTP retry.
+Reopen preserves the retry attempt, permission denial leaves it unchanged, and
+rotated-credential recovery delivers the original frozen bytes and bindings.
+Completed ordinary work is not replayed; the unmatched event remains in the ledger.
+No network access, dependencies, runtime defaults or public contracts change.
+
+Next: integrate selected routes into private bounded runtime-cycle acceptance.
+Installed mapping and activation still require explicit public contract review.
+
+Validation: shared checks pass with 313 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.59% (17,543/17,977), above the 80% gate.
