@@ -2985,3 +2985,25 @@ configuration mapping and runtime activation still require explicit contract rev
 Validation: shared checks pass with 301 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.47% (16,315/16,738), above the 80% gate.
+
+### Owned webhook resources in supervised restart acceptance
+
+The custom HTTP harness now resolves private owned URL/authorization resources and
+prepares the existing frame before supervision. The private wrapper accepts owned
+byte buffers, retaining the zeroizing frame through stdin transfer. Missing/invalid
+URL and missing/control-bearing authorization block before child construction, skip
+maintenance, and preserve event/attempt one across reopen. A decoy receives no
+connection. Restored resources recover via actual loopback 429/Retry-After and 202,
+preserving event/body and avoiding replay. Existing HTTP timeout/TLS/resolver cases
+also use owned frames. ADR 0020 records evidence and remaining memory limitations.
+
+No dependency, runtime default or public contract changes. This expands custom
+process acceptance; ordinary unit-test count is unchanged. Payload bytes remain
+synthetic private fixtures, without establishing a public event wire contract.
+
+Next: remaining private configuration-to-runtime mapping preparation. Installed
+parser/configuration mapping and activation still require explicit contract review.
+
+Validation: shared checks pass with 301 Rust tests plus one ignored helper, expanded
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft
+configuration tests. Rust line coverage is 97.51% (16,321/16,738), above the 80% gate.

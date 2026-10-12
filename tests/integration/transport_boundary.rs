@@ -40,6 +40,8 @@ mod transport;
 mod trust_snapshot;
 #[path = "../../crates/notify-cli/src/webhook.rs"]
 mod webhook;
+#[path = "../../crates/notify-cli/src/webhook_resolution.rs"]
+mod webhook_resolution;
 
 #[path = "../../crates/notify-cli/src/state_path.rs"]
 mod state_path;
@@ -188,17 +190,43 @@ fn request_for(
     mode: &str,
     deadline: Duration,
 ) -> Result<ProviderOutcome, transport::Error> {
-    let input = transport::frame(
-        &[
-            endpoint.as_bytes(),
-            b"Bearer fixture-placeholder",
-            event_id.as_bytes(),
-            b"{}",
-            b"1000",
-        ],
-        4096,
+    request_resources(
+        Some(endpoint),
+        Some("Bearer fixture-placeholder"),
+        event_id,
+        mode,
+        deadline,
     )
-    .unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn request_resources(
+    endpoint: Option<&str>,
+    authorization: Option<&str>,
+    event_id: &str,
+    mode: &str,
+    deadline: Duration,
+) -> Result<ProviderOutcome, transport::Error> {
+    let resources = webhook_resolution::resolve(
+        "URL",
+        Some("AUTH"),
+        Duration::from_secs(1),
+        1024,
+        |name, _| {
+            let value = if name == "URL" {
+                endpoint
+            } else {
+                authorization
+            };
+            value
+                .map(|text| zeroize::Zeroizing::new(text.as_bytes().to_vec()))
+                .ok_or(())
+        },
+    )
+    .map_err(|_| transport::Error::InvalidInput)?;
+    let input = resources
+        .into_frame(event_id, b"{}")
+        .map_err(|_| transport::Error::InvalidInput)?;
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.arg(mode);
     transport::supervise(&mut command, input, deadline, 4096, 64)
@@ -592,6 +620,55 @@ fn orchestrated_owned_http_restart() {
     drop(store);
     let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
     let mut cycles = Cycles::new(1).unwrap();
+    let decoy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    decoy.set_nonblocking(true).unwrap();
+    let decoy_endpoint = format!("http://{}/hook", decoy.local_addr().unwrap());
+    for (url, auth) in [
+        (None, Some("Bearer fixture")),
+        (Some("invalid-fixture"), Some("Bearer fixture")),
+        (Some(decoy_endpoint.as_str()), None),
+        (Some(decoy_endpoint.as_str()), Some("fixture\r\n")),
+    ] {
+        let blocked = cycles.tick_fallible(
+            &settings,
+            &maintenance,
+            &mut store,
+            Hooks {
+                query: fixture,
+                send: |item: &storage::DueDelivery| {
+                    supervised_provider::classify(request_resources(
+                        url,
+                        auth,
+                        &item.event_id,
+                        "--child",
+                        Duration::from_secs(3),
+                    ))
+                    .into_dispatch()
+                },
+                clock: || Some(7200),
+                cancelled: || false,
+            },
+        );
+        assert!(matches!(
+            blocked.delivery,
+            Some(Err(StageError::DispatchBlocked))
+        ));
+        assert!(blocked.cleanup.is_none() && blocked.health.is_none());
+        let failure = blocked.delivery_failure.unwrap();
+        assert_eq!(
+            failure.diagnostic,
+            Some(supervised_provider::Diagnostic::InvalidInput)
+        );
+        assert!(!failure.acceptance_uncertain);
+        assert_eq!(failure.committed.delivered, 0);
+        drop(store);
+        store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+        let pending = store.due_deliveries("cluster", 7200, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, id);
+        assert_eq!(pending[0].attempt_number, 1);
+        assert!(decoy.accept().is_err());
+    }
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,

@@ -97,6 +97,7 @@ pub(super) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use super::*;
     #[test]
     fn exact_owned_resources_survive_source_rotation_and_use_existing_frame() {

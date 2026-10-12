@@ -135,7 +135,7 @@ pub(super) fn send_fields(
 
 pub(super) fn supervise(
     command: &mut Command,
-    input: Vec<u8>,
+    input: impl AsRef<[u8]> + Send + 'static,
     timeout: Duration,
     input_limit: usize,
     output_limit: usize,

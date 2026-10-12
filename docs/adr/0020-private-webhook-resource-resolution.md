@@ -32,6 +32,18 @@ configured authorization without fallback, and event/payload ceilings. Loopback
 URLs are private fixture support inherited from the existing transport validator;
 they do not approve public HTTP configuration.
 
+The custom supervised HTTP harness now resolves resources through this module
+before preparing its requests. The private supervision wrapper accepts owned
+AsRef byte buffers so a zeroizing frame remains owned through child stdin transfer;
+it delegates to the existing bounded supervisor with the same outcome decoder.
+An orchestration fixture blocks missing URL, invalid URL, missing configured auth
+and a control-bearing auth value before child creation. Each block skips maintenance
+and preserves the same pending event/attempt after store reopen. A decoy loopback
+listener receives no connection. Restored resources subsequently pass actual
+loopback HTTP 429/Retry-After and 202 recovery, with the same event and body and no
+replayed completed work. Existing timeout, TLS and blocked-resolver scenarios use
+the owned frames too. This does not establish installed webhook payload semantics.
+
 The injected callback controls allocation and deadline behavior, as in ADR 0018.
 Returned-value bounds cannot prevent oversized allocations inside it. Source copies
 and URL-parser internal allocations are outside this module's zeroizing ownership;
@@ -41,6 +53,5 @@ event identity, source-selection or public schema contract.
 
 ## Next
 
-Exercise these owned webhook resources in bounded supervised transport/restart
-acceptance. Installed parser/configuration mapping and activation remain gated by
-explicit public contract review.
+Prepare remaining private configuration-to-runtime mapping boundaries. Installed
+parser/configuration mapping and activation remain gated by explicit contract review.
