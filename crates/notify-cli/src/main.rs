@@ -1,5 +1,8 @@
 //! Repository foundation executable; monitoring is not implemented.
 #[cfg(test)]
+mod config_validate;
+
+#[cfg(test)]
 mod config_decode;
 
 #[cfg(test)]

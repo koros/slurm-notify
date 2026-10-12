@@ -3195,3 +3195,22 @@ contracts, production parsing and installed activation still need explicit revie
 Validation: shared checks pass with 317 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (17,933/18,386), above the 80% gate.
+
+### Private Rust draft configuration validation
+
+Added private validation over the bounded owned JSON tree, covering all draft
+objects, versions/types/policies, resource-reference text, route membership and
+SMTP exact permission tuples. Reused operational and route mappers; retained
+zeroizing tree ownership and returned mapped numeric controls. Five tests cover
+examples/ownership, optional/empty policies, field mutations, manifest numeric
+failures, relationships/seeds, references/duplicates and text/collection limits.
+No lookup/query/network, new dependencies, defaults or public contracts change.
+ADR 0025 distinguishes shape validation from resource/transport policy validation.
+
+Next: private validated-draft composition with injected observation/resource/route
+mapping, including validation-before-lookup/query acceptance. Installed activation
+and public compatibility baselines still require explicit contract review.
+
+Validation: shared checks pass with 322 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.59% (18,490/18,947), above the 80% gate.
