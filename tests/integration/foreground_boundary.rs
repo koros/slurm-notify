@@ -27,6 +27,8 @@ pub(super) fn child() -> bool {
         mode.as_deref(),
         Some(
             "--foreground-wait"
+                | "--foreground-continuous"
+                | "--foreground-continuous-error"
                 | "--foreground-wait-error"
                 | "--foreground-replay"
                 | "--foreground-cancel-before"
@@ -75,6 +77,69 @@ pub(super) fn child() -> bool {
             return true;
         }
     };
+    if matches!(
+        mode.as_deref(),
+        Some("--foreground-continuous" | "--foreground-continuous-error")
+    ) {
+        let now = Cell::new(Duration::ZERO);
+        let ticks = Cell::new(0);
+        let failed = mode.as_deref() == Some("--foreground-continuous-error");
+        let result = session.run_continuous_with(
+            2,
+            Hooks {
+                tick: |session: &mut Session| {
+                    ticks.set(ticks.get() + 1);
+                    let mut report = blocked_tick(session)?;
+                    assert!(report.poll.as_ref().unwrap().is_ok());
+                    assert_eq!(session.status(7200)?.poll.checkpoint_age_seconds, Some(0));
+                    if ticks.get() == 3 || ticks.get() == 65 {
+                        let competing = Session::start(
+                            Path::new(&path),
+                            2,
+                            Duration::from_millis(1),
+                            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                            |name, _| {
+                                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                                    b"https://fixture.invalid/hook".to_vec()
+                                } else {
+                                    b"Bearer fixture".to_vec()
+                                }))
+                            },
+                            || false,
+                        );
+                        assert!(matches!(
+                            competing,
+                            Err(crate::foreground_session::Error::Ownership)
+                        ));
+                    }
+                    report.cancelled = ticks.get() == 65;
+                    Ok(report)
+                },
+                monotonic: || Some(now.get()),
+                wait: |delay| {
+                    if failed && ticks.get() == 3 {
+                        return Err(());
+                    }
+                    now.set(now.get() + delay);
+                    Ok(Wake::Ready)
+                },
+                cancelled: || false,
+            },
+        );
+        if failed {
+            assert_eq!(result, Err(crate::foreground_schedule::Error::Wait));
+            assert_eq!(ticks.get(), 3);
+        } else {
+            assert_eq!(result, Ok(Exit::Cancelled { ticks: 65 }));
+            assert_eq!(now.get(), Duration::from_secs(64 * 60));
+        }
+        assert!(matches!(
+            session.status(7200),
+            Err(crate::foreground_session::Error::Closed)
+        ));
+        println!("FOREGROUND CONTINUOUS");
+        return true;
+    }
     let result = if matches!(
         mode.as_deref(),
         Some("--foreground-real-wait" | "--foreground-real-replay")
@@ -241,6 +306,7 @@ pub(super) fn one_shot(mode: &str, path: &Path, expected: &[u8]) {
             if matches!(
                 bytes,
                 b"FOREGROUND CANCELLED\n"
+                    | b"FOREGROUND CONTINUOUS\n"
                     | b"FOREGROUND EXHAUSTED\n"
                     | b"FOREGROUND FAILED\n"
                     | b"FOREGROUND INVALID\n"
@@ -355,6 +421,17 @@ pub(super) fn acceptance() {
         .write_all(&serde_json::to_vec(&source).unwrap())
         .unwrap();
     let mut previous = None;
+    one_shot(
+        "--foreground-continuous",
+        &config,
+        b"FOREGROUND CONTINUOUS\n",
+    );
+    one_shot(
+        "--foreground-continuous-error",
+        &config,
+        b"FOREGROUND CONTINUOUS\n",
+    );
+    one_shot("--foreground-replay", &config, b"FOREGROUND EXHAUSTED\n");
     for (mode, kill, expected) in [
         (
             "--foreground-wait",

@@ -66,7 +66,7 @@ CLI baseline is approved.
 | Config validation/status | Decide exact public output and error mapping; support both webhook-only and mixed configs without relying on the mixed runtime's SMTP requirement |
 | Status while monitoring | Current inspection requires exclusive ownership and closed rollback-journal state; decide contention UX or implement a separately tested live inspection path |
 | Signal exit policy | Draft proposes 130/143; the bridge now retains the first delivered handler reason (first atomic winner for concurrent handlers). Bind and test installed exits before activation |
-| Continuous foreground run | Continuous scheduler exists privately with shared clock/wait guards; owned sessions still need finite poll-budget renewal preserving health, ownership and sticky cancellation, with failure/restart acceptance |
+| Continuous foreground run | Continuous owned sessions now renew finite poll batches with shared clock/wait guards, retained health and ownership, plus cancellation/failure/restart acceptance; OS-backed installed orchestration remains pending |
 | Resource lifetime/deadlines | Environment lookup caps accepted bytes after OS allocation; NSS lookup is synchronous. Review deadline/failure behavior before claiming bounded installed startup |
 | Webhook-only foreground | Unified session currently prepares a mixed plan requiring SMTP; compose a reviewed webhook-only path without silently changing the public scope |
 | Public event transaction | Persist opaque IDs, frozen bytes and route bindings atomically; settle identifier widths, source timezone/null semantics and UUID source before public sends |

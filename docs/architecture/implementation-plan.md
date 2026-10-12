@@ -15,8 +15,9 @@ help/version is already installed. MIT licensing, refreshed guidance,
 
 Continuous scheduling and first-signal reason retention are now implemented
 privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
-Next connect continuous scheduling to owned sessions with poll-budget renewal,
-then bind reviewed finite configuration/status and monitoring commands.
+Continuous scheduling now retains one owned session across poll-batch renewal
+([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Next bind finite
+configuration/status, OS-backed orchestration and monitoring commands.
 
 ## Next product milestones
 
@@ -26,7 +27,7 @@ then bind reviewed finite configuration/status and monitoring commands.
    preparation and OS resources to installed commands, with no hidden sending.
 3. Complete public event persistence: opaque IDs, frozen webhook bytes, immutable
    routes and source timestamp/null semantics. Assess the UUID source/dependencies.
-4. Connect the continuous scheduler to owned sessions and map retained signal reasons; complete
+4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed

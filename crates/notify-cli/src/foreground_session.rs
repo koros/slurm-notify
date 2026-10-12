@@ -136,6 +136,56 @@ impl Session {
         self.stop();
         result
     }
+    // One guarded connection and prepared plan survive every scheduling/poll batch.
+    // All scheduling exits release ownership, matching finite-session behavior.
+    pub(super) fn run_continuous_with<T, M, W, X>(
+        &mut self,
+        poll_batch: usize,
+        hooks: crate::foreground_schedule::Hooks<T, M, W, X>,
+    ) -> Result<crate::foreground_schedule::Exit, crate::foreground_schedule::Error>
+    where
+        T: FnMut(&mut Self) -> Result<polling_cycle::TickReport, Error>,
+        M: FnMut() -> Option<Duration>,
+        W: FnMut(Duration) -> Result<crate::foreground_schedule::Wake, ()>,
+        X: FnMut() -> bool,
+    {
+        if !(1..=1024).contains(&poll_batch) {
+            self.stop();
+            return Err(crate::foreground_schedule::Error::Policy);
+        }
+        let interval = self
+            .active
+            .as_ref()
+            .ok_or(crate::foreground_schedule::Error::Tick)?
+            .plan
+            .poll_interval();
+        let crate::foreground_schedule::Hooks {
+            mut tick,
+            monotonic,
+            wait,
+            cancelled,
+        } = hooks;
+        let result = crate::foreground_schedule::run_continuous(
+            interval,
+            crate::foreground_schedule::Hooks {
+                tick: || {
+                    self.active
+                        .as_mut()
+                        .ok_or(())?
+                        .cycles
+                        .renew_if_exhausted(poll_batch)
+                        .map_err(|_| ())?;
+                    tick(self).map(|report| report.cancelled).map_err(|_| ())
+                },
+                monotonic,
+                wait,
+                cancelled,
+            },
+        );
+        self.stop();
+        result
+    }
+
     pub(super) fn stop(&mut self) {
         self.active.take();
     }
@@ -214,5 +264,37 @@ impl Session {
             self.stop();
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
+    use super::*;
+    #[test]
+    fn closed_continuous_session_and_invalid_batches_never_call_hooks() {
+        for batch in [0, 1025, 1] {
+            let mut session = Session { active: None };
+            let result = session.run_continuous_with(
+                batch,
+                crate::foreground_schedule::Hooks {
+                    tick: |_: &mut Session| -> Result<polling_cycle::TickReport, Error> {
+                        panic!("tick")
+                    },
+                    monotonic: || -> Option<Duration> { panic!("clock") },
+                    wait: |_| -> Result<crate::foreground_schedule::Wake, ()> { panic!("wait") },
+                    cancelled: || -> bool { panic!("cancel") },
+                },
+            );
+            assert_eq!(
+                result,
+                Err(if batch == 1 {
+                    crate::foreground_schedule::Error::Tick
+                } else {
+                    crate::foreground_schedule::Error::Policy
+                })
+            );
+            assert!(session.active.is_none());
+        }
     }
 }

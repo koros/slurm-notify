@@ -257,6 +257,18 @@ impl Cycles {
         })
     }
 
+    // Explicit continuous-session renewal retains transient health and durable state.
+    // An unfinished batch is never replenished, so each renewal has a finite bound.
+    pub(super) fn renew_if_exhausted(&mut self, limit: usize) -> Result<(), Error> {
+        if !(1..=1024).contains(&limit) {
+            return Err(Error::InvalidLimit);
+        }
+        if self.remaining == 0 {
+            self.remaining = limit;
+        }
+        Ok(())
+    }
+
     // Existing infallible fixtures delegate to the same orchestration implementation.
     pub(super) fn tick<Q, S, C, X>(
         &mut self,
@@ -1175,6 +1187,32 @@ impl Cycles {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn renewal_retains_health_and_does_not_refill_an_active_batch() {
+        let mut cycles = super::Cycles::new(2).unwrap();
+        cycles.health.consecutive_failures = 7;
+        cycles.health.last_failure = Some(super::Failure::AccountingQuery);
+        cycles.health.checkpoint = Some(7200);
+        cycles.renew_if_exhausted(4).unwrap();
+        assert_eq!(cycles.remaining, 2);
+        cycles.remaining = 0;
+        for invalid in [0, 1025, usize::MAX] {
+            assert!(matches!(
+                cycles.renew_if_exhausted(invalid),
+                Err(super::Error::InvalidLimit)
+            ));
+            assert_eq!(cycles.remaining, 0);
+        }
+        cycles.renew_if_exhausted(4).unwrap();
+        assert_eq!(cycles.remaining, 4);
+        assert_eq!(cycles.health.consecutive_failures, 7);
+        assert_eq!(
+            cycles.health.last_failure,
+            Some(super::Failure::AccountingQuery)
+        );
+        assert_eq!(cycles.health.checkpoint, Some(7200));
+    }
+
     #[test]
     fn deadline_map_requires_exact_destinations_and_bounded_milliseconds() {
         let routes = [render_route(crate::smtp_render::JobVisibility::Hidden)];

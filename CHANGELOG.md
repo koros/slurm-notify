@@ -7,6 +7,9 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private owned continuous sessions with bounded poll-batch renewal, retained health
+  and ownership, and blocked-delivery/cancellation/failure/restart process acceptance.
+
 - Private continuous fixed-delay scheduler preserving monotonic history and bounded
   waits; first-delivered SIGINT/SIGTERM reason retention with isolated-process acceptance.
 - Approved installed `--help`/`--version` CLI, exact stream/exit snapshots and binary
