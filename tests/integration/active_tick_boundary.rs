@@ -19,7 +19,11 @@ fn cancel_from_parent(signal: &Signal) {
     signal.cancel().unwrap();
 }
 pub(super) fn child() -> bool {
-    let mode = std::env::args().nth(1);
+    let requested = std::env::args().nth(1);
+    let combined = requested
+        .as_deref()
+        .is_some_and(|value| value.starts_with("--lifecycle-"));
+    let mode = requested.map(|value| value.replace("--lifecycle-", "--active-"));
     if !matches!(
         mode.as_deref(),
         Some("--active-query" | "--active-send" | "--active-query-replay" | "--active-send-replay")
@@ -30,7 +34,7 @@ pub(super) fn child() -> bool {
         println!("FOREGROUND INVALID");
         return true;
     };
-    let Ok(mut session) = Session::start(
+    let started = Session::start_reported(
         Path::new(&path),
         1,
         Duration::from_millis(50),
@@ -44,9 +48,13 @@ pub(super) fn child() -> bool {
             }))
         },
         || false,
-    ) else {
-        println!("FOREGROUND INVALID");
-        return true;
+    );
+    let mut session = match started {
+        Ok(session) => session,
+        Err(report) => {
+            print!("{}", report.render());
+            return true;
+        }
     };
     let signal = Signal::new();
     let send_case = mode.as_deref().is_some_and(|value| value.contains("send"));
@@ -91,6 +99,13 @@ pub(super) fn child() -> bool {
         session.status(7200),
         Err(crate::foreground_session::Error::Closed)
     ));
+    if combined {
+        print!(
+            "{}",
+            crate::foreground_report::Report::classify(&Ok(result)).render()
+        );
+        return true;
+    }
     println!(
         "{}",
         match result {
@@ -100,6 +115,43 @@ pub(super) fn child() -> bool {
         }
     );
     true
+}
+fn replace(path: &Path, bytes: &[u8]) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let next = path.with_extension("next");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&next)
+        .unwrap()
+        .write_all(bytes)
+        .unwrap();
+    std::fs::rename(next, path).unwrap();
+}
+fn reported_replay(mode: &str, path: &Path, expected: &[u8]) {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args([std::ffi::OsStr::new(mode), path.as_os_str()]);
+    let bytes = crate::transport::supervise_with(
+        &mut command,
+        Vec::new(),
+        Duration::from_secs(2),
+        0,
+        crate::foreground_report::MAX_BYTES,
+        |bytes| {
+            if matches!(
+                bytes,
+                b"foreground startup=failed_preparation\n"
+                    | b"foreground outcome=exhausted ticks=1\n"
+            ) {
+                Ok(bytes.to_vec())
+            } else {
+                Err(crate::transport::Error::InvalidInput)
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(bytes, expected);
 }
 pub(super) fn acceptance() {
     use std::os::unix::fs::OpenOptionsExt;
@@ -142,9 +194,9 @@ pub(super) fn acceptance() {
             .unwrap();
         let mut running = crate::status_boundary::Running::start(
             if send_case {
-                "--active-send"
+                "--lifecycle-send"
             } else {
-                "--active-query"
+                "--lifecycle-query"
             },
             &config,
         );
@@ -152,7 +204,10 @@ pub(super) fn acceptance() {
             crate::status_boundary::inspect("--status-inspect", &config),
             crate::status_boundary::Ack::Owned
         );
-        running.finish(false, b"FOREGROUND CANCELLED\n");
+        // Replace the protected source while the prepared callback is paused.
+        let source_bytes = serde_json::to_vec(&source).unwrap();
+        replace(&config, b"{invalid replacement fixture");
+        running.finish(false, b"foreground outcome=cancelled ticks=1\n");
         let mut store = Store::open_private(&state, Duration::from_millis(50)).unwrap();
         let due = store.due_deliveries("research-cluster", 7200, 10).unwrap();
         assert_eq!(due.len(), 1);
@@ -180,14 +235,26 @@ pub(super) fn acceptance() {
             .unwrap()
             .1;
         drop(store);
-        crate::foreground_boundary::one_shot(
+        let before_failed_restart = crate::status_boundary::files(&state);
+        reported_replay(
             if send_case {
-                "--active-send-replay"
+                "--lifecycle-send-replay"
             } else {
-                "--active-query-replay"
+                "--lifecycle-query-replay"
             },
             &config,
-            b"FOREGROUND EXHAUSTED\n",
+            b"foreground startup=failed_preparation\n",
+        );
+        assert_eq!(crate::status_boundary::files(&state), before_failed_restart);
+        replace(&config, &source_bytes);
+        reported_replay(
+            if send_case {
+                "--lifecycle-send-replay"
+            } else {
+                "--lifecycle-query-replay"
+            },
+            &config,
+            b"foreground outcome=exhausted ticks=1\n",
         );
         let mut store = Store::open_private(&state, Duration::from_millis(50)).unwrap();
         let after = store.due_deliveries("research-cluster", 7200, 10).unwrap();

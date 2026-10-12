@@ -3632,3 +3632,20 @@ acceptance with durable recovery. Public and installed gates remain.
 Validation: shared checks pass with 369 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.41% (21,698/22,276), above the 80% gate.
+
+
+### Combined private reported lifecycle acceptance
+
+Child fixtures compose reported protected startup, shared-signal ticks, scheduling
+and shutdown reports. Atomic malformed source replacement during paused callbacks
+does not affect the running plan; subsequent startup fails without state changes.
+Valid restoration recovers frozen pending work or remaining partial delivery without
+duplicate events. ADR 0048 records owned-source and synthetic callback limits.
+No public contracts, dependencies or defaults change.
+
+Next: private reported startup-to-shutdown orchestration adapter with explicit
+caller-owned hooks and durable recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 369 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.38% (21,692/22,276), above the 80% gate.
