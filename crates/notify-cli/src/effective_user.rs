@@ -76,6 +76,7 @@ fn os_name(scratch: &mut [u8]) -> Result<Option<usize>, Error> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit test bodies.
     use super::*;
     #[test]
     fn bounds_and_static_failure_categories() {

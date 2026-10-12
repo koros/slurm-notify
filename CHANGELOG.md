@@ -17,6 +17,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private unified runtime process fixtures now use effective-UID and explicit environment adapters; invalid resources fail before state creation, existing-state failures preserve bytes, and valid-resource recovery retains frozen blocked work without duplicates.
+
 - Private active-query/send process fixtures now receive SIGINT/SIGTERM, preserve committed frozen work and partial delivery, and verify bounded shutdown, malformed-config restart and recovery without duplicate events.
 
 - Private owned foreground process acceptance delivers SIGINT/SIGTERM through the unified runtime, verifies bounded cancellation and bridge cleanup, and preserves frozen pending work/checkpoints across ownership release and replay.

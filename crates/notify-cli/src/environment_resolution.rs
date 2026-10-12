@@ -44,6 +44,7 @@ fn read_with(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit test bodies.
     use super::*;
     #[test]
     fn validation_precedes_access_and_errors_are_static() {

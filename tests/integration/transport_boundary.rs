@@ -101,6 +101,11 @@ mod active_tick_boundary;
 #[path = "../../crates/notify-cli/src/config_composition.rs"]
 mod config_composition;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "../../crates/notify-cli/src/effective_user.rs"]
+mod effective_user;
+#[path = "../../crates/notify-cli/src/environment_resolution.rs"]
+mod environment_resolution;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod foreground_boundary;
 #[allow(unused_imports)]
 #[path = "../../crates/notify-cli/src/foreground_schedule.rs"]
@@ -121,6 +126,8 @@ mod mixed_config_composition;
 #[path = "../../crates/notify-cli/src/observation_mapping.rs"]
 mod observation_mapping;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+mod os_startup_boundary;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod startup_boundary;
 
 #[allow(unused_imports)]
@@ -138,7 +145,8 @@ use std::time::{Duration, Instant};
 
 fn main() {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    if startup_boundary::child()
+    if os_startup_boundary::child()
+        || startup_boundary::child()
         || active_tick_boundary::child()
         || foreground_boundary::child()
         || status_boundary::child()
@@ -357,6 +365,7 @@ fn acceptance() {
     foreground_boundary::acceptance();
     active_tick_boundary::acceptance();
     startup_boundary::acceptance();
+    os_startup_boundary::acceptance();
     owned_pipeline_restart();
     orchestrated_owned_http_restart();
     orchestrated_cleanup_failure_and_post_delivery_cancellation();

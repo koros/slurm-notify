@@ -3788,3 +3788,21 @@ startup and static failure/recovery acceptance. Installed activation remains gat
 Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
 extended custom process acceptance, eight SQLite tests, six hook tests and 11
 draft-config tests. Rust line coverage is 97.24% (22,173/22,803), above the 80% gate.
+
+
+### Private OS resources composed with unified runtime
+
+New bounded trusted children use effective-UID and explicit environment lookup
+with synthetic accounting and denied SMTP work. Invalid URL/header resources
+(missing/empty/oversized/non-Unicode/invalid values) create no absent state and
+preserve existing files. Valid startup commits frozen work; cross-process owner
+contention fails without writes, then restored resources replay without events
+or changes to frozen bindings/attempt/checkpoint. ADR 0056 records host/NSS limits.
+No dependencies, defaults or public contracts change.
+
+Next: combine OS identity/environment sources with signal-driven foreground
+lifecycle and durable recovery acceptance. Installed activation remains gated.
+
+Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
+extended custom process acceptance, eight SQLite tests, six hook tests and 11
+draft-config tests. Rust line coverage is 97.25% (22,176/22,803), above the 80% gate.
