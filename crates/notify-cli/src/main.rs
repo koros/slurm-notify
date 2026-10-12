@@ -1,5 +1,7 @@
 //! Repository foundation executable; monitoring is not implemented.
 #[cfg(test)]
+mod foreground_report;
+#[cfg(test)]
 mod foreground_schedule;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod foreground_session;

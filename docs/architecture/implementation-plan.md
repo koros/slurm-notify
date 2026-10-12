@@ -3566,3 +3566,20 @@ Validation: shared checks pass with 364 Rust tests plus one ignored helper, exte
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. A clean coverage rerun passes at 97.41% (21,474/22,045), above the 80% gate;
 the first report attempt encountered corrupt instrumentation profiles.
+
+
+### Private foreground shutdown classification
+
+Reports retain only static shutdown classes and optional bounded tick counts,
+rendering one ASCII line within 96 bytes. Failed runs keep counts unknown; invalid
+counts fail statically. A reported session adapter preserves ownership release.
+Three tests cover count boundaries, all failure reasons and actual owned shutdown
+classes without identity/cluster/path metadata. ADR 0044 distinguishes budget
+exhaustion from delivery completion. No installed/public output contracts change.
+
+Next: trusted process-boundary bounded shutdown reports with state recovery.
+Public and installed gates remain.
+
+Validation: shared checks pass with 367 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.41% (21,601/22,176), above the 80% gate.

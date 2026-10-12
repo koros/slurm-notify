@@ -76,6 +76,19 @@ impl Session {
         )
     }
     // Every scheduling exit closes ownership; stage reports remain caller-observed.
+    pub(super) fn run_reported<T, M, W, X>(
+        &mut self,
+        limit: usize,
+        hooks: crate::foreground_schedule::Hooks<T, M, W, X>,
+    ) -> crate::foreground_report::Report
+    where
+        T: FnMut(&mut Self) -> Result<polling_cycle::TickReport, Error>,
+        M: FnMut() -> Option<Duration>,
+        W: FnMut(Duration) -> Result<crate::foreground_schedule::Wake, ()>,
+        X: FnMut() -> bool,
+    {
+        crate::foreground_report::Report::classify(&self.run_with(limit, hooks))
+    }
     pub(super) fn run_with<T, M, W, X>(
         &mut self,
         limit: usize,

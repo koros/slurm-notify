@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground shutdown reports classify cancellation, budget exhaustion and static failures with bounded counts/unknown error counts and 96-byte ASCII summaries; owned shutdown and metadata-exclusion acceptance.
+
 - Private active-tick process acceptance cancels accounting-query and ordinary-send callbacks; owner release, frozen pending-work replay and exactly remaining partial-delivery recovery are verified with static child diagnostics.
 
 - Private interruptible composed ticks use shared cancellation at stage/batch boundaries; query completion preserves frozen work, partial delivery records committed progress, and restart processes only remaining work.

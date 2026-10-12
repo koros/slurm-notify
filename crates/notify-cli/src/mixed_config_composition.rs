@@ -1054,6 +1054,55 @@ mod tests {
             .is_empty());
     }
     #[test]
+    fn reported_shutdown_is_bounded_and_preserves_owner_release_for_all_exit_classes() {
+        use crate::foreground_schedule::Hooks;
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        for case in 0..3 {
+            let mut session = start_session(&path);
+            let report = session.run_reported(
+                1,
+                Hooks {
+                    tick: |_: &mut crate::foreground_session::Session| {
+                        Ok(crate::polling_cycle::TickReport::default())
+                    },
+                    monotonic: || {
+                        if case == 2 {
+                            None
+                        } else {
+                            Some(Duration::ZERO)
+                        }
+                    },
+                    wait: |_| panic!("single tick must not wait"),
+                    cancelled: || case == 0,
+                },
+            );
+            let output = report.render();
+            assert_eq!(
+                output,
+                match case {
+                    0 => "foreground outcome=cancelled ticks=0\n",
+                    1 => "foreground outcome=exhausted ticks=1\n",
+                    _ => "foreground outcome=failed_clock ticks=unknown\n",
+                }
+            );
+            assert!(output.len() <= crate::foreground_report::MAX_BYTES);
+            assert!(
+                !output.contains("research-cluster")
+                    && !output.contains("alice")
+                    && !output.contains("state.sqlite3")
+            );
+            assert!(matches!(
+                session.status(7200),
+                Err(crate::foreground_session::Error::Closed)
+            ));
+            drop(open_owned_fixture(&plan));
+        }
+    }
+    #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;
         let d = crate::storage::tests::Directory::new();

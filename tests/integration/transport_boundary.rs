@@ -118,6 +118,10 @@ mod mixed_config_composition;
 #[path = "../../crates/notify-cli/src/observation_mapping.rs"]
 mod observation_mapping;
 
+#[allow(unused_imports)]
+#[path = "../../crates/notify-cli/src/foreground_report.rs"]
+mod foreground_report;
+
 use delivery::ProviderOutcome;
 use rusqlite::OptionalExtension;
 use std::process::Command;
