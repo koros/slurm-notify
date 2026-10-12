@@ -1,5 +1,8 @@
 //! Repository foundation executable; monitoring is not implemented.
 #[cfg(test)]
+mod mixed_config_composition;
+
+#[cfg(test)]
 mod config_composition;
 
 #[cfg(test)]

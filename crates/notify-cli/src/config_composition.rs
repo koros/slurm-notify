@@ -67,9 +67,17 @@ impl Plan {
 pub(super) fn prepare(
     bytes: &[u8],
     identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
-    mut lookup: impl FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+    lookup: impl FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
 ) -> Result<Plan, Error> {
     let draft = config_validate::validate(bytes).map_err(Error::Validation)?;
+    prepare_draft(draft, false, identity, lookup)
+}
+pub(super) fn prepare_draft(
+    draft: config_validate::Draft,
+    allow_smtp: bool,
+    identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+    mut lookup: impl FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+) -> Result<Plan, Error> {
     // Entire structural/policy validation precedes all caller-owned lookups.
     let shape = |_| Error::Shape;
     let root = object(&draft.value).map_err(shape)?;
@@ -77,6 +85,7 @@ pub(super) fn prepare(
     for (_, provider) in providers {
         if text(get(object(provider).map_err(shape)?, "type").map_err(shape)?).map_err(shape)?
             != "webhook"
+            && !allow_smtp
         {
             return Err(Error::UnsupportedProvider);
         }
@@ -123,6 +132,9 @@ pub(super) fn prepare(
     let mut webhooks = Vec::new();
     for (alias, provider) in providers {
         let p = object(provider).map_err(shape)?;
+        if text(get(p, "type").map_err(shape)?).map_err(shape)? == "smtp" {
+            continue;
+        }
         let integer = |key| match get(p, key).map_err(shape)? {
             crate::config_decode::Value::Integer(n) => Ok(*n),
             _ => Err(Error::Shape),

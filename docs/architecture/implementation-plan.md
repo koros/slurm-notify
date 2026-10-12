@@ -3265,3 +3265,20 @@ public contract baselines still require explicit review.
 Validation: shared checks pass with 327 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.56% (18,836/19,307), above the 80% gate.
+
+
+### Private mixed draft composition
+
+Validated mixed drafts now compose owned SMTP trust, rendering/provider bindings
+and configured exact permission tuples alongside common resources. Credentials
+remain deferred until guarded delivery; reference identities exclude secret values.
+Four tests cover pre-lookup failure, ownership and rotation, denied delivery and
+selected frozen-message preservation through reopen. ADR 0027 documents the private
+reference encoding and trust snapshot lifetime. No public contracts or defaults change.
+
+Next: composed mixed runtime-cycle and supervised transport acceptance; installed
+activation and public baselines still require explicit review.
+
+Validation: shared checks pass with 331 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (19,272/19,758), above the 80% gate.
