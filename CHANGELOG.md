@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private interruptible composed ticks use shared cancellation at stage/batch boundaries; query completion preserves frozen work, partial delivery records committed progress, and restart processes only remaining work.
+
 - Private foreground child acceptance uses real monotonic/condition-variable waits for cross-process cancellation, forced termination and timed exhaustion; durable pending messages, bindings and attempts survive replay.
 
 - Private caller-owned sticky cancellation wakes bounded condition-variable waits; owned sessions combine it with real monotonic scheduling, with timeout, shared cancellation, poison and cancelled restart/lock-release acceptance.

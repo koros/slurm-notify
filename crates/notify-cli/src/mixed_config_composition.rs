@@ -892,6 +892,168 @@ mod tests {
         );
     }
     #[test]
+    fn shared_tick_cancellation_after_query_preserves_frozen_work_for_restart() {
+        use crate::{
+            foreground_schedule::Exit, foreground_wait::Signal, polling_cycle::Hooks,
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let signal = Signal::new();
+        let mut session = start_session(&path);
+        let mut queries = 0;
+        let outcome = session
+            .run_interruptible(2, &signal, |session| {
+                let report = session.tick_interruptible(
+                    (Path::new("squeue"), Path::new("sacct")),
+                    Hooks {
+                        query: |command: &mut std::process::Command, _, _| {
+                            queries += 1;
+                            if command.get_program() == "sacct" {
+                                signal.cancel().unwrap();
+                                Ok("research-cluster|1|alice|s|actual|COMPLETED|0:0".into())
+                            } else {
+                                Ok(String::new())
+                            }
+                        },
+                        send: (
+                            |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                                panic!("cancelled resolution")
+                            },
+                            |_: &DueDelivery| -> std::process::Command {
+                                panic!("cancelled helper")
+                            },
+                            |_: &DueDelivery| -> Result<
+                                crate::delivery::ProviderOutcome,
+                                crate::supervised_provider::Diagnostic,
+                            > { panic!("cancelled send") },
+                        ),
+                        clock: || Some(7200),
+                        cancelled: &signal,
+                    },
+                )?;
+                assert!(report.cancelled);
+                assert!(matches!(
+                    report.poll,
+                    Some(Ok(crate::polling_cycle::Outcome::Committed {
+                        events: 1,
+                        ..
+                    }))
+                ));
+                assert!(report.delivery.is_none());
+                assert!(report.cleanup.is_none());
+                Ok(report)
+            })
+            .unwrap();
+        assert_eq!(outcome, Exit::Cancelled { ticks: 1 });
+        assert_eq!(queries, 2);
+        let store = open_owned_fixture(&plan);
+        let due = store.due_deliveries("research-cluster", 7200, 10).unwrap();
+        assert_eq!(due.len(), 1);
+        let frozen = store
+            .frozen_smtp(&due[0].event_id, "research_email")
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        assert_eq!(due[0].attempt_number, 1);
+        drop(store);
+        let mut restarted = start_session(&path);
+        // Sticky cancellation is also authoritative for direct ticks before any hook.
+        let report = restarted
+            .tick_interruptible(
+                (Path::new("squeue"), Path::new("sacct")),
+                Hooks {
+                    query: |_: &mut std::process::Command, _, _| panic!("cancelled query"),
+                    send: (
+                        |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> { panic!("resolution") },
+                        |_: &DueDelivery| -> std::process::Command { panic!("helper") },
+                        |_: &DueDelivery| -> Result<
+                            crate::delivery::ProviderOutcome,
+                            crate::supervised_provider::Diagnostic,
+                        > { panic!("send") },
+                    ),
+                    clock: || panic!("cancelled clock"),
+                    cancelled: &signal,
+                },
+            )
+            .unwrap();
+        assert!(report.cancelled && report.poll.is_none());
+        let store = open_owned_fixture(&plan);
+        assert_eq!(
+            store
+                .frozen_smtp(&due[0].event_id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
+    }
+    #[test]
+    fn shared_tick_cancellation_after_delivery_records_progress_and_leaves_remaining_work() {
+        use crate::{foreground_wait::Signal, polling_cycle::Hooks, storage::DueDelivery};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_FAILED"],"send_to":["primary"]}]);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let signal = Signal::new();
+        let mut session = start_session(&path);
+        let mut sends = 0;
+        let run = |session: &mut crate::foreground_session::Session,
+                   signal: &Signal,
+                   cancel: bool,
+                   sends: &mut usize| {
+            session.tick_interruptible((Path::new("squeue"), Path::new("sacct")), Hooks {
+                query: |command: &mut std::process::Command, _, _| Ok(if command.get_program() == "squeue" { "" } else {
+                    "research-cluster|1|alice|s|actual|FAILED|1:0\nresearch-cluster|2|alice|s|actual|FAILED|1:0"
+                }.into()),
+                send: (|_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> { panic!("SMTP resolution") },
+                    |_: &DueDelivery| -> std::process::Command { panic!("SMTP helper") },
+                    |due: &DueDelivery| { assert_eq!(due.destination, "primary"); *sends += 1;
+                        if cancel { signal.cancel().unwrap(); }
+                        Ok(crate::delivery::ProviderOutcome::Delivered) }),
+                clock: || Some(7200), cancelled: signal,
+            }).unwrap()
+        };
+        let first = run(&mut session, &signal, true, &mut sends);
+        assert!(first.cancelled);
+        assert_eq!(sends, 1);
+        assert!(matches!(
+            first.delivery,
+            Some(Err(crate::polling_cycle::StageError::Cancelled))
+        ));
+        assert_eq!(first.delivery_failure.unwrap().committed.delivered, 1);
+        assert!(first.cleanup.is_none());
+        let store = open_owned_fixture(&plan);
+        let pending = store.due_deliveries("research-cluster", 7200, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempt_number, 1);
+        drop(store);
+        let mut restarted = start_session(&path);
+        let second = run(&mut restarted, &Signal::new(), false, &mut sends);
+        assert!(!second.cancelled);
+        assert!(matches!(
+            second.poll,
+            Some(Ok(crate::polling_cycle::Outcome::Committed {
+                events: 0,
+                ..
+            }))
+        ));
+        assert_eq!(second.delivery.unwrap().unwrap().delivered, 1);
+        assert_eq!(sends, 2);
+        drop(restarted);
+        let store = open_owned_fixture(&plan);
+        assert!(store
+            .due_deliveries("research-cluster", 7200, 10)
+            .unwrap()
+            .is_empty());
+    }
+    #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;
         let d = crate::storage::tests::Directory::new();

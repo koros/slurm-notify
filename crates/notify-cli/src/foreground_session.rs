@@ -122,6 +122,43 @@ impl Session {
             .status(&active.cycles, &mut active.store, now)
             .map_err(|_| Error::Status)
     }
+    pub(super) fn tick_interruptible<Q, L, H, O, C>(
+        &mut self,
+        programs: (&std::path::Path, &std::path::Path),
+        hooks: crate::polling_cycle::Hooks<Q, (L, H, O), C, &crate::foreground_wait::Signal>,
+    ) -> Result<crate::polling_cycle::TickReport, Error>
+    where
+        Q: FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+        L: FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        H: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        O: FnMut(
+            &crate::storage::DueDelivery,
+        ) -> Result<
+            crate::delivery::ProviderOutcome,
+            crate::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+    {
+        let polling_cycle::Hooks {
+            query,
+            send,
+            clock,
+            cancelled: signal,
+        } = hooks;
+        self.tick_with(
+            programs,
+            polling_cycle::Hooks {
+                query,
+                send,
+                clock,
+                cancelled: || signal.cancelled().unwrap_or(true),
+            },
+        )
+    }
     pub(super) fn tick_with<Q, L, H, O, C, X>(
         &mut self,
         programs: (&std::path::Path, &std::path::Path),

@@ -3531,3 +3531,20 @@ hooks and pending-work recovery. Public and installed gates remain.
 Validation: shared checks pass with 362 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.43% (21,331/21,894), above the 80% gate.
+
+
+### Private shared cancellation through active ticks
+
+A tick adapter accepts the same sticky signal used by scheduling and delegates to
+existing stage/batch cancellation checks. Two tests cancel within accounting-query
+and ordinary-send callbacks, verifying committed frozen work, retained attempts,
+partial delivered progress, skipped later hooks and fresh/sticky restart behavior.
+Cancelled ticks release ownership. ADR 0042 records cooperative hook deadlines and
+completed-work semantics. No defaults, dependencies or public contracts change.
+
+Next: process-boundary shared cancellation during active ticks with partial delivery
+and frozen pending-work recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 364 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.39% (21,470/22,045), above the 80% gate.
