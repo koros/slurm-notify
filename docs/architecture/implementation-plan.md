@@ -3282,3 +3282,20 @@ activation and public baselines still require explicit review.
 Validation: shared checks pass with 331 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (19,272/19,758), above the 80% gate.
+
+
+### Private composed mixed runtime-cycle acceptance
+
+The mixed plan now maps observation, query/window/capacity and maintenance controls
+into selected bound runtime cycles, retaining exact permission checks before
+credential resolution. Two tests cover controlled child retry, ordinary progress,
+cancellation, denied restart, edited routes and rotated-credential recovery with
+exact frozen bytes, plus incompatible timeout rejection before hooks/storage.
+ADR 0028 records synthetic transport limits and the cycle's one-timeout restriction.
+
+Next: per-destination private SMTP transport deadlines and composed acceptance
+with distinct budgets. Public contract and installed activation gates remain.
+
+Validation: shared checks pass with 333 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.50% (19,524/20,024), above the 80% gate.

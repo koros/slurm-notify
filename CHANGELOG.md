@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private composed mixed runtime cycles map validated controls and exact permissions into supervised SMTP dispatch; cancellation, retry/ordinary progress, denied restart and rotated-credential recovery acceptance, with explicit rejection of differing SMTP timeouts.
+
 - Private mixed draft composition owns protected SMTP trust, rendering/provider bindings and explicit permission tuples; four failure-ordering, credential/reference/trust rotation and durable selected-poll restart tests, without installed activation.
 
 - Private webhook draft composition maps validated identity, controls, routes and owned injected resources into durable routed polling; five lookup-order/ownership/emit-suppress restart tests. Mixed SMTP drafts fail before lookup until bound composition is implemented.

@@ -118,6 +118,102 @@ impl Plan {
             .map(|s| s.timeout)
             .ok_or(Error::Profile)
     }
+    // Existing bound cycles have one transport timeout; reject differing values.
+    pub(super) fn tick_with<Q, L, H, O, C, X>(
+        &self,
+        programs: (&std::path::Path, &std::path::Path),
+        cycles: &mut crate::polling_cycle::Cycles,
+        store: &mut crate::storage::Store,
+        hooks: crate::polling_cycle::Hooks<Q, (L, H, O), C, X>,
+    ) -> Result<crate::polling_cycle::TickReport, Error>
+    where
+        Q: FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+        L: FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        H: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        O: FnMut(
+            &crate::storage::DueDelivery,
+        ) -> Result<
+            crate::delivery::ProviderOutcome,
+            crate::supervised_provider::Diagnostic,
+        >,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        use crate::polling_cycle::{BoundSmtp, Hooks, MixedBoundSmtp, Rendering, Settings};
+        let timeout = self.smtp.first().ok_or(Error::NoSmtp)?.timeout;
+        if self.smtp.iter().any(|s| s.timeout != timeout) {
+            return Err(Error::Profile);
+        }
+        let ordinary: Vec<_> = self
+            .common
+            .webhooks
+            .iter()
+            .map(|w| w.alias.as_str())
+            .collect();
+        let mut names = ordinary.clone();
+        names.extend(self.smtp.iter().map(|s| s.name.as_str()));
+        let routes: Vec<_> = self.smtp.iter().map(Smtp::route).collect();
+        let profiles: Vec<_> = self.smtp.iter().map(|s| s.descriptor.profile()).collect();
+        let entries = self.permissions();
+        let permissions =
+            smtp_provider_delivery::Permissions::new(&entries).map_err(|_| Error::Shape)?;
+        let settings = Settings {
+            active_program: programs.0,
+            accounting_program: programs.1,
+            cluster: self.common.observation.cluster(),
+            user: self.common.observation.user(),
+            timeout: self.common.controls.query_timeout,
+            output_limit: self.common.controls.output_limit,
+            emit_discovered: self.common.observation.emit_discovered(),
+            capacity: self.common.controls.identity_limit,
+            destinations: &names,
+            window: self.common.controls.window,
+        };
+        let Hooks {
+            query,
+            send: (mut lookup, helper, ordinary_send),
+            clock,
+            cancelled,
+        } = hooks;
+        Ok(cycles.tick_selected_mixed_bound_smtp(
+            &settings,
+            &self.common.controls.maintenance,
+            store,
+            MixedBoundSmtp {
+                ordinary_destinations: &ordinary,
+                smtp: BoundSmtp {
+                    rendering: Rendering {
+                        routes: &routes,
+                        max_messages: self.max_messages,
+                    },
+                    profiles: &profiles,
+                    permissions: &permissions,
+                    timeout,
+                },
+            },
+            Hooks {
+                query,
+                send: (
+                    |bound: &Descriptor| {
+                        self.resolve(bound, &mut lookup)
+                            .map_err(|error| match error {
+                                Error::Credentials(_) => smtp_provider_delivery::Error::Credentials,
+                                _ => smtp_provider_delivery::Error::Profile,
+                            })
+                    },
+                    helper,
+                    ordinary_send,
+                ),
+                clock,
+                cancelled,
+            },
+            |event| self.common.routes.destinations(&event.state),
+        ))
+    }
     pub(super) fn poll_with(
         &self,
         input: config_composition::PollInput<'_>,
@@ -517,6 +613,222 @@ mod tests {
                 }
             )))
             .is_ok());
+    }
+
+    #[test]
+    fn composed_cycles_supervise_retry_and_recover_with_rotated_credentials_and_edited_routes() {
+        use crate::{
+            polling_cycle::{Cycles, Hooks, StageError},
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["routes"] = json!([
+            {"events":["JOB_COMPLETED"],"send_to":["research_email"]},
+            {"events":["JOB_FAILED"],"send_to":["primary"]}
+        ]);
+        v["delivery"]["jitter_seconds"] = json!(0);
+        let provisional = prepare_fixture(&v);
+        let (_, rendering, provider) = provisional.revisions()[0];
+        // Explicit test-only enrollment of exactly the inspected pair.
+        v["delivery"]["smtp_permissions"] = json!([{
+            "cluster_id":"research-cluster","destination":"research_email",
+            "rendering_revision":rendering,"provider_revision":provider
+        }]);
+        let plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut cycles = Cycles::new(1).unwrap();
+        let query = |command: &mut std::process::Command, timeout, limit| {
+            assert!(timeout <= Duration::from_secs(10));
+            assert_eq!(limit, 1048576);
+            Ok(if command.get_program()=="squeue" {""} else {"research-cluster|1|alice|s|actual|COMPLETED|0:0\nresearch-cluster|2|alice|s|actual|FAILED|1:0\nresearch-cluster|3|alice|s|actual|TIMEOUT|1:0"}.into())
+        };
+        let run = |plan: &Plan,
+                   cycles: &mut Cycles,
+                   store: &mut Store,
+                   now,
+                   reply: &str,
+                   password: &[u8],
+                   cancelled| {
+            let mut ordinary = 0;
+            let mut secrets = 0;
+            let result = plan
+                .tick_with(
+                    (Path::new("squeue"), Path::new("sacct")),
+                    cycles,
+                    store,
+                    Hooks {
+                        query,
+                        send: (
+                            |name: &str, _| {
+                                secrets += 1;
+                                Ok(Zeroizing::new(if name.ends_with("USERNAME") {
+                                    b"researcher".to_vec()
+                                } else {
+                                    password.to_vec()
+                                }))
+                            },
+                            |due: &DueDelivery| {
+                                assert_eq!(due.destination, "research_email");
+                                assert!(!reply.is_empty());
+                                let mut cmd = std::process::Command::new("/bin/sh");
+                                cmd.args([
+                                    "-c",
+                                    "cat >/dev/null; printf '%s\\n' \"$1\"",
+                                    "fixture",
+                                    reply,
+                                ]);
+                                cmd
+                            },
+                            |due: &DueDelivery| {
+                                assert_eq!(due.destination, "primary");
+                                ordinary += 1;
+                                Ok(crate::delivery::ProviderOutcome::Delivered)
+                            },
+                        ),
+                        clock: || Some(now),
+                        cancelled: || cancelled,
+                    },
+                )
+                .unwrap();
+            (result, ordinary, secrets)
+        };
+        let (cancelled, ordinary, secrets) =
+            run(&plan, &mut cycles, &mut store, 7200, "", b"first", true);
+        assert!(cancelled.cancelled);
+        assert_eq!((ordinary, secrets), (0, 0));
+        assert!(store
+            .due_deliveries("research-cluster", 7200, 10)
+            .unwrap()
+            .is_empty());
+        let (first, ordinary, secrets) = run(
+            &plan,
+            &mut cycles,
+            &mut store,
+            7200,
+            "SMTP_SUBMIT FINAL TEMP NA",
+            b"first",
+            false,
+        );
+        assert_eq!((ordinary, secrets), (1, 2));
+        let batch = first.delivery.unwrap().unwrap();
+        assert_eq!((batch.delivered, batch.retrying), (1, 1));
+        let pending = store
+            .due_deliveries("research-cluster", 7205, 10)
+            .unwrap()
+            .remove(0);
+        let frozen = store
+            .frozen_smtp(&pending.event_id, "research_email")
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        assert_eq!(pending.attempt_number, 2);
+        drop(store);
+        v["routes"] = json!([{"events":["JOB_COMPLETED","JOB_TIMEOUT"],"send_to":["primary"]}]);
+        let allowed_source = v.clone();
+        v["delivery"]["smtp_permissions"] = json!([]);
+        let denied = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let (blocked, ordinary, secrets) = run(
+            &denied,
+            &mut Cycles::new(1).unwrap(),
+            &mut store,
+            7205,
+            "",
+            b"rotated",
+            false,
+        );
+        assert_eq!(blocked.delivery, Some(Err(StageError::DispatchBlocked)));
+        assert_eq!((ordinary, secrets), (0, 0));
+        assert!(blocked.cleanup.is_none());
+        drop(store);
+        let recovered = prepare_fixture(&allowed_source);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(
+            store
+                .frozen_smtp(&pending.event_id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
+        let (last, ordinary, secrets) = run(
+            &recovered,
+            &mut Cycles::new(1).unwrap(),
+            &mut store,
+            7205,
+            "SMTP_SUBMIT FINAL ACCEPTED RA",
+            b"rotated",
+            false,
+        );
+        assert_eq!((ordinary, secrets), (0, 2));
+        assert_eq!(last.delivery.unwrap().unwrap().delivered, 1);
+        assert!(store
+            .due_deliveries("research-cluster", 7206, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .restore("research-cluster", 10000)
+                .unwrap()
+                .0
+                .emitted
+                .len(),
+            3
+        );
+        assert_eq!(
+            store
+                .frozen_smtp(&pending.event_id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
+    }
+
+    #[test]
+    fn composed_cycle_rejects_incompatible_timeouts_before_hooks_or_storage() {
+        use crate::{
+            polling_cycle::{Cycles, Hooks},
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["providers"]["second_email"] = v["providers"]["research_email"].clone();
+        v["providers"]["second_email"]["request_timeout_milliseconds"] = json!(2000);
+        let mut plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        for empty in [false, true] {
+            if empty {
+                plan.smtp.clear();
+            }
+            let result = plan.tick_with(
+                (Path::new("squeue"), Path::new("sacct")),
+                &mut Cycles::new(1).unwrap(),
+                &mut store,
+                Hooks {
+                    query: |_: &mut std::process::Command, _, _| panic!("unsupported query"),
+                    send: (
+                        |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                            panic!("unsupported lookup")
+                        },
+                        |_: &DueDelivery| -> std::process::Command { panic!("unsupported helper") },
+                        |_: &DueDelivery| panic!("unsupported ordinary"),
+                    ),
+                    clock: || panic!("unsupported clock"),
+                    cancelled: || panic!("unsupported cancellation"),
+                },
+            );
+            assert!(matches!(
+                (empty, result),
+                (false, Err(Error::Profile)) | (true, Err(Error::NoSmtp))
+            ));
+        }
+        assert!(store
+            .due_deliveries("research-cluster", 7200, 10)
+            .unwrap()
+            .is_empty());
     }
     #[test]
     fn changed_trust_after_restart_rejects_old_bound_profile_before_credentials() {
