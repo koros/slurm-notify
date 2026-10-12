@@ -1181,6 +1181,132 @@ mod tests {
         );
     }
     #[test]
+    fn runtime_startup_failures_precede_hooks_and_state_access() {
+        use crate::{
+            foreground_runtime::{self, Hooks, Request},
+            foreground_wait::Signal,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let path = config_path(&d);
+        for (ticks, cancel, expected) in [
+            (0, false, "failed_limit"),
+            (1025, false, "failed_limit"),
+            (1, true, "cancelled"),
+            (1, false, "failed_preparation"),
+        ] {
+            let signal = Signal::new();
+            if cancel {
+                signal.cancel().unwrap();
+            }
+            let summary = foreground_runtime::run(
+                Request {
+                    path: &path,
+                    poll_limit: 1,
+                    tick_limit: ticks,
+                    lock_timeout: Duration::from_millis(50),
+                },
+                &signal,
+                Hooks {
+                    identity: |_| panic!("identity"),
+                    lookup: |_: &str, _| panic!("lookup"),
+                    tick: |_: &mut crate::foreground_session::Session, _: &Signal| panic!("tick"),
+                },
+            );
+            assert_eq!(summary.render(), format!("foreground startup={expected}\n"));
+        }
+        assert!(!owned_path(&d).exists());
+    }
+    #[test]
+    fn runtime_shared_query_cancellation_and_fresh_restart_preserve_durable_work() {
+        use crate::{
+            foreground_runtime::{self, Request},
+            foreground_wait::Signal,
+            polling_cycle::Hooks,
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_FAILED"],"send_to":["primary"]}]);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let mut sends = 0;
+        for cancel in [true, false] {
+            let signal = Signal::new();
+            let summary = foreground_runtime::run(
+                Request {
+                    path: &path,
+                    poll_limit: 1,
+                    tick_limit: 1,
+                    lock_timeout: Duration::from_millis(50),
+                },
+                &signal,
+                foreground_runtime::Hooks {
+                    identity: |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                    lookup: |name: &str, _| {
+                        Ok(Zeroizing::new(if name.ends_with("_URL") {
+                            b"https://fixture.invalid/hook".to_vec()
+                        } else {
+                            b"Bearer fixture".to_vec()
+                        }))
+                    },
+                    tick: |session: &mut crate::foreground_session::Session, shared: &Signal| {
+                        let report = session.tick_interruptible(
+                            (Path::new("squeue"), Path::new("sacct")),
+                            Hooks {
+                                query: |command: &mut std::process::Command, _, _| {
+                                    if command.get_program() == "squeue" {
+                                        return Ok(String::new());
+                                    }
+                                    if cancel {
+                                        shared.cancel().unwrap();
+                                    }
+                                    Ok("research-cluster|1|alice|s|actual|FAILED|1:0".into())
+                                },
+                                send: (
+                                    |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                                        panic!("SMTP resolution")
+                                    },
+                                    |_: &DueDelivery| -> std::process::Command {
+                                        panic!("SMTP helper")
+                                    },
+                                    |_: &DueDelivery| {
+                                        assert!(!cancel);
+                                        sends += 1;
+                                        Ok(crate::delivery::ProviderOutcome::Delivered)
+                                    },
+                                ),
+                                clock: || Some(7200),
+                                cancelled: shared,
+                            },
+                        )?;
+                        assert!(
+                            matches!(report.poll, Some(Ok(crate::polling_cycle::Outcome::Committed { events, .. })) if events == usize::from(cancel))
+                        );
+                        Ok(report)
+                    },
+                },
+            );
+            assert_eq!(
+                summary.render(),
+                if cancel {
+                    "foreground outcome=cancelled ticks=1\n"
+                } else {
+                    "foreground outcome=exhausted ticks=1\n"
+                }
+            );
+            let store = open_owned_fixture(&plan);
+            assert_eq!(
+                store
+                    .due_deliveries("research-cluster", 7200, 10)
+                    .unwrap()
+                    .len(),
+                usize::from(cancel)
+            );
+        }
+        assert_eq!(sends, 1);
+    }
+    #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;
         let d = crate::storage::tests::Directory::new();

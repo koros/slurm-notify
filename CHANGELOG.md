@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private reported runtime orchestration combines protected startup, real interruptible scheduling and caller-owned ticks with one shared signal; pre-access budget validation and committed-query cancellation/recovery tests return bounded summaries.
+
 - Combined private reported lifecycle acceptance replaces protected configuration during active callbacks, verifies owned-plan cancellation, reports invalid restart without state changes, then restores configuration and recovers only durable remaining work.
 
 - Private process startup reporting tests cover missing/malformed/unsafe protected config, cancellation, invalid budgets, unsafe state and owner contention; exact bounded diagnostics and unchanged-state reacquisition are verified.

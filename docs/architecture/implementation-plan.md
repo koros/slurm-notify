@@ -3649,3 +3649,20 @@ caller-owned hooks and durable recovery. Public and installed gates remain.
 Validation: shared checks pass with 369 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.38% (21,692/22,276), above the 80% gate.
+
+
+### Private reported runtime orchestration
+
+One adapter accepts protected config, explicit budgets/timeouts and identity/resource/
+tick hooks. It returns bounded startup/shutdown summaries after ownership release,
+using one signal across startup, waiting and ticks. Two tests verify pre-access
+failure ordering and committed-query cancellation/fresh-signal recovery without
+duplicate delivery. ADR 0049 preserves hook/budget and public-activation limits.
+No defaults, dependencies or public contracts change.
+
+Next: unified adapter process lifecycle acceptance with source replacement and
+durable recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 371 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.36% (21,810/22,401), above the 80% gate.
