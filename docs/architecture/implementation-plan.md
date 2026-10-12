@@ -3599,3 +3599,19 @@ owner-acquisition failures. Public and installed gates remain.
 Validation: shared checks pass with 367 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.42% (21,604/22,176), above the 80% gate.
+
+
+### Private bounded startup failure reports
+
+Reported startup delegates to the existing adapter and maps errors to fixed bounded
+ASCII classifications. Success keeps the owned session unchanged. Two tests cover
+all classes, invalid phases, callback ordering, missing/malformed input, contention
+and successful ownership after release. ADR 0046 records broad classifications and
+initialization side effects. No public contracts, dependencies or defaults change.
+
+Next: process-boundary startup reporting for protected-file, ownership/unsafe-state
+and cancellation failures. Public and installed gates remain.
+
+Validation: shared checks pass with 369 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.40% (21,696/22,276), above the 80% gate.

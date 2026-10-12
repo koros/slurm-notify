@@ -1103,6 +1103,84 @@ mod tests {
         }
     }
     #[test]
+    fn reported_startup_preserves_failure_ordering_and_owned_state() {
+        use crate::foreground_session::Session;
+        let d = crate::storage::tests::Directory::new();
+        let path = config_path(&d);
+        for (limit, cancel, expected) in [
+            (0, false, "failed_limit"),
+            (1, true, "cancelled"),
+            (1, false, "failed_preparation"),
+        ] {
+            let report = match Session::start_reported(
+                &path,
+                limit,
+                Duration::from_millis(50),
+                |_| panic!("unexpected identity"),
+                |_, _| panic!("unexpected lookup"),
+                || cancel,
+            ) {
+                Err(report) => report,
+                Ok(_) => panic!("unexpected startup"),
+            };
+            assert_eq!(report.render(), format!("foreground startup={expected}\n"));
+        }
+        assert!(!owned_path(&d).exists());
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let plan = prepare_file_fixture(&v, &path);
+        let mut owner = start_session(&path);
+        let lookup = |name: &str, _| {
+            Ok(Zeroizing::new(if name.ends_with("_URL") {
+                b"https://fixture.invalid/hook".to_vec()
+            } else {
+                b"Bearer fixture".to_vec()
+            }))
+        };
+        let report = match Session::start_reported(
+            &path,
+            1,
+            Duration::from_millis(50),
+            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            lookup,
+            || false,
+        ) {
+            Err(report) => report,
+            Ok(_) => panic!("second owner"),
+        };
+        assert_eq!(report.render(), "foreground startup=failed_ownership\n");
+        assert!(owner.status(7200).unwrap().poll.stale);
+        owner.stop();
+        let mut session = Session::start_reported(
+            &path,
+            1,
+            Duration::from_millis(50),
+            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            lookup,
+            || false,
+        )
+        .unwrap();
+        assert!(session.status(7200).unwrap().poll.stale);
+        session.stop();
+        drop(open_owned_fixture(&plan));
+        // Malformed protected input maps statically without reaching resource callbacks.
+        replace_config(&path, b"{private malformed fixture");
+        assert_eq!(
+            match Session::start_reported(
+                &path,
+                1,
+                Duration::from_millis(50),
+                |_| panic!("identity"),
+                |_, _| panic!("lookup"),
+                || false
+            ) {
+                Err(report) => report.render(),
+                Ok(_) => panic!("invalid config"),
+            },
+            "foreground startup=failed_preparation\n"
+        );
+    }
+    #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;
         let d = crate::storage::tests::Directory::new();

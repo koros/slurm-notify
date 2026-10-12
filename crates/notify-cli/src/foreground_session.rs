@@ -23,6 +23,17 @@ pub(super) struct Session {
     active: Option<Active>,
 }
 impl Session {
+    pub(super) fn start_reported(
+        path: &Path,
+        poll_limit: usize,
+        lock_timeout: Duration,
+        identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        lookup: impl FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        cancelled: impl FnMut() -> bool,
+    ) -> Result<Self, crate::foreground_report::StartupReport> {
+        Self::start(path, poll_limit, lock_timeout, identity, lookup, cancelled)
+            .map_err(crate::foreground_report::StartupReport::classify)
+    }
     pub(super) fn start(
         path: &Path,
         poll_limit: usize,

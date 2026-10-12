@@ -131,3 +131,66 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug, PartialEq, Eq)]
+enum StartupOutcome {
+    Cancelled,
+    Limit,
+    Preparation,
+    Ownership,
+    InvalidPhase,
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct StartupReport {
+    outcome: StartupOutcome,
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl StartupReport {
+    pub(super) fn classify(error: crate::foreground_session::Error) -> Self {
+        use crate::foreground_session::Error;
+        Self {
+            outcome: match error {
+                Error::Cancelled => StartupOutcome::Cancelled,
+                Error::InvalidLimit => StartupOutcome::Limit,
+                Error::Preparation => StartupOutcome::Preparation,
+                Error::Ownership => StartupOutcome::Ownership,
+                Error::Closed | Error::Cycle | Error::Status => StartupOutcome::InvalidPhase,
+            },
+        }
+    }
+    pub(super) fn render(&self) -> String {
+        let token = match self.outcome {
+            StartupOutcome::Cancelled => "cancelled",
+            StartupOutcome::Limit => "failed_limit",
+            StartupOutcome::Preparation => "failed_preparation",
+            StartupOutcome::Ownership => "failed_ownership",
+            StartupOutcome::InvalidPhase => "failed_invalid_phase",
+        };
+        format!("foreground startup={token}\n")
+    }
+}
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod startup_tests {
+    use super::*;
+    use crate::foreground_session::Error;
+    #[test]
+    fn startup_failure_classes_are_bounded_static_and_phase_specific() {
+        for (error, token) in [
+            (Error::Cancelled, "cancelled"),
+            (Error::InvalidLimit, "failed_limit"),
+            (Error::Preparation, "failed_preparation"),
+            (Error::Ownership, "failed_ownership"),
+            (Error::Closed, "failed_invalid_phase"),
+            (Error::Cycle, "failed_invalid_phase"),
+            (Error::Status, "failed_invalid_phase"),
+        ] {
+            let report = StartupReport::classify(error);
+            let output = report.render();
+            assert_eq!(output, format!("foreground startup={token}\n"));
+            assert!(output.is_ascii() && output.len() <= MAX_BYTES);
+            assert_eq!(output.bytes().filter(|byte| *byte == b'\n').count(), 1);
+        }
+    }
+}
