@@ -3406,3 +3406,21 @@ repair, with absent/unsafe state and concurrent-owner acceptance. Public gates r
 Validation: shared checks pass with 346 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (20,479/20,995), above the 80% gate.
+
+
+### Private health-only existing-state inspection
+
+Metadata-only plans explicitly inspect existing state through a noncreating guarded
+namespace and read-only SQLite connection, with no initialization/migration path.
+The shared exact basename mapper preserves owned-acquisition behavior. Three tests
+cover absent/active-owned state, missing locks, unsafe files, recovery sidecars, WAL
+headers, old/malformed databases, rejected writes and byte-for-byte preservation
+of pending state. ADR 0035 records exclusive cooperating ownership and rollback-only
+inspection limits. No providers, defaults, dependencies or public contracts change.
+
+Next: process-boundary private status inspection acceptance for owner exit,
+cancellation and credential-free diagnostics. Public and installed gates remain.
+
+Validation: shared checks pass with 349 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.53% (20,689/21,212), above the 80% gate.

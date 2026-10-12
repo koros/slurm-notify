@@ -77,21 +77,8 @@ impl Plan {
         &self,
         lock_timeout: Duration,
     ) -> Result<crate::storage::Store, crate::storage::StorageError> {
-        let raw = self.common.storage_path.as_str();
-        let path = std::path::Path::new(raw);
-        if !path.is_absolute()
-            || !raw.ends_with("/state.sqlite3")
-            || raw
-                .split('/')
-                .skip(1)
-                .any(|part| part.is_empty() || part == "." || part == "..")
-        {
-            return Err(crate::storage::StorageError::InvalidInput);
-        }
-        let parent = path
-            .parent()
-            .filter(|parent| *parent != std::path::Path::new("/"))
-            .ok_or(crate::storage::StorageError::InvalidInput)?;
+        let parent = crate::state_path::database_parent(self.common.storage_path.as_str())
+            .map_err(|_| crate::storage::StorageError::InvalidInput)?;
         crate::storage::Store::open_private(parent, lock_timeout)
     }
     pub(super) fn status(

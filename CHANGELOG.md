@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private metadata-only status inspection opens existing guarded SQLite state read-only without creation, migration or repair; active-owner, unsafe/recovery-artifact, schema/header and unchanged pending-state acceptance.
+
 - Private metadata-only status preparation validates protected configuration without identity, environment or trust access; ownership, unavailable-resource, validation and reopened pressure/freshness tests, without creating state or introducing commands.
 
 - Private composed status snapshots read bounded health/checkpoint metadata in one transaction, report freshness and capacity pressure without lookup/send hooks, and preserve pending frozen work; static-error, privacy and restart tests.

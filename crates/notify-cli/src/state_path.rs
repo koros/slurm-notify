@@ -14,6 +14,7 @@ mod unix {
         UnsafePermissions,
         Io,
         AlreadyOwned,
+        UnsupportedState,
     }
 
     pub(crate) struct Guard {
@@ -57,6 +58,12 @@ mod unix {
 
     impl Guard {
         pub(crate) fn acquire(path: &Path) -> Result<Self, Error> {
+            Self::acquire_mode(path, true)
+        }
+        pub(crate) fn inspect(path: &Path) -> Result<Self, Error> {
+            Self::acquire_mode(path, false)
+        }
+        fn acquire_mode(path: &Path, create: bool) -> Result<Self, Error> {
             if !path.is_absolute()
                 || path
                     .components()
@@ -80,7 +87,7 @@ mod unix {
             for (index, component) in components.iter().enumerate() {
                 let entry = name(component)?;
                 let last = index + 1 == components.len();
-                if last {
+                if last && create {
                     // Only the final directory may be created. EEXIST is checked by
                     // descriptor open/metadata, never accepted as proof of safety.
                     // SAFETY: descriptor and CString remain live throughout this call.
@@ -116,7 +123,13 @@ mod unix {
             let lock = open_at(
                 directory.as_raw_fd(),
                 &lock_name,
-                libc::O_RDWR | libc::O_CREAT | libc::O_NONBLOCK,
+                libc::O_RDONLY
+                    | libc::O_NONBLOCK
+                    | if create {
+                        libc::O_RDWR | libc::O_CREAT
+                    } else {
+                        0
+                    },
                 0o600,
             )?;
             check_file(&lock, owner)?;
@@ -131,10 +144,16 @@ mod unix {
                 );
             }
             let database_name = CString::new("state.sqlite3").unwrap();
-            let database = open_at(
+            let mut database = open_at(
                 directory.as_raw_fd(),
                 &database_name,
-                libc::O_RDWR | libc::O_CREAT | libc::O_NONBLOCK,
+                libc::O_RDONLY
+                    | libc::O_NONBLOCK
+                    | if create {
+                        libc::O_RDWR | libc::O_CREAT
+                    } else {
+                        0
+                    },
                 0o600,
             )?;
             check_file(&database, owner)?;
@@ -146,11 +165,26 @@ mod unix {
                     libc::O_RDONLY | libc::O_NONBLOCK,
                     0,
                 ) {
-                    Ok(file) => check_file(&file, owner)?,
+                    Ok(file) => {
+                        check_file(&file, owner)?;
+                        if !create {
+                            return Err(Error::UnsupportedState);
+                        }
+                    }
                     Err(_)
                         if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) => {
                     }
                     Err(error) => return Err(error),
+                }
+            }
+            if !create {
+                use std::io::Read;
+                let mut header = [0; 20];
+                database
+                    .read_exact(&mut header)
+                    .map_err(|_| Error::UnsupportedState)?;
+                if &header[..16] != b"SQLite format 3\0" || header[18] != 1 || header[19] != 1 {
+                    return Err(Error::UnsupportedState);
                 }
             }
             Ok(Self {
@@ -163,6 +197,24 @@ mod unix {
 }
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use unix::{Error, Guard};
+
+// Shared exact private basename mapping; no path rewriting or filesystem access.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn database_parent(raw: &str) -> Result<&std::path::Path, Error> {
+    let path = std::path::Path::new(raw);
+    if !path.is_absolute()
+        || !raw.ends_with("/state.sqlite3")
+        || raw
+            .split('/')
+            .skip(1)
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(Error::InvalidPath);
+    }
+    path.parent()
+        .filter(|parent| *parent != std::path::Path::new("/"))
+        .ok_or(Error::InvalidPath)
+}
 
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "macos"))]

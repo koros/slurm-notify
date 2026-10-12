@@ -11,6 +11,14 @@ pub(super) enum Error {
     Snapshot(crate::config_snapshot::Error),
     Validation(config_validate::Error),
 }
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum InspectionError {
+    State(crate::state_path::Error),
+    Storage,
+    UnsupportedVersion,
+    Report(ReportError),
+}
 // Retain only status metadata. No identity, trust, credential or provider resources.
 // No Debug/Clone: even cluster/path metadata must not become diagnostic output.
 pub(super) struct Plan {
@@ -24,6 +32,23 @@ pub(super) struct Plan {
 impl Plan {
     pub(super) fn storage_path(&self) -> &str {
         &self.path
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn inspect(
+        &self,
+        cycles: &Cycles,
+        now: i64,
+        lock_timeout: std::time::Duration,
+    ) -> Result<HealthReport, InspectionError> {
+        let parent = crate::state_path::database_parent(self.storage_path())
+            .map_err(InspectionError::State)?;
+        let mut store = Store::open_status(parent, lock_timeout).map_err(|error| match error {
+            crate::storage::StorageError::StatePath(error) => InspectionError::State(error),
+            crate::storage::StorageError::UnsupportedVersion => InspectionError::UnsupportedVersion,
+            _ => InspectionError::Storage,
+        })?;
+        self.status(cycles, &mut store, now)
+            .map_err(InspectionError::Report)
     }
     pub(super) fn status(
         &self,
@@ -101,6 +126,202 @@ mod tests {
             .unwrap()
             .write_all(bytes)
             .unwrap();
+    }
+
+    fn inspect_fixture(plan: &Plan) -> Result<HealthReport, InspectionError> {
+        let until = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            match plan.inspect(&Cycles::new(1).unwrap(), 10, Duration::from_millis(50)) {
+                Err(InspectionError::State(crate::state_path::Error::AlreadyOwned))
+                    if std::time::Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                result => return result,
+            }
+        }
+    }
+    fn files(path: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut entries: Vec<_> = std::fs::read_dir(path)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_str().unwrap().to_owned(),
+                    std::fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    }
+    #[test]
+    fn inspection_does_not_create_absent_state_and_rejects_concurrent_owner() {
+        let directory = crate::storage::tests::Directory::new();
+        let source = fixture(&directory);
+        let plan = prepare(&serde_json::to_vec(&source).unwrap()).unwrap();
+        let state = Path::new(plan.storage_path()).parent().unwrap();
+        let cycles = Cycles::new(1).unwrap();
+        assert!(matches!(
+            plan.inspect(&cycles, 10, Duration::from_millis(50)),
+            Err(InspectionError::State(crate::state_path::Error::Io))
+        ));
+        assert!(!state.exists());
+        let owner = Store::open_private(state, Duration::from_millis(50)).unwrap();
+        let before = files(state);
+        assert!(matches!(
+            plan.inspect(&cycles, 10, Duration::from_millis(50)),
+            Err(InspectionError::State(
+                crate::state_path::Error::AlreadyOwned
+            ))
+        ));
+        assert_eq!(files(state), before);
+        drop(owner);
+        let report = inspect_fixture(&plan).unwrap();
+        assert!(report.poll.stale);
+        assert_eq!(files(state), before);
+        std::fs::remove_file(state.join(".owner.lock")).unwrap();
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::State(crate::state_path::Error::Io))
+        ));
+        assert!(!state.join(".owner.lock").exists());
+    }
+    #[test]
+    fn inspection_rejects_unsafe_files_recovery_artifacts_and_old_schema_without_repair() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let directory = crate::storage::tests::Directory::new();
+        let source = fixture(&directory);
+        let plan = prepare(&serde_json::to_vec(&source).unwrap()).unwrap();
+        let state = Path::new(plan.storage_path()).parent().unwrap();
+        drop(Store::open_private(state, Duration::from_millis(50)).unwrap());
+        std::fs::set_permissions(state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::State(
+                crate::state_path::Error::UnsafePermissions
+            ))
+        ));
+        std::fs::set_permissions(state, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = state.join(format!("state.sqlite3{suffix}"));
+            write(&sidecar, b"synthetic recovery artifact");
+            let before = files(state);
+            assert!(matches!(
+                inspect_fixture(&plan),
+                Err(InspectionError::State(
+                    crate::state_path::Error::UnsupportedState
+                ))
+            ));
+            assert_eq!(files(state), before);
+            std::fs::remove_file(sidecar).unwrap();
+        }
+        let path = state.join("state.sqlite3");
+        let saved = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let target = state.parent().unwrap().join("sentinel");
+        write(&target, b"synthetic sentinel");
+        symlink(&target, &path).unwrap();
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::State(crate::state_path::Error::Io))
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic sentinel");
+        std::fs::remove_file(&path).unwrap();
+        write(&path, &saved);
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.pragma_update(None, "user_version", 3).unwrap();
+        drop(db);
+        let before = files(state);
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::UnsupportedVersion)
+        ));
+        assert_eq!(files(state), before);
+        let mut wal_header = saved.clone();
+        wal_header[18] = 2;
+        wal_header[19] = 2;
+        std::fs::write(&path, &wal_header).unwrap();
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::State(
+                crate::state_path::Error::UnsupportedState
+            ))
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), wal_header);
+        std::fs::write(&path, b"not a SQLite database").unwrap();
+        assert!(matches!(
+            inspect_fixture(&plan),
+            Err(InspectionError::State(
+                crate::state_path::Error::UnsupportedState
+            ))
+        ));
+        assert_eq!(std::fs::read(path).unwrap(), b"not a SQLite database");
+    }
+    #[test]
+    fn inspection_reads_pending_health_and_enforces_sqlite_read_only_without_changes() {
+        let directory = crate::storage::tests::Directory::new();
+        let source = fixture(&directory);
+        let plan = prepare(&serde_json::to_vec(&source).unwrap()).unwrap();
+        let state = Path::new(plan.storage_path()).parent().unwrap();
+        let mut owner = Store::open_private(state, Duration::from_millis(50)).unwrap();
+        let mut reconciler = crate::lifecycle::Reconciler::with_capacity(10);
+        let events = reconciler
+            .observe_snapshot(
+                "",
+                "research-cluster|1|alice|s|actual|COMPLETED|0:0",
+                "research-cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        owner
+            .persist_reconciler(
+                &reconciler,
+                &events,
+                &["primary"],
+                "research-cluster",
+                "1970-01-01T00:00:10",
+                10,
+            )
+            .unwrap();
+        drop(owner);
+        let before = files(state);
+        let report = inspect_fixture(&plan).unwrap();
+        assert_eq!(report.poll.checkpoint_age_seconds, Some(0));
+        assert!(!report.poll.stale);
+        let mut readonly = {
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            loop {
+                match Store::open_status(state, Duration::from_millis(50)) {
+                    Ok(store) => break store,
+                    Err(crate::storage::StorageError::StatePath(
+                        crate::state_path::Error::AlreadyOwned,
+                    )) if std::time::Instant::now() < until => {
+                        std::thread::sleep(Duration::from_millis(2))
+                    }
+                    Err(error) => panic!("read-only fixture failed: {error:?}"),
+                }
+            }
+        };
+        let pending = readonly.due_deliveries("research-cluster", 10, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(readonly
+            .persist_reconciler(
+                &reconciler,
+                &[],
+                &["primary"],
+                "research-cluster",
+                "1970-01-01T00:00:11",
+                11
+            )
+            .is_err());
+        drop(readonly);
+        assert_eq!(files(state), before);
+        assert_eq!(
+            inspect_fixture(&plan).unwrap().poll.checkpoint_age_seconds,
+            Some(0)
+        );
     }
     #[test]
     fn unavailable_resources_do_not_prevent_owned_metadata_preparation() {

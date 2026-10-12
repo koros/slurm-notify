@@ -173,6 +173,32 @@ impl Store {
         Ok(store)
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn open_status(
+        directory: &Path,
+        lock_timeout: Duration,
+    ) -> Result<Self, StorageError> {
+        let owner =
+            super::state_path::Guard::inspect(directory).map_err(StorageError::StatePath)?;
+        let db = Connection::open_with_flags(
+            &owner.database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        db.busy_timeout(lock_timeout)?;
+        db.pragma_update(None, "query_only", true)?;
+        db.pragma_update(None, "temp_store", "MEMORY")?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version != 4 {
+            return Err(StorageError::UnsupportedVersion);
+        }
+        Ok(Self {
+            db,
+            _owner: Some(owner),
+        })
+    }
+
     // Caller owns a private test directory. Secure production creation remains pending.
     pub(super) fn open(path: &Path, lock_timeout: Duration) -> Result<Self, StorageError> {
         Self::initialize(Connection::open(path)?, lock_timeout)
