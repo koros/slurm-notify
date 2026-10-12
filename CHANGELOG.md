@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private bounded Rust JSON decoding with pinned test-only serde_json/serde_core, decoded duplicate-key rejection, canonical u64 tokens, static errors and owned zeroizing text; three syntax/structure/boundary tests, without installed schema adoption.
+
 - Consolidated source-linked prototype readiness and contract review gates, distinguished installed resource/payload gaps and documented the activation sequence; refreshed README validation and CI descriptions.
 
 - Private event-selected mixed runtime cycles reuse bounded poll/dispatch/maintenance stages; controlled helper acceptance covers cancellation, denied permission, retry/reopen and edited rules without retargeting frozen SMTP work or backfilling unmatched events.

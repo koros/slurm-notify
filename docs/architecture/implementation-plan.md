@@ -3178,3 +3178,20 @@ Validation: checked changed local Markdown links and tracked-file policy. Latest
 implementation evidence remains 314 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite, six hook and 11 draft configuration tests; Rust
 line coverage 97.57% (17,768/18,210). Commit/push hooks rerun shared checks.
+
+### Private bounded Rust JSON decoding
+
+Added a test-only syntax/structure boundary with pinned serde_json 1.0.152 and the
+existing serde_core 1.0.229, without installed parser adoption or schema approval.
+A preflight bounds UTF-8 bytes/depth and canonical u64 tokens; a custom visitor
+bounds containers and rejects decoded duplicate keys before retaining entries.
+Retained strings are zeroizing and errors static; upstream scratch zeroization is
+not promised. Three tests cover synthetic draft examples, ownership, malformed
+inputs and exact budgets. ADR 0024 records dependencies and remaining validation.
+
+Next: private typed draft-shape validation before lookup/query/dispatch. Public
+contracts, production parsing and installed activation still need explicit review.
+
+Validation: shared checks pass with 317 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (17,933/18,386), above the 80% gate.
