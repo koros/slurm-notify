@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private typed operational-control mapping into accounting, retry and maintenance settings, with explicit numeric ceilings, cross-field checks, lossless jitter-seed conversion and three boundary/failure tests; no JSON parser, defaults or installed activation.
+
 - Owned webhook resource frames in supervised HTTP/restart acceptance, preserving zeroizing input through child transfer and rejecting missing/invalid URL or authorization before child creation; pending attempts survive reopen and recover through rate-limit retry.
 
 - Private injected webhook URL/authorization resolution with bounded owned zeroizing bytes, shared endpoint/header validation, static failures and four preflight/ownership/frame tests; no ambient lookup, network access or installed activation.

@@ -3007,3 +3007,23 @@ parser/configuration mapping and activation still require explicit contract revi
 Validation: shared checks pass with 301 Rust tests plus one ignored helper, expanded
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft
 configuration tests. Rust line coverage is 97.51% (16,321/16,738), above the 80% gate.
+
+### Private typed operational-control mapping
+
+Added test-only runtime_mapping to translate explicit numeric controls into existing
+accounting, retry and maintenance settings and bounded durations/capacities. All 17
+draft numeric ranges and five relationships are checked before publishing a plan.
+Jitter seeds use strict bounded ASCII decimal/u64 parsing without loss of precision.
+There is no parser, lookup, state creation, schedule, command activation or default.
+
+Three tests cover exact mapping, combined minima/maxima, full u64 seed preservation,
+every out-of-range control, all relationships and malformed/overflowing seeds. ADR
+0021 records scope and remaining user/route/resource/public-contract boundaries.
+No dependency or public contract changes.
+
+Next: mapped controls through private runtime-cycle/persistence acceptance. Installed
+parser/configuration mapping and activation still require explicit public review.
+
+Validation: shared checks pass with 304 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.52% (16,554/16,975), above the 80% gate.
