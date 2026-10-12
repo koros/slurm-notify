@@ -3753,3 +3753,20 @@ bounded reports and durable recovery. Installed activation remains review-gated.
 Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
 tests. Rust line coverage is 97.24% (22,174/22,803), above the 80% gate.
+
+
+### Private owned foreground OS signal acceptance
+
+Trusted process fixtures compose the signal bridge with unified protected runtime
+startup, one committed blocked tick and real interruptible scheduling. Parent sends
+SIGINT/SIGTERM after READY and contention checks; bounded reports, bridge cleanup,
+state ownership release and unchanged durable files/frozen bindings/checkpoints
+are verified through blocked replay and status reacquisition. ADR 0054 records
+READY-boundary scope. No dependencies, defaults or public contracts change.
+
+Next: OS signal acceptance during active query/send callbacks with partial-delivery
+and frozen-work recovery. Installed activation remains review-gated.
+
+Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
+extended custom process acceptance, eight SQLite tests, six hook tests and 11
+draft-config tests. Rust line coverage is 97.23% (22,171/22,803), above the 80% gate.

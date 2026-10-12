@@ -32,6 +32,8 @@ pub(super) fn child() -> bool {
                 | "--foreground-cancel-before"
                 | "--foreground-real-wait"
                 | "--foreground-real-replay"
+                | "--foreground-os-int"
+                | "--foreground-os-term"
         )
     ) {
         return false;
@@ -40,6 +42,13 @@ pub(super) fn child() -> bool {
         println!("FOREGROUND INVALID");
         return true;
     };
+    if matches!(
+        mode.as_deref(),
+        Some("--foreground-os-int" | "--foreground-os-term")
+    ) {
+        signal_lifecycle(Path::new(&path));
+        return true;
+    }
     let started = Session::start(
         Path::new(&path),
         2,
@@ -144,6 +153,47 @@ pub(super) fn child() -> bool {
     );
     true
 }
+fn signal_lifecycle(path: &Path) {
+    let signal = crate::foreground_wait::Signal::new();
+    let binding = crate::foreground_signals::bind(&signal).unwrap();
+    let mut ticks = 0;
+    let summary = crate::foreground_runtime::run(
+        crate::foreground_runtime::Request {
+            path,
+            poll_limit: 2,
+            tick_limit: 2,
+            lock_timeout: Duration::from_millis(50),
+        },
+        &signal,
+        crate::foreground_runtime::Hooks {
+            identity: |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            lookup: |name: &str, _| {
+                assert!(!name.contains("SMTP"));
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+            tick: |session: &mut Session, _: &crate::foreground_wait::Signal| {
+                ticks += 1;
+                assert_eq!(ticks, 1, "unexpected signal lifecycle tick");
+                let report = blocked_tick(session)?;
+                println!("READY");
+                std::io::stdout().flush().unwrap();
+                Ok(report)
+            },
+        },
+    );
+    assert!(signal.cancelled().unwrap());
+    drop(binding);
+    // Verify bridge ownership/worker cleanup before emitting the bounded report.
+    let fresh = crate::foreground_wait::Signal::new();
+    drop(crate::foreground_signals::bind(&fresh).unwrap());
+    assert!(!fresh.cancelled().unwrap());
+    print!("{}", summary.render());
+}
+
 fn blocked_tick(
     session: &mut Session,
 ) -> Result<crate::polling_cycle::TickReport, crate::foreground_session::Error> {
@@ -329,6 +379,16 @@ pub(super) fn acceptance() {
         ),
         ("--foreground-real-wait", true, b"".as_slice()),
         (
+            "--foreground-os-int",
+            false,
+            b"foreground outcome=cancelled ticks=1\n".as_slice(),
+        ),
+        (
+            "--foreground-os-term",
+            false,
+            b"foreground outcome=cancelled ticks=1\n".as_slice(),
+        ),
+        (
             "--foreground-wait-error",
             false,
             b"FOREGROUND FAILED\n".as_slice(),
@@ -340,7 +400,18 @@ pub(super) fn acceptance() {
             crate::status_boundary::Ack::Owned
         );
         let before = crate::status_boundary::files(&state);
-        running.finish(kill, expected);
+        if matches!(mode, "--foreground-os-int" | "--foreground-os-term") {
+            running.finish_signal(
+                if mode == "--foreground-os-int" {
+                    libc::SIGINT
+                } else {
+                    libc::SIGTERM
+                },
+                expected,
+            );
+        } else {
+            running.finish(kill, expected);
+        }
         assert_eq!(crate::status_boundary::files(&state), before);
         let durable = pending(&state);
         assert_eq!(durable.1, 1);

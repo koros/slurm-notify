@@ -108,6 +108,9 @@ mod foreground_schedule;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "../../crates/notify-cli/src/foreground_session.rs"]
 mod foreground_session;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "../../crates/notify-cli/src/foreground_signals.rs"]
+mod foreground_signals;
 #[allow(unused_imports)]
 #[path = "../../crates/notify-cli/src/foreground_wait.rs"]
 mod foreground_wait;
@@ -377,7 +380,7 @@ fn acceptance() {
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
     owned_smtp_upgrade_policy_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart and mixed-route rendering-failure recovery and status inspection owner exit/cancellation/privacy and foreground wait cancellation/termination/recovery and active query/send cancellation/replay passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart and mixed-route rendering-failure recovery and status inspection owner exit/cancellation/privacy and foreground wait cancellation/termination/recovery, owned OS signal shutdown/replay and active query/send cancellation/replay passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

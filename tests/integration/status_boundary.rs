@@ -156,10 +156,22 @@ impl Running {
         } else {
             self.child.stdin.take().unwrap().write_all(b"x").unwrap();
         }
+        self.collect(!kill, expected);
+    }
+    pub(super) fn finish_signal(&mut self, number: libc::c_int, expected: &[u8]) {
+        assert!(matches!(number, libc::SIGINT | libc::SIGTERM));
+        // SAFETY: target is the owned, READY child PID; valid signal constants.
+        assert_eq!(
+            unsafe { libc::kill(self.child.id().try_into().unwrap(), number) },
+            0
+        );
+        self.collect(true, expected);
+    }
+    fn collect(&mut self, success: bool, expected: &[u8]) {
         let until = Instant::now() + Duration::from_secs(2);
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
-                assert_eq!(status.success(), !kill);
+                assert_eq!(status.success(), success);
                 break;
             }
             assert!(Instant::now() < until, "status child did not exit");
