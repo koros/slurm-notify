@@ -3666,3 +3666,19 @@ durable recovery. Public and installed gates remain.
 Validation: shared checks pass with 371 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.36% (21,810/22,401), above the 80% gate.
+
+
+### Unified private runtime process acceptance
+
+Active lifecycle children now invoke the unified reported runtime with explicit
+request/identity/resource/tick hooks. The adapter supplies the shared signal and
+bounded startup/shutdown summaries. Existing replacement, cancellation, invalid
+restart and durable recovery checks verify the single entry path. ADR 0050 retains
+cooperative hook and public activation limits. No defaults or dependencies change.
+
+Next: consolidate foreground readiness and concrete remaining activation decisions
+from the unified process evidence. Public and installed gates remain.
+
+Validation: shared checks pass with 371 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.37% (21,812/22,401), above the 80% gate.

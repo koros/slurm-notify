@@ -124,6 +124,10 @@ mod startup_boundary;
 #[path = "../../crates/notify-cli/src/foreground_report.rs"]
 mod foreground_report;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "../../crates/notify-cli/src/foreground_runtime.rs"]
+mod foreground_runtime;
+
 use delivery::ProviderOutcome;
 use rusqlite::OptionalExtension;
 use std::process::Command;

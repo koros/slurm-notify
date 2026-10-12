@@ -20,9 +20,6 @@ fn cancel_from_parent(signal: &Signal) {
 }
 pub(super) fn child() -> bool {
     let requested = std::env::args().nth(1);
-    let combined = requested
-        .as_deref()
-        .is_some_and(|value| value.starts_with("--lifecycle-"));
     let mode = requested.map(|value| value.replace("--lifecycle-", "--active-"));
     if !matches!(
         mode.as_deref(),
@@ -34,39 +31,35 @@ pub(super) fn child() -> bool {
         println!("FOREGROUND INVALID");
         return true;
     };
-    let started = Session::start_reported(
-        Path::new(&path),
-        1,
-        Duration::from_millis(50),
-        |_| Ok(Zeroizing::new(b"alice".to_vec())),
-        |name, _| {
-            assert!(!name.contains("SMTP"));
-            Ok(Zeroizing::new(if name.ends_with("_URL") {
-                b"https://fixture.invalid/hook".to_vec()
-            } else {
-                b"Bearer fixture".to_vec()
-            }))
-        },
-        || false,
-    );
-    let mut session = match started {
-        Ok(session) => session,
-        Err(report) => {
-            print!("{}", report.render());
-            return true;
-        }
-    };
     let signal = Signal::new();
     let send_case = mode.as_deref().is_some_and(|value| value.contains("send"));
     let replay = mode
         .as_deref()
         .is_some_and(|value| value.ends_with("replay"));
     let mut sends = 0;
-    let result = session.run_interruptible(1, &signal, |session| {
-        let report = session.tick_interruptible((Path::new("squeue"), Path::new("sacct")), Hooks {
+    let summary = crate::foreground_runtime::run(
+        crate::foreground_runtime::Request {
+            path: Path::new(&path),
+            poll_limit: 1,
+            tick_limit: 1,
+            lock_timeout: Duration::from_millis(50),
+        },
+        &signal,
+        crate::foreground_runtime::Hooks {
+            identity: |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            lookup: |name: &str, _| {
+                assert!(!name.contains("SMTP"));
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+            tick: |session: &mut Session, signal: &Signal| {
+                let report = session.tick_interruptible((Path::new("squeue"), Path::new("sacct")), Hooks {
             query: |command: &mut Command, _, _| {
                 if command.get_program() == "squeue" { return Ok(String::new()); }
-                if !send_case && !replay { cancel_from_parent(&signal); }
+                if !send_case && !replay { cancel_from_parent(signal); }
                 Ok(if send_case {
                     "research-cluster|1|alice|s|actual|FAILED|1:0\nresearch-cluster|2|alice|s|actual|FAILED|1:0"
                 } else { "research-cluster|1|alice|s|actual|COMPLETED|0:0" }.into())
@@ -78,42 +71,52 @@ pub(super) fn child() -> bool {
                     assert_eq!(due.destination, "primary");
                     sends += 1;
                     assert_eq!(sends, 1);
-                    if !replay { cancel_from_parent(&signal); }
+                    if !replay { cancel_from_parent(signal); }
                     Ok(crate::delivery::ProviderOutcome::Delivered)
                 }),
-            clock: || Some(7200), cancelled: &signal,
+            clock: || Some(7200), cancelled: signal,
         })?;
-        assert!(matches!(report.poll, Some(Ok(Outcome::Committed { events, .. })) if events == if replay { 0 } else if send_case { 2 } else { 1 }));
-        if !replay {
-            assert!(report.cancelled && report.cleanup.is_none());
-            if send_case {
-                assert!(matches!(report.delivery, Some(Err(StageError::Cancelled))));
-                assert_eq!(report.delivery_failure.as_ref().unwrap().committed.delivered, 1);
-            } else { assert!(report.delivery.is_none()); }
-        } else if send_case {
-            assert_eq!(report.delivery.as_ref().unwrap().as_ref().unwrap().delivered, 1);
-        } else { assert!(matches!(report.delivery, Some(Err(StageError::DispatchBlocked)))); }
-        Ok(report)
-    }).unwrap();
-    assert!(matches!(
-        session.status(7200),
-        Err(crate::foreground_session::Error::Closed)
-    ));
-    if combined {
-        print!(
-            "{}",
-            crate::foreground_report::Report::classify(&Ok(result)).render()
-        );
-        return true;
-    }
-    println!(
-        "{}",
-        match result {
-            crate::foreground_schedule::Exit::Cancelled { ticks: 1 } => "FOREGROUND CANCELLED",
-            crate::foreground_schedule::Exit::Exhausted { ticks: 1 } => "FOREGROUND EXHAUSTED",
-            _ => "FOREGROUND INVALID",
-        }
+                assert!(
+                    matches!(report.poll, Some(Ok(Outcome::Committed { events, .. })) if events == if replay { 0 } else if send_case { 2 } else { 1 })
+                );
+                if !replay {
+                    assert!(report.cancelled && report.cleanup.is_none());
+                    if send_case {
+                        assert!(matches!(report.delivery, Some(Err(StageError::Cancelled))));
+                        assert_eq!(
+                            report
+                                .delivery_failure
+                                .as_ref()
+                                .unwrap()
+                                .committed
+                                .delivered,
+                            1
+                        );
+                    } else {
+                        assert!(report.delivery.is_none());
+                    }
+                } else if send_case {
+                    assert_eq!(
+                        report
+                            .delivery
+                            .as_ref()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
+                            .delivered,
+                        1
+                    );
+                } else {
+                    assert!(matches!(
+                        report.delivery,
+                        Some(Err(StageError::DispatchBlocked))
+                    ));
+                }
+                Ok(report)
+            },
+        },
     );
+    print!("{}", summary.render());
     true
 }
 fn replace(path: &Path, bytes: &[u8]) {

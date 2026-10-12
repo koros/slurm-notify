@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Unified private runtime process fixtures now use the reported orchestration adapter directly; shared cancellation, protected source replacement, failed restart and durable frozen/partial-delivery recovery acceptance cover the single entry path.
+
 - Private reported runtime orchestration combines protected startup, real interruptible scheduling and caller-owned ticks with one shared signal; pre-access budget validation and committed-query cancellation/recovery tests return bounded summaries.
 
 - Combined private reported lifecycle acceptance replaces protected configuration during active callbacks, verifies owned-plan cancellation, reports invalid restart without state changes, then restores configuration and recovers only durable remaining work.
