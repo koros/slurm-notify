@@ -17,6 +17,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground lifecycle fixtures combine effective-UID/environment resources with SIGINT/SIGTERM cancellation; bounded shutdown, bridge cleanup, unchanged frozen pending work and fresh-resource replay/status recovery are verified.
+
 - Private unified runtime process fixtures now use effective-UID and explicit environment adapters; invalid resources fail before state creation, existing-state failures preserve bytes, and valid-resource recovery retains frozen blocked work without duplicates.
 
 - Private active-query/send process fixtures now receive SIGINT/SIGTERM, preserve committed frozen work and partial delivery, and verify bounded shutdown, malformed-config restart and recovery without duplicate events.

@@ -14,20 +14,34 @@ pub(super) fn child() -> bool {
     let mode = std::env::args().nth(1);
     if !matches!(
         mode.as_deref(),
-        Some("--os-runtime" | "--os-runtime-replay")
+        Some(
+            "--os-runtime"
+                | "--os-runtime-replay"
+                | "--os-runtime-signal-int"
+                | "--os-runtime-signal-term"
+        )
     ) {
         return false;
     }
     let Some(path) = std::env::args().nth(2) else {
         return true;
     };
-    let replay = mode.as_deref() == Some("--os-runtime-replay");
+    let os_signal = mode
+        .as_deref()
+        .is_some_and(|value| value.starts_with("--os-runtime-signal-"));
+    let replay = os_signal || mode.as_deref() == Some("--os-runtime-replay");
     let signal = crate::foreground_wait::Signal::new();
+    let binding = if os_signal {
+        Some(crate::foreground_signals::bind(&signal).unwrap())
+    } else {
+        None
+    };
+    let mut ticks = 0;
     let summary = crate::foreground_runtime::run(
         crate::foreground_runtime::Request {
             path: Path::new(&path),
-            poll_limit: 1,
-            tick_limit: 1,
+            poll_limit: if os_signal { 2 } else { 1 },
+            tick_limit: if os_signal { 2 } else { 1 },
             lock_timeout: Duration::from_millis(50),
         },
         &signal,
@@ -36,6 +50,8 @@ pub(super) fn child() -> bool {
             lookup: crate::environment_resolution::lookup,
             tick: |session: &mut crate::foreground_session::Session,
                    signal: &crate::foreground_wait::Signal| {
+                ticks += 1;
+                assert_eq!(ticks, 1, "unexpected OS lifecycle tick");
                 let report = session.tick_interruptible(
                     (Path::new("squeue"), Path::new("sacct")),
                     crate::polling_cycle::Hooks {
@@ -72,10 +88,21 @@ pub(super) fn child() -> bool {
                     report.delivery,
                     Some(Err(crate::polling_cycle::StageError::DispatchBlocked))
                 ));
+                if os_signal {
+                    println!("READY");
+                    std::io::stdout().flush().unwrap();
+                }
                 Ok(report)
             },
         },
     );
+    if let Some(binding) = binding {
+        assert!(signal.cancelled().unwrap());
+        drop(binding);
+        let fresh = crate::foreground_wait::Signal::new();
+        drop(crate::foreground_signals::bind(&fresh).unwrap());
+        assert!(!fresh.cancelled().unwrap());
+    }
     print!("{}", summary.render());
     true
 }
@@ -93,12 +120,24 @@ impl Drop for OwnedChild {
     }
 }
 fn run(path: &Path, replay: bool, url: Option<OsString>, auth: Option<OsString>, expected: &[u8]) {
+    run_with_signal(path, replay, url, auth, expected, None);
+}
+fn run_with_signal(
+    path: &Path,
+    replay: bool,
+    url: Option<OsString>,
+    auth: Option<OsString>,
+    expected: &[u8],
+    number: Option<libc::c_int>,
+) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .arg(if replay {
-            "--os-runtime-replay"
-        } else {
-            "--os-runtime"
+        .arg(match number {
+            Some(libc::SIGINT) => "--os-runtime-signal-int",
+            Some(libc::SIGTERM) => "--os-runtime-signal-term",
+            Some(_) => panic!("invalid fixture signal"),
+            None if replay => "--os-runtime-replay",
+            None => "--os-runtime",
         })
         .arg(path)
         .env_clear()
@@ -113,19 +152,40 @@ fn run(path: &Path, replay: bool, url: Option<OsString>, auth: Option<OsString>,
     if let Some(auth) = auth {
         command.env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", auth);
     }
-    let mut child = command.spawn().unwrap();
-    let mut output = child.stdout.take().unwrap().take(97);
+    let mut owned = OwnedChild {
+        child: command.spawn().unwrap(),
+        reader: None,
+    };
+    let mut output = owned.child.stdout.take().unwrap();
     let (sender, receiver) = mpsc::channel();
-    let reader = thread::spawn(move || {
+    owned.reader = Some(thread::spawn(move || {
+        if number.is_some() {
+            let mut ready = vec![0; 6];
+            if output.read_exact(&mut ready).is_err() {
+                return;
+            }
+            let _ = sender.send(ready);
+        }
         let mut bytes = Vec::new();
-        if output.read_to_end(&mut bytes).is_ok() {
+        if output.take(97).read_to_end(&mut bytes).is_ok() {
             let _ = sender.send(bytes);
         }
-    });
-    let mut owned = OwnedChild {
-        child,
-        reader: Some(reader),
-    };
+    }));
+    if let Some(number) = number {
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+            b"READY\n"
+        );
+        assert_eq!(
+            crate::status_boundary::inspect("--status-inspect", path),
+            crate::status_boundary::Ack::Owned
+        );
+        // SAFETY: signal constants validated above; target is our READY child PID.
+        assert_eq!(
+            unsafe { libc::kill(owned.child.id().try_into().unwrap(), number) },
+            0
+        );
+    }
     // NSS is synchronous inside the child; the parent enforces the fixture deadline.
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -284,4 +344,31 @@ pub(super) fn acceptance() {
     owner.finish(false, b"CLOSED\n");
     valid(&config, true);
     assert!(pending() == before);
+    for number in [libc::SIGINT, libc::SIGTERM] {
+        let files = crate::status_boundary::files(&state);
+        run_with_signal(
+            &config,
+            true,
+            Some("https://fixture.invalid/private-fixture".into()),
+            Some("Bearer fixture".into()),
+            b"foreground outcome=cancelled ticks=1\n",
+            Some(number),
+        );
+        assert_eq!(crate::status_boundary::files(&state), files);
+        assert!(pending() == before);
+        valid(&config, true);
+        assert!(pending() == before);
+        assert!(
+            !crate::status_composition::prepare_path(&config)
+                .unwrap()
+                .inspect(
+                    &crate::polling_cycle::Cycles::new(1).unwrap(),
+                    7200,
+                    Duration::from_millis(50)
+                )
+                .unwrap()
+                .poll
+                .stale
+        );
+    }
 }

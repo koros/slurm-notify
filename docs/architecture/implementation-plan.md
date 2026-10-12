@@ -3806,3 +3806,21 @@ lifecycle and durable recovery acceptance. Installed activation remains gated.
 Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
 extended custom process acceptance, eight SQLite tests, six hook tests and 11
 draft-config tests. Rust line coverage is 97.25% (22,176/22,803), above the 80% gate.
+
+
+### Private combined OS foreground lifecycle acceptance
+
+Unified runtime process fixtures now combine effective-UID/environment resources
+with SIGINT/SIGTERM bridge binding before startup and real foreground scheduling.
+READY contention checks, exact cancellation summaries, bridge cleanup/rebind,
+unchanged state/frozen bindings and fresh-resource replay/status recovery cover
+both signals. Child ownership is guarded before reader creation. ADR 0057 records
+blocked-tick scope and remaining installed/OS limitations. No defaults, dependencies
+or public contracts change.
+
+Next: consolidate concrete installed activation review from combined OS lifecycle
+evidence before choosing an activation slice. Public contract review remains a gate.
+
+Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
+extended custom process acceptance, eight SQLite tests, six hook tests and 11
+draft-config tests. Rust line coverage is 97.24% (22,174/22,803), above the 80% gate.

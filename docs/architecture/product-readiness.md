@@ -1,7 +1,7 @@
 # Product readiness assessment
 
-Assessment after private OS resources composed with unified runtime and active-callback
-OS signal process acceptance.
+Assessment after combined private OS resources and signal-driven unified runtime
+lifecycle acceptance.
 Historical increments remain in the implementation plan; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
 
@@ -30,7 +30,7 @@ the bound supervised SMTP path remains blocked.
 
 The latest implementation milestone passed 379 Rust tests plus four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.25% (22,176/22,803); the gate is 80%.
+Python tests. Rust line coverage was 97.24% (22,174/22,803); the gate is 80%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -39,7 +39,7 @@ These are recorded local results, not a claim that hosted checks currently pass.
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private environment and effective-UID adapters exist; installed bindings and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
-| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Owned-runtime and cooperative active-callback SIGINT/SIGTERM recovery are tested; Private OS resource startup/recovery is tested separately; combined OS lifecycle and installed bindings remain pending |
+| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Owned-runtime and cooperative active-callback SIGINT/SIGTERM recovery are tested; Combined OS resource/signal lifecycle and recovery are tested; installed lifecycle/exit bindings remain pending |
 | Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
 | Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public opaque IDs and frozen webhook JSON; authorized real-provider acceptance |
 
@@ -103,9 +103,9 @@ The [private environment adapter](../../crates/notify-cli/src/environment_resolu
 now composes with the injected resource boundary. Its accepted-value cap does not
 bound the initial standard-library OS allocation. The
 [private effective-user adapter](../../crates/notify-cli/src/effective_user.rs) uses bounded scratch storage; OS account lookup duration remains unbounded. Next
-private milestone: combine OS identity/environment sources with signal-driven
-foreground lifecycle and durable recovery acceptance. OS resource startup failure
-and restored replay are tested. Cooperative active-callback OS
+milestone: consolidate the concrete installed activation review from combined OS
+lifecycle evidence. Private OS resource startup, signal shutdown and restored
+replay/status recovery are tested. Cooperative active-callback OS
 signal and partial-delivery recovery are tested; see
 [signal bridge limitations](../adr/0053-private-foreground-signal-bridge.md).
 Neither activates a public command or chooses a public schema.
