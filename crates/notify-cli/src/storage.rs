@@ -231,15 +231,37 @@ impl Store {
         capacity: usize,
         sample_limit: usize,
     ) -> Result<StorageHealth, HealthError> {
+        self.health_with_capacities(
+            cluster,
+            now,
+            retain_seconds,
+            (capacity, capacity),
+            sample_limit,
+        )
+    }
+    pub(super) fn health_with_capacities(
+        &mut self,
+        cluster: &str,
+        now: i64,
+        retain_seconds: i64,
+        capacities: (usize, usize),
+        sample_limit: usize,
+    ) -> Result<StorageHealth, HealthError> {
+        let (capacity, event_capacity) = capacities;
         if cluster.is_empty()
             || now < 0
             || retain_seconds <= 0
             || capacity == 0
+            || event_capacity == 0
             || sample_limit == 0
         {
             return Err(HealthError::InvalidInput);
         }
         let capacity_probe = i64::try_from(capacity)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or(HealthError::InvalidInput)?;
+        let event_probe = i64::try_from(event_capacity)
             .ok()
             .and_then(|n| n.checked_add(1))
             .ok_or(HealthError::InvalidInput)?;
@@ -261,7 +283,7 @@ impl Store {
             )?;
             let events: usize = tx.query_row(
                 "SELECT count(*) FROM (SELECT 1 FROM events WHERE cluster=?1 LIMIT ?2)",
-                params![cluster, capacity_probe],
+                params![cluster, event_probe],
                 |r| {
                     let count: i64 = r.get(0)?;
                     usize::try_from(count)
@@ -272,7 +294,7 @@ impl Store {
                 jobs_sampled: jobs,
                 events_sampled: events,
                 jobs_over_capacity: jobs > capacity,
-                events_over_capacity: events > capacity,
+                events_over_capacity: events > event_capacity,
                 destinations_sampled: 0,
                 destinations_truncated: false,
                 pending: 0,
@@ -1138,13 +1160,25 @@ impl Store {
         cluster: &str,
         capacity: usize,
     ) -> Result<(super::lifecycle::Reconciler, Option<String>), StorageError> {
+        self.restore_with_capacities(cluster, (capacity, capacity))
+    }
+    pub(super) fn restore_with_capacities(
+        &mut self,
+        cluster: &str,
+        capacities: (usize, usize),
+    ) -> Result<(super::lifecycle::Reconciler, Option<String>), StorageError> {
+        let (capacity, event_capacity) = capacities;
         use super::lifecycle::{Event as LifecycleEvent, Identity, Reconciler, State};
         let limit = i64::try_from(capacity)
             .ok()
             .and_then(|n| n.checked_add(1))
             .ok_or(StorageError::InvalidInput)?;
         let tx = self.db.transaction()?;
-        let mut restored = Reconciler::with_capacity(capacity);
+        let event_limit = i64::try_from(event_capacity)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or(StorageError::InvalidInput)?;
+        let mut restored = Reconciler::with_capacities(capacity, event_capacity);
         let mut statement = tx.prepare(
             "SELECT job_id,submitted_at,started_at,state FROM jobs WHERE cluster=?1 LIMIT ?2",
         )?;
@@ -1174,7 +1208,7 @@ impl Store {
         }
         drop(statement);
         let mut statement = tx.prepare("SELECT event_id,job_id,submitted_at,started_at,event_type FROM events WHERE cluster=?1 LIMIT ?2")?;
-        let rows = statement.query_map(params![cluster, limit], |row| {
+        let rows = statement.query_map(params![cluster, event_limit], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -1205,7 +1239,7 @@ impl Store {
             restored.emitted.insert(event);
         }
         drop(statement);
-        if restored.latest.len() > capacity || restored.emitted.len() > capacity {
+        if restored.latest.len() > capacity || restored.emitted.len() > event_capacity {
             return Err(StorageError::InvalidInput);
         }
         let checkpoint = tx
@@ -1496,6 +1530,33 @@ pub(super) mod tests {
         store.retire_exhausted(&retired, 1).unwrap();
     }
 
+    #[test]
+    fn independent_health_probes_validate_each_capacity_and_preserve_shared_adapter() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        retention_fixture(&mut store);
+        let shared = store.health("cluster", 100, 50, 1, 10).unwrap();
+        assert_eq!(
+            shared,
+            store
+                .health_with_capacities("cluster", 100, 50, (1, 1), 10)
+                .unwrap()
+        );
+        for capacities in [(0, 1), (1, 0), (usize::MAX, 1), (1, usize::MAX)] {
+            assert_eq!(
+                store
+                    .health_with_capacities("cluster", 100, 50, capacities, 10)
+                    .unwrap_err(),
+                HealthError::InvalidInput
+            );
+        }
+        for capacities in [(usize::MAX, 1), (1, usize::MAX)] {
+            assert!(matches!(
+                store.restore_with_capacities("cluster", capacities),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+    }
     #[test]
     fn health_reports_queue_protection_and_cleanup_changes_after_reopen() {
         let directory = Directory::new();

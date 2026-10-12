@@ -15,6 +15,7 @@ pub(super) struct Settings<'a> {
     pub(super) output_limit: usize,
     pub(super) emit_discovered: bool,
     pub(super) capacity: usize,
+    pub(super) event_capacity: usize,
     pub(super) destinations: &'a [&'a str],
     pub(super) window: Policy,
 }
@@ -222,6 +223,7 @@ fn valid_settings(settings: &Settings<'_>, maintenance: &Maintenance) -> bool {
         && settings.output_limit > 0
         && settings.output_limit.checked_add(1).is_some()
         && probe(settings.capacity)
+        && probe(settings.event_capacity)
         && settings.window.valid()
         && !settings.destinations.is_empty()
         && settings
@@ -778,11 +780,11 @@ impl Cycles {
             report.preflight = Some(Err(StageError::Policy));
             return report;
         }
-        let storage_health = match store.health(
+        let storage_health = match store.health_with_capacities(
             settings.cluster,
             now,
             maintenance.retain_seconds,
-            settings.capacity,
+            (settings.capacity, settings.event_capacity),
             maintenance.health_sample_limit,
         ) {
             Ok(health) => health,
@@ -798,7 +800,10 @@ impl Cycles {
         }
         // Exhausted polling still requires a coherent ledger and valid checkpoint
         // before delivery or maintenance; do not rely on step() to restore it.
-        let (_, checkpoint) = match store.restore(settings.cluster, settings.capacity) {
+        let (_, checkpoint) = match store.restore_with_capacities(
+            settings.cluster,
+            (settings.capacity, settings.event_capacity),
+        ) {
             Ok(restored) => restored,
             Err(_) => {
                 report.preflight = Some(Err(StageError::Storage));
@@ -932,7 +937,10 @@ impl Cycles {
         // Refresh the durable checkpoint even before the first restarted cycle.
         self.health.report(now, stale_after)?;
         let (_, checkpoint) = store
-            .restore(settings.cluster, settings.capacity)
+            .restore_with_capacities(
+                settings.cluster,
+                (settings.capacity, settings.event_capacity),
+            )
             .map_err(|_| ReportError::Storage)?;
         let checkpoint = checkpoint
             .as_deref()
@@ -946,11 +954,11 @@ impl Cycles {
         }
         .report(now, stale_after)?;
         let storage = store
-            .health(
+            .health_with_capacities(
                 settings.cluster,
                 now,
                 retain_seconds,
-                settings.capacity,
+                (settings.capacity, settings.event_capacity),
                 sample_limit,
             )
             .map_err(|_| ReportError::Storage)?;
@@ -1092,7 +1100,10 @@ impl Cycles {
         self.remaining -= 1;
         // Durable state is authoritative after failed commits or a reopened owner.
         let (mut reconciler, checkpoint) = store
-            .restore(settings.cluster, settings.capacity)
+            .restore_with_capacities(
+                settings.cluster,
+                (settings.capacity, settings.event_capacity),
+            )
             .map_err(Error::Storage)?;
         let window = accounting_window::plan(now, checkpoint.as_deref(), settings.window)
             .map_err(Error::Window)?;
@@ -2304,6 +2315,7 @@ mod tests {
             output_limit: 4096,
             emit_discovered: true,
             capacity: 10,
+            event_capacity: 10,
             destinations: &["primary"],
             window: Policy {
                 lookback_seconds: 3600,
@@ -2854,6 +2866,7 @@ mod tests {
         let mut store = open(&directory);
         let mut smaller = settings();
         smaller.capacity = 1;
+        smaller.event_capacity = 1;
         let report = cycles.tick(
             &smaller,
             &maintenance(),
@@ -2877,6 +2890,7 @@ mod tests {
         );
         assert_eq!(store.due_deliveries("cluster", 7300, 10).unwrap().len(), 2);
         smaller.capacity = 2;
+        smaller.event_capacity = 2;
         let recovered = cycles.tick(
             &smaller,
             &maintenance(),
@@ -2914,6 +2928,7 @@ mod tests {
         }
         let mut smaller = settings();
         smaller.capacity = 1;
+        smaller.event_capacity = 1;
         let blocked = cycles.tick(
             &smaller,
             &maintenance(),
@@ -2937,7 +2952,7 @@ mod tests {
         let directory = Directory::new();
         let mut store = open(&directory);
         let mut cycles = Cycles::new(1).unwrap();
-        for case in 0..27 {
+        for case in 0..29 {
             let mut settings = settings();
             let mut maintenance = maintenance();
             match case {
@@ -2967,7 +2982,9 @@ mod tests {
                 23 => maintenance.delivery_limit = usize::MAX,
                 24 => maintenance.health_sample_limit = usize::MAX,
                 25 => maintenance.retain_seconds = 0,
-                _ => maintenance.stale_after = 0,
+                26 => maintenance.stale_after = 0,
+                27 => settings.event_capacity = 0,
+                _ => settings.event_capacity = usize::MAX,
             }
             let report = cycles.tick(
                 &settings,

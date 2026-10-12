@@ -550,6 +550,7 @@ fn orchestration_settings<'a>(destinations: &'a [&'a str]) -> polling_cycle::Set
         output_limit: 4096,
         emit_discovered: true,
         capacity: 10,
+        event_capacity: 10,
         destinations,
         window: accounting_window::Policy {
             lookback_seconds: 3600,
@@ -2169,6 +2170,7 @@ fn owned_frozen_submission_restart() {
             output_limit: 4096,
             emit_discovered: true,
             capacity: 10,
+            event_capacity: 10,
             destinations: &["smtp"],
             window: accounting_window::Policy {
                 lookback_seconds: 3600,
@@ -2759,6 +2761,7 @@ fn owned_bound_transport_restart() {
             output_limit: 4096,
             emit_discovered: true,
             capacity: 10,
+            event_capacity: 10,
             destinations: &["smtp", "webhook"],
             window: accounting_window::Policy {
                 lookback_seconds: 10,

@@ -196,6 +196,7 @@ impl Plan {
             output_limit: self.common.controls.output_limit,
             emit_discovered: self.common.observation.emit_discovered(),
             capacity: self.common.controls.identity_limit,
+            event_capacity: self.common.controls.event_limit,
             destinations: &names,
             window: self.common.controls.window,
         };
@@ -1175,6 +1176,170 @@ mod tests {
                 .data(),
             frozen
         );
+    }
+
+    #[test]
+    fn composed_identity_and_event_budgets_preserve_pending_work_and_recover_after_reopen() {
+        use crate::{
+            polling_cycle::{Cycles, Hooks, Outcome, StageError},
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["monitor"]["retained_identity_limit"] = json!(2);
+        v["monitor"]["retained_event_limit"] = json!(2);
+        v["routes"] = json!([{"events":["JOB_COMPLETED","JOB_STARTED"],"send_to":["primary"]}]);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let mut store = open_owned_fixture(&plan);
+        let run = |plan: &Plan,
+                   store: &mut Store,
+                   records: &str,
+                   now,
+                   stop_after_poll: bool,
+                   forbid_query: bool| {
+            let mut cancellations = 0;
+            let mut sends = 0;
+            let report = plan
+                .tick_with(
+                    (Path::new("squeue"), Path::new("sacct")),
+                    &mut Cycles::new(1).unwrap(),
+                    store,
+                    Hooks {
+                        query: |cmd: &mut std::process::Command, _, _| {
+                            assert!(!forbid_query);
+                            Ok(if cmd.get_program() == "squeue" {
+                                ""
+                            } else {
+                                records
+                            }
+                            .into())
+                        },
+                        send: (
+                            |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                                panic!("ordinary credentials")
+                            },
+                            |_: &DueDelivery| -> std::process::Command {
+                                panic!("ordinary SMTP helper")
+                            },
+                            |due: &DueDelivery| {
+                                assert_eq!(due.destination, "primary");
+                                sends += 1;
+                                Ok(crate::delivery::ProviderOutcome::Delivered)
+                            },
+                        ),
+                        clock: || Some(now),
+                        cancelled: || {
+                            cancellations += 1;
+                            stop_after_poll && cancellations > 1
+                        },
+                    },
+                )
+                .unwrap();
+            (report, sends)
+        };
+        let (first, _) = run(
+            &plan,
+            &mut store,
+            "research-cluster|1|alice|s|actual|RUNNING|0:0",
+            7200,
+            false,
+            false,
+        );
+        let health = first.health.unwrap().unwrap().storage;
+        assert!(!health.jobs_over_capacity && !health.events_over_capacity);
+        let completed = "research-cluster|1|alice|s|actual|COMPLETED|0:0";
+        let (second, sends) = run(&plan, &mut store, completed, 7260, true, false);
+        assert!(second.cancelled);
+        assert_eq!(sends, 0);
+        let pending = store
+            .due_deliveries("research-cluster", 7260, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(pending.attempt_number, 1);
+        drop(store);
+        v["monitor"]["retained_identity_limit"] = json!(1);
+        v["monitor"]["retained_event_limit"] = json!(1);
+        let reduced = prepare_file_fixture(&v, &path);
+        let mut store = open_owned_fixture(&reduced);
+        let (blocked, sends) = run(&reduced, &mut store, completed, 7320, false, true);
+        assert_eq!(blocked.preflight, Some(Err(StageError::Capacity)));
+        let pressure = blocked.capacity_pressure.unwrap();
+        assert!(!pressure.jobs_over_capacity && pressure.events_over_capacity);
+        assert_eq!(sends, 0);
+        assert!(blocked.poll.is_none() && blocked.delivery.is_none() && blocked.cleanup.is_none());
+        assert_eq!(
+            store.due_deliveries("research-cluster", 7320, 10).unwrap()[0].event_id,
+            pending.event_id
+        );
+        assert!(store
+            .restore_with_capacities("research-cluster", (1, 1))
+            .is_err());
+        assert_eq!(
+            store
+                .restore_with_capacities("research-cluster", (1, 2))
+                .unwrap()
+                .0
+                .emitted
+                .len(),
+            2
+        );
+        drop(store);
+        v["monitor"]["retained_identity_limit"] = json!(2);
+        v["monitor"]["retained_event_limit"] = json!(2);
+        let exact = prepare_file_fixture(&v, &path);
+        let mut store = open_owned_fixture(&exact);
+        let (recovered, sends) = run(&exact, &mut store, completed, 7320, false, false);
+        assert_eq!(sends, 1);
+        assert!(matches!(
+            recovered.poll,
+            Some(Ok(Outcome::Committed { events: 0, .. }))
+        ));
+        let health = recovered.health.unwrap().unwrap().storage;
+        assert!(!health.jobs_over_capacity && !health.events_over_capacity);
+        let new_running = "research-cluster|2|alice|s|actual|RUNNING|0:0";
+        let checkpoint = store
+            .restore_with_capacities("research-cluster", (1, 2))
+            .unwrap()
+            .1;
+        let (overflow, sends) = run(&exact, &mut store, new_running, 7380, false, false);
+        assert_eq!(overflow.poll, Some(Err(StageError::Poll)));
+        assert_eq!(sends, 0);
+        assert_eq!(overflow.delivery.unwrap().unwrap().delivered, 0);
+        let (restored, unchanged) = store
+            .restore_with_capacities("research-cluster", (1, 2))
+            .unwrap();
+        assert_eq!(unchanged, checkpoint);
+        assert_eq!(restored.emitted.len(), 2);
+        assert_eq!(
+            restored.latest.values().next(),
+            Some(&crate::lifecycle::State::Completed)
+        );
+        drop(store);
+        v["monitor"]["retained_event_limit"] = json!(3);
+        let raised = prepare_file_fixture(&v, &path);
+        let mut store = open_owned_fixture(&raised);
+        let (last, sends) = run(&raised, &mut store, new_running, 7380, false, false);
+        assert_eq!(sends, 1);
+        assert!(matches!(
+            last.poll,
+            Some(Ok(Outcome::Committed { events: 1, .. }))
+        ));
+        let (identity_overflow, sends) = run(
+            &raised,
+            &mut store,
+            "research-cluster|3|alice|s|actual|PENDING|0:0",
+            7440,
+            false,
+            false,
+        );
+        assert_eq!(identity_overflow.poll, Some(Err(StageError::Poll)));
+        assert_eq!(sends, 0);
+        let (restored, _) = store
+            .restore_with_capacities("research-cluster", (2, 3))
+            .unwrap();
+        assert_eq!((restored.latest.len(), restored.emitted.len()), (2, 3));
     }
     #[test]
     fn changed_trust_after_restart_rejects_old_bound_profile_before_credentials() {

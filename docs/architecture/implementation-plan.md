@@ -3352,3 +3352,21 @@ preflight and health, with boundary/recovery acceptance. Public and installed ga
 Validation: shared checks pass with 339 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.53% (19,902/20,406), above the 80% gate.
+
+
+### Private independent identity/event capacity budgets
+
+Configured capacities now flow separately through composed cycle preflight, health,
+SQLite restore and candidate reconciliation. Shared-limit adapters retain existing
+behavior. Owned-state acceptance covers event-only pressure after reducing a budget,
+exact-boundary restore, pending delivery recovery and atomic event/identity overflow.
+Storage probe checks and invalid preflight cases cover each independent limit.
+ADR 0032 records bounded row probes, no automatic pruning and unchanged poll-failure
+delivery policy. No migration, default or public contract changes.
+
+Next: private composed health/status snapshots with stale-checkpoint and capacity
+pressure evidence, without credential lookup. Public and installed gates remain.
+
+Validation: shared checks pass with 341 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (20,105/20,613), above the 80% gate.

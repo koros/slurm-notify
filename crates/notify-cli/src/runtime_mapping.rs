@@ -343,6 +343,7 @@ mod tests {
             output_limit: plan.output_limit,
             emit_discovered: true,
             capacity: plan.identity_limit,
+            event_capacity: plan.event_limit,
             destinations: &["primary"],
             window: plan.window,
         };

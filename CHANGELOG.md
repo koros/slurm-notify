@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private composed cycles apply independent retained-identity/event budgets through reconciliation, bounded restore, preflight and health; atomic overflow and owned-state boundary/restart recovery acceptance, preserving shared-limit adapters.
+
 - Private composed owned-state acquisition checks exact storage-path compatibility and reuses guarded SQLite ownership; creation/mode/contention/unsafe-path acceptance and file-backed retry/restart recovery through owned state.
 
 - Private protected-file mixed configuration preparation reads one bounded snapshot before validation/lookups; read-failure and replacement ownership tests, with file-backed composed retry/permission-denial/restart acceptance.

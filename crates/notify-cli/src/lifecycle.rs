@@ -203,13 +203,16 @@ pub(super) struct Reconciler {
     // Candidate state is persisted by the private storage pipeline; retention is future work.
     pub(super) latest: HashMap<Identity, State>,
     pub(super) emitted: HashSet<Event>,
-    capacity: Option<usize>,
+    capacity: Option<(usize, usize)>,
 }
 
 impl Reconciler {
     pub(super) fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacities(capacity, capacity)
+    }
+    pub(super) fn with_capacities(identities: usize, events: usize) -> Self {
         Self {
-            capacity: Some(capacity),
+            capacity: Some((identities, events)),
             ..Self::default()
         }
     }
@@ -249,8 +252,8 @@ impl Reconciler {
         }
         let mut candidate = self.clone();
         let events = candidate.observe(&records, emit_discovered);
-        if let Some(capacity) = self.capacity {
-            if candidate.latest.len() > capacity || candidate.emitted.len() > capacity {
+        if let Some((identities, events)) = self.capacity {
+            if candidate.latest.len() > identities || candidate.emitted.len() > events {
                 return Err(ParseError {
                     line: 0,
                     reason: "reconciliation capacity exhausted",
