@@ -29,10 +29,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 379 private Rust tests plus four installed
+The latest implementation milestone passed 381 private Rust tests plus four installed
 CLI acceptance tests and four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.25% (22,188/22,815); the gate is 90%.
+Python tests. Rust line coverage was 97.29% (22,293/22,913); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -41,7 +41,7 @@ These are recorded local results, not a claim that hosted checks currently pass.
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private environment and effective-UID adapters exist; installed bindings and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
-| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; signal-reason exit mapping, continuous scheduling and installed bindings remain pending |
+| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; first-signal retention and continuous scheduler exist; installed exit mapping, session poll-budget renewal and bindings remain pending |
 | Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
 | Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public opaque IDs and frozen webhook JSON; authorized real-provider acceptance |
 
@@ -108,7 +108,7 @@ has bounded scratch storage but synchronous NSS duration. Combined signal/resour
 lifecycle and cooperative active-callback recovery are tested privately.
 
 The [updated activation review](../proposals/local-contract-review-v1.md) identifies
-remaining signal-reason/130-vs-143 mapping, finite-budget renewal, webhook-only
+remaining installed 130-vs-143 mapping, owned poll-budget renewal, webhook-only
 composition, live-status contention and public payload transaction gaps. The
 [help/version slice](../proposals/finite-cli-activation-v1.md) is approved and
 implemented; further installed commands and public schema choices remain pending.

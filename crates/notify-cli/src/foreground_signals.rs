@@ -1,13 +1,20 @@
 //! Private process-wide SIGINT/SIGTERM bridge; Linux/macOS only.
 use crate::foreground_wait::Signal;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::{thread, time::Duration};
 
 static OWNED: AtomicBool = AtomicBool::new(false);
-static REQUESTED: AtomicBool = AtomicBool::new(false);
-extern "C" fn request_cancel(_: libc::c_int) {
-    // Only a lock-free atomic store in signal context: no locks, allocation or I/O.
-    REQUESTED.store(true, Ordering::Relaxed);
+static REQUESTED: AtomicI32 = AtomicI32::new(0);
+extern "C" fn request_cancel(number: libc::c_int) {
+    // First delivered handler wins, including concurrent and repeated signals.
+    // Native atomic operations only: no locks, allocation or I/O in signal context.
+    let _ = REQUESTED.compare_exchange(0, number, Ordering::Relaxed, Ordering::Relaxed);
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Reason {
+    Interrupt,
+    Terminate,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
@@ -26,7 +33,7 @@ pub(super) fn bind(signal: &Signal) -> Result<Binding, Error> {
     OWNED
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
         .map_err(|_| Error::Owned)?;
-    REQUESTED.store(false, Ordering::Relaxed);
+    REQUESTED.store(0, Ordering::Relaxed);
     // SAFETY: zero initializes valid sigaction storage; sigemptyset initializes
     // the mask. Handler has C ABI and only uses a lock-free atomic store.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
@@ -58,7 +65,7 @@ pub(super) fn bind(signal: &Signal) -> Result<Binding, Error> {
         .name("private-signal-bridge".into())
         .spawn(move || {
             while !stopping.load(Ordering::Relaxed) {
-                if REQUESTED.load(Ordering::Relaxed) {
+                if REQUESTED.load(Ordering::Relaxed) != 0 {
                     let _ = signal.cancel();
                     break;
                 }
@@ -87,6 +94,16 @@ fn restore(previous: &[libc::sigaction; 2]) -> bool {
     }
     restored
 }
+impl Binding {
+    pub(super) fn reason(&self) -> Option<Reason> {
+        match REQUESTED.load(Ordering::Relaxed) {
+            libc::SIGINT => Some(Reason::Interrupt),
+            libc::SIGTERM => Some(Reason::Terminate),
+            _ => None,
+        }
+    }
+}
+
 impl Drop for Binding {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
@@ -152,6 +169,7 @@ mod tests {
             let binding = bind(&signal).unwrap();
             assert!(matches!(bind(&Signal::new()), Err(Error::Owned)));
             assert!(!signal.cancelled().unwrap());
+            assert_eq!(binding.reason(), None);
             let sender = thread::spawn(move || {
                 thread::sleep(Duration::from_millis(10));
                 assert_eq!(unsafe { libc::kill(libc::getpid(), number) }, 0);
@@ -171,13 +189,35 @@ mod tests {
             }
             sender.join().unwrap();
             assert!(signal.cancelled().unwrap());
+            let expected = if number == libc::SIGINT {
+                Reason::Interrupt
+            } else {
+                Reason::Terminate
+            };
+            assert_eq!(binding.reason(), Some(expected));
+            let other = if number == libc::SIGINT {
+                libc::SIGTERM
+            } else {
+                libc::SIGINT
+            };
+            assert_eq!(unsafe { libc::raise(other) }, 0);
+            assert_eq!(
+                binding.reason(),
+                Some(if number == libc::SIGINT {
+                    Reason::Interrupt
+                } else {
+                    Reason::Terminate
+                })
+            );
             drop(binding);
             RESTORED.store(false, Ordering::Relaxed);
             assert_eq!(unsafe { libc::raise(number) }, 0);
             assert!(RESTORED.load(Ordering::Relaxed));
         }
         let fresh = Signal::new();
-        drop(bind(&fresh).unwrap());
+        let binding = bind(&fresh).unwrap();
+        assert_eq!(binding.reason(), None);
+        drop(binding);
         assert!(!fresh.cancelled().unwrap());
     }
 }

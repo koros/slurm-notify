@@ -6,6 +6,9 @@ the design handoff; no release has been published.
 ## [Unreleased]
 
 ### Added
+
+- Private continuous fixed-delay scheduler preserving monotonic history and bounded
+  waits; first-delivered SIGINT/SIGTERM reason retention with isolated-process acceptance.
 - Approved installed `--help`/`--version` CLI, exact stream/exit snapshots and binary
   acceptance for invalid arguments, non-Unicode input and resource-free execution.
 

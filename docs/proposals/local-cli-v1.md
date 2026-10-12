@@ -1,7 +1,8 @@
 # Local CLI v1 proposal
 
 Status: draft for explicit review. No command, flag, exit code or output below is
-implemented or approved. The installed executable continues to exit with status 1.
+implemented or approved except the separately approved finite help/version slice.
+The installed executable supports exactly that slice; empty/invalid invocations exit 2.
 
 ## Scope and grammar
 

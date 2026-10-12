@@ -56,15 +56,16 @@ finite scheduling, static lifecycle reports, effective-UID/environment adapters 
 SIGINT/SIGTERM binding now exist privately. Combined OS resource/signal lifecycle
 and active-callback recovery are tested. See [ADR 0057](../adr/0057-private-combined-os-foreground-lifecycle.md)
 and the readiness evidence. Python draft checks are supplementary review tooling.
-There is no installed config parser or supported CLI/event baseline yet.
+There is no installed config parser or event baseline yet. The finite help/version
+CLI baseline is approved.
 
 | Activation gap | Concrete decision or implementation needed |
 | --- | --- |
 | First finite CLI | Help/version approved and implemented; later finite commands require config/output review |
 | Config validation/status | Decide exact public output and error mapping; support both webhook-only and mixed configs without relying on the mixed runtime's SMTP requirement |
 | Status while monitoring | Current inspection requires exclusive ownership and closed rollback-journal state; decide contention UX or implement a separately tested live inspection path |
-| Signal exit policy | Draft proposes 130/143; current bridge stores only a cancellation boolean. Retain the first signal reason and define repeated/concurrent signal precedence before mapping exits |
-| Continuous foreground run | Private scheduler/session budgets are finite (1..1024 ticks); define bounded scheduling renewal while retaining ownership and sticky cancellation, with failure/restart acceptance |
+| Signal exit policy | Draft proposes 130/143; the bridge now retains the first delivered handler reason (first atomic winner for concurrent handlers). Bind and test installed exits before activation |
+| Continuous foreground run | Continuous scheduler exists privately with shared clock/wait guards; owned sessions still need finite poll-budget renewal preserving health, ownership and sticky cancellation, with failure/restart acceptance |
 | Resource lifetime/deadlines | Environment lookup caps accepted bytes after OS allocation; NSS lookup is synchronous. Review deadline/failure behavior before claiming bounded installed startup |
 | Webhook-only foreground | Unified session currently prepares a mixed plan requiring SMTP; compose a reviewed webhook-only path without silently changing the public scope |
 | Public event transaction | Persist opaque IDs, frozen bytes and route bindings atomically; settle identifier widths, source timezone/null semantics and UUID source before public sends |

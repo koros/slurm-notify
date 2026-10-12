@@ -5,11 +5,18 @@ The installed executable supports the approved help/version slice. [Product read
 contains current capability evidence and limitations; [implementation history](implementation-history.md)
 preserves past increments without treating their next steps as current instructions.
 
-## Current maintenance milestone
+## Current MVP milestone
 
-MIT licensing is in place, current documentation/agent guidance is refreshed, and
-the shared coverage script and CI enforce 90% Rust line coverage. README badges
-reflect current status; the build artifact and Cargo metadata include MIT licensing.
+The target is a local foreground MVP with generic HTTPS webhook and required
+STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
+setup/test/doctor/status workflows. Broader public contracts are awaiting the
+maintainer's decision; help/version is approved. MIT licensing, refreshed guidance,
+90% coverage and accurate badges are complete.
+
+Continuous scheduling and first-signal reason retention are now implemented
+privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
+Next connect continuous scheduling to owned sessions with poll-budget renewal,
+then bind reviewed finite configuration/status and monitoring commands.
 
 ## Next product milestones
 
@@ -19,7 +26,7 @@ reflect current status; the build artifact and Cargo metadata include MIT licens
    preparation and OS resources to installed commands, with no hidden sending.
 3. Complete public event persistence: opaque IDs, frozen webhook bytes, immutable
    routes and source timestamp/null semantics. Assess the UUID source/dependencies.
-4. Complete continuous foreground scheduling, signal-specific exit reasons,
+4. Connect the continuous scheduler to owned sessions and map retained signal reasons; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
