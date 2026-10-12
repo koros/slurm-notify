@@ -7,6 +7,8 @@ mod foreground_runtime;
 mod foreground_schedule;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod foreground_session;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod foreground_signals;
 #[cfg(test)]
 mod foreground_wait;
 #[cfg(test)]

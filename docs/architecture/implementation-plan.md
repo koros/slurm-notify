@@ -3735,3 +3735,21 @@ Installed activation and public contract review remain separate gates.
 Validation: shared checks pass with 378 Rust tests plus three ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
 tests. Rust line coverage is 97.31% (22,059/22,668), above the 80% gate.
+
+
+### Private foreground OS signal bridge
+
+Added Linux/macOS process-wide SIGINT/SIGTERM binding using the pinned libc ABI.
+Handlers only set a lock-free sticky request; one worker invokes shared cancellation
+outside signal context. Binding owns/restores prior actions and joins its worker;
+failed restoration retains reservation. Isolated bounded child acceptance verifies
+real wait cancellation, repeated signals, exclusive ownership, restoration and
+fresh rebinding. ADR 0053 records cadence, masks and competing-handler limits.
+No public contracts, defaults or dependencies change.
+
+Next: compose OS signal binding with owned foreground lifecycle process acceptance,
+bounded reports and durable recovery. Installed activation remains review-gated.
+
+Validation: shared checks pass with 379 Rust tests plus four ignored child helpers,
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
+tests. Rust line coverage is 97.24% (22,174/22,803), above the 80% gate.
