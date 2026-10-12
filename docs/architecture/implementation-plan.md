@@ -3388,3 +3388,21 @@ of provider resource availability. Public and installed gates remain.
 Validation: shared checks pass with 343 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.54% (20,294/20,806), above the 80% gate.
+
+
+### Private metadata-only status preparation
+
+A separate private status plan retains only cluster/storage metadata and reporting
+controls after full draft validation. Protected-file preparation has no identity,
+resource or trust access and creates no state. Three tests cover absent resources,
+owned source-independent metadata, full validation/protected read failures and
+reopened pressure/freshness reporting after configuration replacement. ADR 0034
+distinguishes status metadata readiness from provider readiness and caller-owned
+state requirements. No dependencies, defaults or public contracts change.
+
+Next: private health-only inspection of existing state without initialization or
+repair, with absent/unsafe state and concurrent-owner acceptance. Public gates remain.
+
+Validation: shared checks pass with 346 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.54% (20,479/20,995), above the 80% gate.
