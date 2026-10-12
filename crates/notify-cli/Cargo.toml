@@ -13,7 +13,7 @@ path = "src/main.rs"
 # Private bounded draft JSON decoding; no installed schema/parser adoption.
 serde_json = "=1.0.152"
 serde_core = "=1.0.229"
-rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 url = "=2.5.4"
