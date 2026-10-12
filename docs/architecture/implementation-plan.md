@@ -3334,3 +3334,21 @@ and unsafe paths. Installed activation and public baselines remain review gates.
 Validation: shared checks pass with 337 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.52% (19,812/20,315), above the 80% gate.
+
+
+### Private composed state ownership
+
+Mixed plans explicitly acquire guarded SQLite state from storage metadata with a
+caller-supplied lock timeout. The adapter rejects unsupported filenames and ambiguous
+paths before I/O, retaining existing safe-directory/file/sidecar and ownership checks.
+Two tests cover deferred creation, private modes, contention/reopen, unsafe parent and
+database symlink rejection, and release after acquisition failure. File-backed
+composed runtime recovery now uses owned acquisition at every reopen. ADR 0031
+records fixed private basename, nonblocking ownership and platform limits.
+
+Next: independent configured identity/event capacity budgets in composed cycle
+preflight and health, with boundary/recovery acceptance. Public and installed gates remain.
+
+Validation: shared checks pass with 339 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.53% (19,902/20,406), above the 80% gate.

@@ -71,6 +71,29 @@ impl Smtp {
     }
 }
 impl Plan {
+    // Existing owned namespace fixes the database basename; never reinterpret a path.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn open_owned(
+        &self,
+        lock_timeout: Duration,
+    ) -> Result<crate::storage::Store, crate::storage::StorageError> {
+        let raw = self.common.storage_path.as_str();
+        let path = std::path::Path::new(raw);
+        if !path.is_absolute()
+            || !raw.ends_with("/state.sqlite3")
+            || raw
+                .split('/')
+                .skip(1)
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return Err(crate::storage::StorageError::InvalidInput);
+        }
+        let parent = path
+            .parent()
+            .filter(|parent| *parent != std::path::Path::new("/"))
+            .ok_or(crate::storage::StorageError::InvalidInput)?;
+        crate::storage::Store::open_private(parent, lock_timeout)
+    }
     pub(super) fn permissions(&self) -> Vec<Permission<'_>> {
         self.permissions
             .iter()
@@ -488,6 +511,102 @@ mod tests {
         )
         .unwrap()
     }
+
+    fn owned_path(d: &crate::storage::tests::Directory) -> PathBuf {
+        config_path(d)
+            .parent()
+            .unwrap()
+            .join("owned-state")
+            .join("state.sqlite3")
+    }
+    fn open_owned_fixture(plan: &Plan) -> Store {
+        let until = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            match plan.open_owned(Duration::from_millis(50)) {
+                Ok(store) => return store,
+                Err(crate::storage::StorageError::StatePath(
+                    crate::state_path::Error::AlreadyOwned,
+                )) if std::time::Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                Err(error) => panic!("owned fixture acquisition failed: {error:?}"),
+            }
+        }
+    }
+    #[test]
+    fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        let path = owned_path(&d);
+        v["storage"]["path"] = json!(path);
+        let plan = prepare_file_fixture(&v, &config_path(&d));
+        assert!(!path.exists());
+        let store = plan.open_owned(Duration::from_millis(50)).unwrap();
+        for (path, mode) in [
+            (path.parent().unwrap().to_path_buf(), 0o700),
+            (path.clone(), 0o600),
+            (path.parent().unwrap().join(".owner.lock"), 0o600),
+        ] {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o7777,
+                mode
+            );
+        }
+        assert!(matches!(
+            plan.open_owned(Duration::from_millis(50)),
+            Err(crate::storage::StorageError::StatePath(
+                crate::state_path::Error::AlreadyOwned
+            ))
+        ));
+        drop(store);
+        let reopened = open_owned_fixture(&plan);
+        assert!(reopened
+            .due_deliveries("research-cluster", 10, 10)
+            .unwrap()
+            .is_empty());
+    }
+    #[test]
+    fn composed_owned_state_rejects_ambiguous_paths_and_unsafe_namespace() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        let path = owned_path(&d);
+        for bad in [
+            path.with_file_name("custom.sqlite3"),
+            path.parent().unwrap().join(".").join("state.sqlite3"),
+            path.parent().unwrap().join("..").join("state.sqlite3"),
+            PathBuf::from("/state.sqlite3"),
+        ] {
+            v["storage"]["path"] = json!(bad);
+            assert!(matches!(
+                prepare_fixture(&v).open_owned(Duration::from_millis(50)),
+                Err(crate::storage::StorageError::InvalidInput)
+            ));
+            assert!(!path.parent().unwrap().exists());
+        }
+        v["storage"]["path"] = json!(path);
+        let plan = prepare_fixture(&v);
+        let parent = path.parent().unwrap();
+        std::fs::create_dir(parent).unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            plan.open_owned(Duration::from_millis(50)),
+            Err(crate::storage::StorageError::StatePath(
+                crate::state_path::Error::UnsafePermissions
+            ))
+        ));
+        assert!(!path.exists());
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = parent.parent().unwrap().join("untouched");
+        std::fs::write(&target, b"synthetic sentinel").unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(plan.open_owned(Duration::from_millis(50)).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic sentinel");
+        std::fs::remove_file(&path).unwrap();
+        // A failed database check must release the acquired ownership lock.
+        drop(open_owned_fixture(&plan));
+    }
     #[test]
     fn protected_config_failures_stop_before_composition_lookups() {
         use std::os::unix::fs::{symlink, PermissionsExt};
@@ -760,6 +879,7 @@ mod tests {
         };
         let d = crate::storage::tests::Directory::new();
         let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
         v["routes"] = json!([
             {"events":["JOB_COMPLETED"],"send_to":["research_email"]},
             {"events":["JOB_FAILED"],"send_to":["primary"]}
@@ -774,7 +894,7 @@ mod tests {
         }]);
         let path = config_path(&d);
         let plan = prepare_file_fixture(&v, &path);
-        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open_owned_fixture(&plan);
         let mut cycles = Cycles::new(1).unwrap();
         let query = |command: &mut std::process::Command, timeout, limit| {
             assert!(timeout <= Duration::from_secs(10));
@@ -867,7 +987,7 @@ mod tests {
         let allowed_source = v.clone();
         v["delivery"]["smtp_permissions"] = json!([]);
         let denied = prepare_file_fixture(&v, &path);
-        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open_owned_fixture(&denied);
         let (blocked, ordinary, secrets) = run(
             &denied,
             &mut Cycles::new(1).unwrap(),
@@ -882,7 +1002,7 @@ mod tests {
         assert!(blocked.cleanup.is_none());
         drop(store);
         let recovered = prepare_file_fixture(&allowed_source, &path);
-        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open_owned_fixture(&recovered);
         assert_eq!(
             store
                 .frozen_smtp(&pending.event_id, "research_email")

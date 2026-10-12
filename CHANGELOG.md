@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private composed owned-state acquisition checks exact storage-path compatibility and reuses guarded SQLite ownership; creation/mode/contention/unsafe-path acceptance and file-backed retry/restart recovery through owned state.
+
 - Private protected-file mixed configuration preparation reads one bounded snapshot before validation/lookups; read-failure and replacement ownership tests, with file-backed composed retry/permission-denial/restart acceptance.
 
 - Private per-destination SMTP cycle deadlines retain each composed timeout, reject incomplete/invalid maps before I/O and preserve frozen bindings through timeout edits and restart; controlled child acceptance verifies distinct retry/completion budgets.
