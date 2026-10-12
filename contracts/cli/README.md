@@ -11,3 +11,13 @@ its snapshot with a compatibility/version decision. No aliases or monitoring com
 are approved. Config, state, environment resources and providers are not loaded.
 Installed-binary acceptance compares bytes, streams and exits without regenerating
 these snapshots. Broader draft contracts remain unapproved.
+
+## Configuration-validation addition (2026-10-13)
+
+`config validate --config <absolute-path>` accepts exactly one config option before,
+between or after the two command words. Unknown/duplicate flags, extra values,
+relative or non-Unicode paths fail before file access with the invocation diagnostic.
+`config validate --help` (help before/between words also accepted) loads no resources.
+Global help now lists this command. Webhook validation succeeds with schema/cluster/
+count output; invalid config/resources or unsupported SMTP scope exit 2 with the
+corresponding static stderr snapshot and empty stdout. No monitoring command is active.

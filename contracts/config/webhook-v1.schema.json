@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slurm Notify installed webhook configuration v1",
+  "description": "Structural schema only. Strict JSON lexemes/duplicate keys, byte/depth budgets, cross-field relations, route references, secure files and referenced HTTPS/auth resources are additionally enforced by Rust.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "monitor",
+    "storage",
+    "providers",
+    "routes",
+    "delivery",
+    "maintenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "monitor": {
+      "type": "object",
+      "required": [
+        "mode",
+        "cluster_id",
+        "user_jobs_only",
+        "initial_observation",
+        "poll_seconds",
+        "query_timeout_seconds",
+        "accounting_lookback_seconds",
+        "accounting_overlap_seconds",
+        "command_output_limit_bytes",
+        "retained_identity_limit",
+        "retained_event_limit",
+        "stale_after_seconds"
+      ],
+      "properties": {
+        "mode": {
+          "const": "local"
+        },
+        "cluster_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "user_jobs_only": {
+          "const": true
+        },
+        "initial_observation": {
+          "enum": [
+            "suppress",
+            "emit"
+          ]
+        },
+        "poll_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "query_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "accounting_lookback_seconds": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 604800
+        },
+        "accounting_overlap_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "command_output_limit_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576
+        },
+        "retained_identity_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "retained_event_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000
+        },
+        "stale_after_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      },
+      "additionalProperties": false
+    },
+    "storage": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "type",
+          "url_env",
+          "request_timeout_seconds",
+          "payload_limit_bytes"
+        ],
+        "properties": {
+          "type": {
+            "const": "webhook"
+          },
+          "url_env": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "request_timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "payload_limit_bytes": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 16384
+          },
+          "authorization_env": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "events",
+          "send_to"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 9,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "JOB_STARTED",
+                "JOB_COMPLETED",
+                "JOB_FAILED",
+                "JOB_TIMEOUT",
+                "JOB_CANCELLED",
+                "JOB_OUT_OF_MEMORY",
+                "JOB_NODE_FAILURE",
+                "JOB_BOOT_FAILURE",
+                "JOB_DEADLINE"
+              ]
+            }
+          },
+          "send_to": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "required": [
+        "max_attempts",
+        "initial_backoff_seconds",
+        "max_backoff_seconds",
+        "jitter_seconds",
+        "batch_limit",
+        "jitter_seed"
+      ],
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "initial_backoff_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "max_backoff_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "jitter_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "batch_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "jitter_seed": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "maintenance": {
+      "type": "object",
+      "required": [
+        "completed_delivery_retention_seconds",
+        "cleanup_batch_limit",
+        "health_sample_limit",
+        "smtp_revision_cleanup_limit"
+      ],
+      "properties": {
+        "completed_delivery_retention_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 31536000
+        },
+        "cleanup_batch_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "health_sample_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "smtp_revision_cleanup_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

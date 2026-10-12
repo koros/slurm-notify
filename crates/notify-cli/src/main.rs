@@ -1,4 +1,5 @@
-//! Finite help/version CLI; monitoring is not implemented.
+//! Finite local CLI; monitoring is not implemented.
+mod control_validation;
 #[cfg(test)]
 mod foreground_report;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
@@ -11,21 +12,20 @@ mod foreground_session;
 mod foreground_signals;
 #[cfg(test)]
 mod foreground_wait;
+mod installed_config;
 #[cfg(test)]
 mod mixed_config_composition;
+mod routing_validation;
 #[cfg(test)]
 mod status_composition;
 
 #[cfg(test)]
 mod config_composition;
 
-#[cfg(test)]
 mod config_validate;
 
-#[cfg(test)]
 mod config_decode;
 
-#[cfg(test)]
 mod config_snapshot;
 
 #[cfg(test)]
@@ -143,27 +143,76 @@ mod smtp_submit_frame;
 #[cfg(test)]
 mod smtp_submit_dispatch;
 
-const HELP: &str = "Usage: slurm-notify --help | --version\n\nOptions:\n  --help     Show this help\n  --version  Show the package version\n\nMonitoring commands are not available in this build.\n";
+const HELP: &str = include_str!("../../../contracts/cli/help.stdout");
+const CONFIG_HELP: &str = include_str!("../../../contracts/cli/config-help.stdout");
 
 fn main() -> std::process::ExitCode {
-    let mut args = std::env::args_os().skip(1);
-    let first = args.next();
-    match (first.as_deref(), args.next()) {
-        (Some(arg), None) if arg == "--help" => {
-            print!("{HELP}");
-            std::process::ExitCode::SUCCESS
+    let args: Vec<_> = std::env::args_os().skip(1).take(8).collect();
+    if args.len() == 1 && args[0] == "--help" {
+        print!("{HELP}");
+        return std::process::ExitCode::SUCCESS;
+    }
+    if args.len() == 1 && args[0] == "--version" {
+        println!("slurm-notify {}", env!("CARGO_PKG_VERSION"));
+        return std::process::ExitCode::SUCCESS;
+    }
+    if args.is_empty() {
+        eprintln!("Usage: slurm-notify --help | --version");
+        return std::process::ExitCode::from(2);
+    }
+    if let Some(path) = config_path(&args) {
+        return match crate::installed_config::validate(&path) {
+            Ok(output) => {
+                print!("{output}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(crate::installed_config::Error::Invalid) => {
+                eprintln!("Configuration invalid or required resource unavailable.");
+                std::process::ExitCode::from(2)
+            }
+            Err(crate::installed_config::Error::UnsupportedSmtp) => {
+                eprintln!("SMTP configuration validation is not available in this build.");
+                std::process::ExitCode::from(2)
+            }
+        };
+    }
+    if args.len() == 3 && args.iter().filter(|v| *v == "--help").count() == 1 {
+        let words: Vec<_> = args.iter().filter(|v| *v != "--help").collect();
+        if words[0] == "config" && words[1] == "validate" {
+            print!("{CONFIG_HELP}");
+            return std::process::ExitCode::SUCCESS;
         }
-        (Some(arg), None) if arg == "--version" => {
-            println!("slurm-notify {}", env!("CARGO_PKG_VERSION"));
-            std::process::ExitCode::SUCCESS
+    }
+    eprintln!("Invalid invocation. Use --help for usage.");
+    std::process::ExitCode::from(2)
+}
+
+fn config_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
+    if args.len() != 4 {
+        return None;
+    }
+    let mut words = Vec::new();
+    let mut path = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            if path.is_some() {
+                return None;
+            }
+            let value = args.next()?;
+            value.to_str()?;
+            let candidate = std::path::PathBuf::from(value);
+            if !candidate.is_absolute() {
+                return None;
+            }
+            path = Some(candidate);
+        } else {
+            words.push(arg);
         }
-        (None, None) => {
-            eprintln!("Usage: slurm-notify --help | --version");
-            std::process::ExitCode::from(2)
-        }
-        _ => {
-            eprintln!("Invalid invocation. Use --help for usage.");
-            std::process::ExitCode::from(2)
-        }
+    }
+    if words.len() == 2 && words[0] == "config" && words[1] == "validate" {
+        path
+    } else {
+        None
     }
 }

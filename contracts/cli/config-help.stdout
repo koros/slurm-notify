@@ -1,0 +1,4 @@
+Usage: slurm-notify config validate --config <absolute-path>
+
+Validate webhook configuration and local resources without polling or sending.
+SMTP configuration validation is not available in this build.

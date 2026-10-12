@@ -1,7 +1,12 @@
 Usage: slurm-notify --help | --version
+       slurm-notify config validate --config <absolute-path>
 
 Options:
   --help     Show this help
   --version  Show the package version
+  --config   Explicit absolute configuration path
 
-Monitoring commands are not available in this build.
+Commands:
+  config validate  Validate webhook configuration and local resources
+
+SMTP validation and monitoring commands are not available in this build.

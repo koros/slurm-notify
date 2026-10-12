@@ -1,4 +1,4 @@
-//! Private draft JSON boundary; no schema, defaults, lookup or installed behavior.
+//! Shared bounded strict JSON boundary; no defaults or resource lookup.
 use serde_core::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use std::{cell::Cell, fmt};
 use zeroize::Zeroizing;

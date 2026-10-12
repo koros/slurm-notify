@@ -9,18 +9,20 @@ license = "MIT"
 name = "slurm-notify"
 path = "src/main.rs"
 
-# Prototype-only: bundled SQLite makes schema tests independent of system SQLite.
-[dev-dependencies]
-# Private bounded draft JSON decoding; no installed schema/parser adoption.
+[dependencies]
+# Installed strict bounded configuration boundary; retain existing locked versions.
 serde_json = "=1.0.152"
 serde_core = "=1.0.229"
+zeroize = "=1.8.1"
+url = "=2.5.8"
+libc = "=0.2.190"
+
+# Prototype-only: bundled SQLite makes schema tests independent of system SQLite.
+[dev-dependencies]
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
-url = "=2.5.8"
 httpdate = "=1.0.3"
-# Explicit zeroization version for the private prototypes.
-zeroize = "=1.8.1"
 # Reuse locked TLS crypto for bounded deterministic private SMTP identities.
 ring = "=0.17.14"
 # Private AUTH PLAIN codec; retain scalar implementation without new unsafe SIMD.
@@ -42,7 +44,3 @@ powerfmt = { version = "=0.2.1", default-features = false }
 name = "transport_boundary"
 path = "../../tests/integration/transport_boundary.rs"
 harness = false
-
-[dev-dependencies.libc]
-# Reuse the already locked version for Unix openat/flock constants and ABI.
-version = "=0.2.190"

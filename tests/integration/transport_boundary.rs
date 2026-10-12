@@ -86,8 +86,12 @@ mod config_decode;
 #[path = "../../crates/notify-cli/src/config_validate.rs"]
 mod config_validate;
 #[allow(unused_imports)]
+#[path = "../../crates/notify-cli/src/control_validation.rs"]
+mod control_validation;
 #[path = "../../crates/notify-cli/src/route_selection.rs"]
 mod route_selection;
+#[path = "../../crates/notify-cli/src/routing_validation.rs"]
+mod routing_validation;
 #[path = "../../crates/notify-cli/src/runtime_mapping.rs"]
 mod runtime_mapping;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

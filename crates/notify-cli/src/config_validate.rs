@@ -1,7 +1,7 @@
-//! Private draft-shape validation; no environment/filesystem lookup or installed schema.
+//! Shared local configuration validation; no environment or filesystem lookup.
 use crate::{
     config_decode::{self, Value},
-    runtime_mapping,
+    control_validation,
 };
 use zeroize::Zeroizing;
 
@@ -21,7 +21,8 @@ pub(super) enum Error {
 // The tree retains zeroizing metadata; no Debug/Clone or public config contract.
 pub(super) struct Draft {
     pub(super) value: Value,
-    pub(super) controls: runtime_mapping::Plan,
+    #[cfg(test)]
+    pub(super) controls: crate::runtime_mapping::Plan,
 }
 pub(super) fn object(value: &Value) -> Result<&Object, Error> {
     match value {
@@ -285,15 +286,15 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
         destinations.push(strings(list(get(r, "send_to")?, 1, 64)?)?);
     }
     for (events, destinations) in events.iter().zip(&destinations) {
-        rules.push(crate::route_selection::Rule {
+        rules.push(crate::routing_validation::Rule {
             events,
             destinations,
         });
     }
-    crate::route_selection::Plan::new(&aliases, &rules).map_err(|e| match e {
-        crate::route_selection::Error::Duplicate => Error::Duplicate,
-        crate::route_selection::Error::Reference => Error::Reference,
-        crate::route_selection::Error::Limit => Error::Structure,
+    crate::routing_validation::validate(&aliases, &rules).map_err(|e| match e {
+        crate::routing_validation::Error::Duplicate => Error::Duplicate,
+        crate::routing_validation::Error::Reference => Error::Reference,
+        crate::routing_validation::Error::Limit => Error::Structure,
     })?;
     let mut required = vec![
         "max_attempts",
@@ -350,7 +351,7 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
     if seed.len() > 1 && seed.starts_with('0') {
         return Err(Error::Controls);
     }
-    let controls = runtime_mapping::map(runtime_mapping::Controls {
+    let input = control_validation::Controls {
         poll: n(monitor, "poll_seconds")?,
         query_timeout: n(monitor, "query_timeout_seconds")?,
         lookback: n(monitor, "accounting_lookback_seconds")?,
@@ -369,9 +370,15 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
         cleanup: n(maintenance, "cleanup_batch_limit")?,
         health_sample: n(maintenance, "health_sample_limit")?,
         revision_cleanup: n(maintenance, "smtp_revision_cleanup_limit")?,
+    };
+    control_validation::validate(input).map_err(|_| Error::Controls)?;
+    #[cfg(test)]
+    let controls = crate::runtime_mapping::map(input).map_err(|_| Error::Controls)?;
+    Ok(Draft {
+        value,
+        #[cfg(test)]
+        controls,
     })
-    .map_err(|_| Error::Controls)?;
-    Ok(Draft { value, controls })
 }
 
 #[cfg(test)]

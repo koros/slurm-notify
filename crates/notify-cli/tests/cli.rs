@@ -92,3 +92,171 @@ fn ignores_unusable_environment_and_does_not_create_resources() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn installed_config_validation_checks_resources_and_preserves_files() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("slurm-notify-config-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.join("private.json");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../contracts/config/webhook-v1.example.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(root.join("absent-state/state.sqlite3"));
+    let bytes = serde_json::to_vec(&source).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let invalid = include_bytes!("../../../contracts/cli/config-invalid.stderr");
+    let valid = include_bytes!("../../../contracts/cli/config-valid.stdout");
+    let invoke = |args: &[&OsStr], url: Option<&OsStr>, auth: Option<&OsStr>| {
+        let mut process = command();
+        process.args(args).current_dir(&root);
+        if let Some(value) = url {
+            process.env("SLURM_NOTIFY_WEBHOOK_URL", value);
+        }
+        if let Some(value) = auth {
+            process.env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", value);
+        }
+        process.output().unwrap()
+    };
+    let config_args = [
+        OsStr::new("config"),
+        OsStr::new("validate"),
+        OsStr::new("--config"),
+        path.as_os_str(),
+    ];
+    for args in [
+        config_args,
+        [
+            OsStr::new("--config"),
+            path.as_os_str(),
+            OsStr::new("config"),
+            OsStr::new("validate"),
+        ],
+        [
+            OsStr::new("config"),
+            OsStr::new("--config"),
+            path.as_os_str(),
+            OsStr::new("validate"),
+        ],
+    ] {
+        expect(
+            invoke(
+                &args,
+                Some(OsStr::new(
+                    "https://unreachable.invalid/private-secret?q=secret",
+                )),
+                Some(OsStr::new("Bearer private-secret")),
+            ),
+            0,
+            valid,
+            b"",
+        );
+    }
+    for url in [
+        None,
+        Some("http://127.0.0.1/private"),
+        Some("https://user:secret@invalid.test"),
+        Some("https://invalid.test/#secret"),
+        Some("https://invalid.test/\n"),
+        Some(""),
+    ] {
+        expect(
+            invoke(
+                &config_args,
+                url.map(OsStr::new),
+                Some(OsStr::new("Bearer private-secret")),
+            ),
+            2,
+            b"",
+            invalid,
+        );
+    }
+    expect(
+        invoke(&config_args, Some(OsStr::new("https://invalid.test")), None),
+        2,
+        b"",
+        invalid,
+    );
+    expect(
+        invoke(
+            &config_args,
+            Some(OsStr::new("https://invalid.test")),
+            Some(OsStr::new("Bearer secret\n")),
+        ),
+        2,
+        b"",
+        invalid,
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    expect(invoke(&config_args, None, None), 2, b"", invalid);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let link = root.join("symlink.json");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    expect(
+        invoke(
+            &[
+                OsStr::new("config"),
+                OsStr::new("validate"),
+                OsStr::new("--config"),
+                link.as_os_str(),
+            ],
+            None,
+            None,
+        ),
+        2,
+        b"",
+        invalid,
+    );
+    std::fs::remove_file(link).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    assert!(!root.join("absent-state").exists());
+    std::fs::write(
+        &path,
+        br#"{"schema_version":1,"schema_version":1,"secret":"private"}"#,
+    )
+    .unwrap();
+    expect(invoke(&config_args, None, None), 2, b"", invalid);
+    std::fs::write(
+        &path,
+        include_bytes!("../../../docs/proposals/examples/local-mixed-config.json"),
+    )
+    .unwrap();
+    expect(
+        invoke(&config_args, None, None),
+        2,
+        b"",
+        include_bytes!("../../../contracts/cli/config-smtp-unavailable.stderr"),
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn config_grammar_and_help_require_no_resources() {
+    let help = include_bytes!("../../../contracts/cli/config-help.stdout");
+    for args in [
+        ["config", "validate", "--help"],
+        ["--help", "config", "validate"],
+    ] {
+        let args: Vec<_> = args.iter().map(OsStr::new).collect();
+        expect(run(&args), 0, help, b"");
+    }
+    for args in [
+        vec!["config", "validate"],
+        vec!["config", "validate", "--config", "relative"],
+        vec![
+            "config", "validate", "--config", "/private", "--config", "/private",
+        ],
+        vec!["config", "validate", "--config", "/private", "--help"],
+        vec!["status", "--config", "/private"],
+        vec!["config", "validate", "--unknown", "/private"],
+    ] {
+        let args: Vec<_> = args.iter().map(OsStr::new).collect();
+        expect(run(&args), 2, b"", INVALID);
+    }
+}

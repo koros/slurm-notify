@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed webhook-only `config validate --config <absolute-path>` with protected
+  bounded strict JSON loading, HTTPS/auth environment checks, exact output snapshots
+  and installed permission/symlink/redaction/no-state acceptance. SMTP configs return
+  an explicit unsupported-operation diagnostic pending profile validation.
+
 - Private owned continuous sessions with bounded poll-batch renewal, retained health
   and ownership, and blocked-delivery/cancellation/failure/restart process acceptance.
 

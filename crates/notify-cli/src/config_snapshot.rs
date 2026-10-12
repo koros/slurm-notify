@@ -1,4 +1,4 @@
-//! Private configuration byte snapshot experiment; no installed path or JSON contract.
+//! Shared protected configuration byte snapshots; no JSON parsing or resource lookup.
 use std::io::Read;
 use zeroize::Zeroizing;
 
@@ -169,6 +169,7 @@ mod unix {
 pub(super) fn read(path: &std::path::Path) -> Result<Snapshot, Error> {
     unix::read(path)
 }
+#[cfg(test)]
 pub(super) fn read_limit(path: &std::path::Path, limit: usize) -> Result<Snapshot, Error> {
     if limit == 0 || limit > MAX_BYTES {
         return Err(Error::Limit);

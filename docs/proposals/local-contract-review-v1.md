@@ -57,8 +57,9 @@ finite scheduling, static lifecycle reports, effective-UID/environment adapters 
 SIGINT/SIGTERM binding now exist privately. Combined OS resource/signal lifecycle
 and active-callback recovery are tested. See [ADR 0057](../adr/0057-private-combined-os-foreground-lifecycle.md)
 and the readiness evidence. Python draft checks are supplementary review tooling.
-There is no installed config parser or event baseline yet. The finite help/version
-CLI baseline is approved.
+The installed protected parser now serves webhook-only configuration validation
+with a structural schema and exact output baselines. SMTP validation, status and
+public events still need installed acceptance.
 
 | Activation gap | Concrete decision or implementation needed |
 | --- | --- |
