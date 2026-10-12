@@ -3548,3 +3548,21 @@ and frozen pending-work recovery. Public and installed gates remain.
 Validation: shared checks pass with 364 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.39% (21,470/22,045), above the 80% gate.
+
+
+### Private active-tick process cancellation
+
+Trusted child callbacks pause during accounting queries and ordinary sends while
+retaining ownership. Parent-driven shared cancellation preserves committed frozen
+work or records one delivered item and leaves the next pending. Fresh child replay
+produces no duplicate events, preserves bindings/attempts/checkpoints and delivers
+only remaining ordinary work. Read-only status succeeds after shutdown. ADR 0043
+records synthetic callback/acceptance limits. No public contracts or defaults change.
+
+Next: private foreground shutdown classification and bounded redacted reports for
+cancellation, exhaustion and failure. Public and installed gates remain.
+
+Validation: shared checks pass with 364 Rust tests plus one ignored helper, extended
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. A clean coverage rerun passes at 97.41% (21,474/22,045), above the 80% gate;
+the first report attempt encountered corrupt instrumentation profiles.

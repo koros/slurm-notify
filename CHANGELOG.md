@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private active-tick process acceptance cancels accounting-query and ordinary-send callbacks; owner release, frozen pending-work replay and exactly remaining partial-delivery recovery are verified with static child diagnostics.
+
 - Private interruptible composed ticks use shared cancellation at stage/batch boundaries; query completion preserves frozen work, partial delivery records committed progress, and restart processes only remaining work.
 
 - Private foreground child acceptance uses real monotonic/condition-variable waits for cross-process cancellation, forced termination and timed exhaustion; durable pending messages, bindings and attempts survive replay.

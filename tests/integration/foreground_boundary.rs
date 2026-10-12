@@ -162,7 +162,7 @@ fn blocked_tick(
     ));
     Ok(report)
 }
-fn one_shot(mode: &str, path: &Path, expected: &[u8]) {
+pub(super) fn one_shot(mode: &str, path: &Path, expected: &[u8]) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args([std::ffi::OsStr::new(mode), path.as_os_str()]);
     let output = crate::transport::supervise_with(
