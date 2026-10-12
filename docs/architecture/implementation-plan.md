@@ -3104,3 +3104,23 @@ and activation still require explicit public contract review.
 Validation: shared checks pass with 312 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.58% (17,171/17,596), above the 80% gate.
+
+### Private selected mixed SMTP preparation
+
+Bound SMTP plans now prepare per-event selected ordinary/SMTP destinations. Subset,
+duplicate and count validation precedes rendering. Only selected SMTP pairs consume
+the message budget; frozen bytes, rendering/provider bindings and ordinary pairs
+commit together. Storage independently validates selection/message membership.
+Existing uniform preparation paths remain covered by the shared acceptance suite.
+
+One mixed test covers invalid selection and budget rejection, exact selected-pair
+capacity, injected message-insert rollback, recovery and reopen with changed routes
+without replacing frozen bytes or bindings. ADR 0023 records scope. No dependencies,
+runtime defaults or public contracts change.
+
+Next: selected mixed routes through private runtime-cycle dispatch/restart acceptance.
+Installed mapping and activation still require explicit public contract review.
+
+Validation: shared checks pass with 313 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.61% (17,442/17,869), above the 80% gate.

@@ -50,6 +50,88 @@ pub(super) struct ProviderPlan<'a, 'b> {
     providers: Vec<super::smtp_provider_revision::Descriptor>,
 }
 impl<'a, 'b> ProviderPlan<'a, 'b> {
+    pub(super) fn poll_selected_with<'s>(
+        &self,
+        request: &PollRequest<'_>,
+        reconciler: &mut Reconciler,
+        store: &mut Store,
+        observed_at: i64,
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        mut select: impl FnMut(&Event) -> Vec<&'s str>,
+    ) -> Result<Vec<Event>, smtp_poll::Error> {
+        if smtp_metadata::timestamp(observed_at).is_err() {
+            return Err(smtp_poll::Error::InvalidInput);
+        }
+        let mut candidate = reconciler.clone();
+        let events = super::scheduler::poll_with(request, &mut candidate, query)
+            .map_err(smtp_poll::Error::Poll)?;
+        let mut selected = std::collections::HashMap::new();
+        let mut count = 0usize;
+        for event in &events {
+            let names = select(event);
+            let mut seen = std::collections::HashSet::new();
+            if names.len() > 64
+                || names
+                    .iter()
+                    .any(|name| !self.rendering.destinations.contains(name) || !seen.insert(*name))
+            {
+                return Err(smtp_poll::Error::InvalidInput);
+            }
+            count = count
+                .checked_add(
+                    names
+                        .iter()
+                        .filter(|name| self.rendering.smtp_destinations.contains(name))
+                        .count(),
+                )
+                .filter(|count| *count <= self.rendering.max_messages)
+                .ok_or(smtp_poll::Error::Limit)?;
+            selected.insert(event.clone(), names);
+        }
+        let mut owned = Vec::with_capacity(count);
+        for event in &events {
+            for name in &selected[event] {
+                if self.rendering.smtp_destinations.contains(name) {
+                    let message = self
+                        .rendering
+                        .prepare_revision(event, name, observed_at, &self.revisions)
+                        .map_err(|_| smtp_poll::Error::Preparation)?;
+                    owned.push((event, *name, message));
+                }
+            }
+        }
+        let messages: Vec<_> = owned
+            .iter()
+            .map(
+                |(event, destination, message)| super::storage::SmtpPreparation {
+                    event,
+                    destination,
+                    message,
+                },
+            )
+            .collect();
+        store
+            .persist_selected_profiles(
+                super::storage::PollPreparation {
+                    candidate: &candidate,
+                    deliverable: &events,
+                    destinations: self.rendering.destinations,
+                    smtp_destinations: &self.rendering.smtp_destinations,
+                    messages: &messages,
+                },
+                super::storage::SmtpRevisions {
+                    rendering: &self.revisions,
+                    providers: &self.providers,
+                },
+                request.cluster,
+                request.history_end,
+                observed_at,
+                &selected,
+            )
+            .map_err(smtp_poll::Error::Storage)?;
+        *reconciler = candidate;
+        Ok(events)
+    }
     pub(super) fn new(
         rendering: &'a Plan<'b>,
         profiles: &[super::smtp_provider_revision::Profile<'_>],

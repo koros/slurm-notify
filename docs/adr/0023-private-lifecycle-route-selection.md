@@ -36,13 +36,28 @@ Removing the trigger allows recovery. Reopening with replacement rules preserves
 the original pending destinations and attempts; it neither retargets those records
 nor backfills the previously unmatched event.
 
-This prepares private ordinary outbox routes, without payload freezing, SMTP
-rendering/profile composition, permission grants, disclosure changes or sending.
+The private bound SMTP plan also accepts per-event destination selection. It
+validates subsets, duplicates and count ceilings before rendering, counts only
+selected SMTP pairs against the preparation budget, then commits ordinary pairs,
+frozen SMTP bytes and rendering/provider bindings through the same transaction.
+Storage independently checks selected membership and rejects unselected messages.
+The existing uniform preparation paths retain their behavior.
+
+Mixed acceptance selects one SMTP completed event and one ordinary failed event
+while leaving a timeout unmatched. A one-message ceiling succeeds although the
+unfiltered Cartesian product would exceed it. Invalid selections and oversized
+preparation fail before publishing candidate state. A synthetic smtp_messages
+trigger verifies write rollback; removing it recovers. Reopening with changed
+selection preserves the pending routes, frozen bytes and provider binding.
+
+This prepares private ordinary/SMTP outbox routes and existing SMTP frozen bytes
+and profiles, without public webhook payload freezing, permission grants,
+disclosure changes or sending.
 The storage selector callback is private and caller-managed; the route plan bounds
 its own output, without certifying arbitrary callbacks. Current rules must not be
 applied to already pending work to retarget it.
 
 ## Next
 
-Prepare private route selection alongside mixed SMTP preparation and failure/restart
+Exercise selected mixed routes through bounded runtime-cycle dispatch/restart
 acceptance. Installed mapping and activation require explicit contract review.

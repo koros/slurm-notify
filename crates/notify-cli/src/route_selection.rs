@@ -363,4 +363,164 @@ mod tests {
         );
         assert!(after.iter().all(|due| due.attempt_number == 1));
     }
+    #[test]
+    fn mixed_selected_preparation_counts_only_selected_smtp_pairs_and_freezes_bindings() {
+        use crate::{
+            lifecycle::Reconciler,
+            scheduler::PollRequest,
+            smtp_provider_revision::{Profile, TlsMode},
+            smtp_render::JobVisibility,
+            smtp_routes::{self, Metadata, ProviderPlan, Route},
+            storage::Store,
+        };
+        use std::{path::Path, time::Duration};
+        let directory = crate::storage::tests::Directory::new();
+        let open = || Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut store = open();
+        let rendering = smtp_routes::Plan::new(
+            &["mail", "plain"],
+            &[Route {
+                name: "mail",
+                visibility: JobVisibility::Hidden,
+                metadata: Metadata {
+                    sender: "s@fixture.invalid",
+                    recipient: "r@fixture.invalid",
+                    namespace: "fixture",
+                },
+            }],
+            1,
+        )
+        .unwrap();
+        let profile = Profile {
+            destination: "mail",
+            relay: "relay.fixture.invalid",
+            port: 587,
+            tls: TlsMode::RequiredStartTls,
+            server_name: "smtp.fixture.invalid",
+            trust_reference: "fixture-trust",
+            trust_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            authentication_identity: "fixture-user",
+            credential_reference: "fixture-secret",
+        };
+        let bound = crate::smtp_provider_revision::Descriptor::new(&profile).unwrap();
+        let providers = ProviderPlan::new(&rendering, &[profile]).unwrap();
+        let request = PollRequest {
+            active_program: Path::new("squeue"),
+            accounting_program: Path::new("sacct"),
+            cluster: "cluster",
+            user: "alice",
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let query = |command: &mut std::process::Command, _, _| {
+            Ok(if command.get_program()=="squeue" {""}
+            else {"cluster|1|alice|s|actual|COMPLETED|0:0\ncluster|2|alice|s|actual|FAILED|1:0\ncluster|3|alice|s|actual|TIMEOUT|1:0"}.into())
+        };
+        let mut reconciler = Reconciler::with_capacity(10);
+        for invalid in [vec!["missing"], vec!["mail", "mail"], vec!["mail"; 65]] {
+            assert!(matches!(
+                providers.poll_selected_with(
+                    &request,
+                    &mut reconciler,
+                    &mut store,
+                    10,
+                    query,
+                    |_| invalid.clone()
+                ),
+                Err(crate::smtp_poll::Error::InvalidInput)
+            ));
+            assert!(reconciler.latest.is_empty());
+        }
+        assert!(matches!(
+            providers.poll_selected_with(
+                &request,
+                &mut reconciler,
+                &mut store,
+                10,
+                query,
+                |_| vec!["mail"]
+            ),
+            Err(crate::smtp_poll::Error::Limit)
+        ));
+        assert!(reconciler.latest.is_empty());
+        let selection = Plan::new(
+            &["mail", "plain"],
+            &[
+                Rule {
+                    events: &["JOB_COMPLETED"],
+                    destinations: &["mail"],
+                },
+                Rule {
+                    events: &["JOB_FAILED"],
+                    destinations: &["plain"],
+                },
+            ],
+        )
+        .unwrap();
+        let fault = rusqlite::Connection::open(directory.path()).unwrap();
+        fault.execute_batch("CREATE TRIGGER block_message BEFORE INSERT ON smtp_messages BEGIN SELECT RAISE(ABORT,'fixture block'); END;").unwrap();
+        assert!(providers
+            .poll_selected_with(&request, &mut reconciler, &mut store, 10, query, |event| {
+                selection.destinations(&event.state)
+            })
+            .is_err());
+        assert!(reconciler.latest.is_empty() && store.restore("cluster", 10).unwrap().1.is_none());
+        assert!(store.due_deliveries("cluster", 10, 10).unwrap().is_empty());
+        fault.execute_batch("DROP TRIGGER block_message;").unwrap();
+        assert_eq!(
+            providers
+                .poll_selected_with(&request, &mut reconciler, &mut store, 10, query, |event| {
+                    selection.destinations(&event.state)
+                })
+                .unwrap()
+                .len(),
+            3
+        );
+        let pending = store.due_deliveries("cluster", 10, 10).unwrap();
+        assert_eq!(pending.len(), 2);
+        let mail = pending
+            .iter()
+            .find(|due| due.destination == "mail")
+            .unwrap();
+        let id = mail.event_id.clone();
+        let frozen = store.frozen_smtp(&id, "mail").unwrap().unwrap();
+        assert_eq!(
+            store
+                .bound_smtp_provider(&id, "mail")
+                .unwrap()
+                .unwrap()
+                .token(),
+            bound.token()
+        );
+        let ordinary = pending
+            .iter()
+            .find(|due| due.destination == "plain")
+            .unwrap();
+        assert!(store
+            .frozen_smtp(&ordinary.event_id, "plain")
+            .unwrap()
+            .is_none());
+        drop(store);
+        store = open();
+        let (mut reconciler, _) = store.restore("cluster", 10).unwrap();
+        assert!(providers
+            .poll_selected_with(&request, &mut reconciler, &mut store, 11, query, |_| vec![
+                "plain"
+            ])
+            .unwrap()
+            .is_empty());
+        assert!(store.frozen_smtp(&id, "mail").unwrap().unwrap().data() == frozen.data());
+        assert_eq!(
+            store
+                .bound_smtp_provider(&id, "mail")
+                .unwrap()
+                .unwrap()
+                .token(),
+            bound.token()
+        );
+        assert_eq!(store.due_deliveries("cluster", 11, 10).unwrap().len(), 2);
+    }
 }

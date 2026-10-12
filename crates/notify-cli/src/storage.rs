@@ -861,7 +861,14 @@ impl Store {
         through: &str,
         observed_at: i64,
     ) -> Result<(), StorageError> {
-        self.persist_prepared(preparation, None, None, cluster, through, observed_at)
+        self.persist_prepared(
+            preparation,
+            (None, None),
+            cluster,
+            through,
+            observed_at,
+            None,
+        )
     }
 
     pub(super) fn persist_prepared_revisions<'a>(
@@ -874,11 +881,11 @@ impl Store {
     ) -> Result<(), StorageError> {
         self.persist_prepared(
             preparation,
-            Some(revisions),
-            None,
+            (Some(revisions), None),
             cluster,
             through,
             observed_at,
+            None,
         )
     }
 
@@ -892,23 +899,46 @@ impl Store {
     ) -> Result<(), StorageError> {
         self.persist_prepared(
             preparation,
-            Some(revisions.rendering),
-            Some(revisions.providers),
+            (Some(revisions.rendering), Some(revisions.providers)),
             cluster,
             through,
             observed_at,
+            None,
+        )
+    }
+
+    pub(super) fn persist_selected_profiles<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        revisions: SmtpRevisions<'a>,
+        cluster: &str,
+        through: &str,
+        observed_at: i64,
+        selected: &std::collections::HashMap<super::lifecycle::Event, Vec<&'a str>>,
+    ) -> Result<(), StorageError> {
+        self.persist_prepared(
+            preparation,
+            (Some(revisions.rendering), Some(revisions.providers)),
+            cluster,
+            through,
+            observed_at,
+            Some(selected),
         )
     }
 
     fn persist_prepared<'a>(
         &mut self,
         preparation: PollPreparation<'a>,
-        revisions: Option<&'a [super::smtp_revision::Descriptor]>,
-        providers: Option<&'a [super::smtp_provider_revision::Descriptor]>,
+        bindings: (
+            Option<&'a [super::smtp_revision::Descriptor]>,
+            Option<&'a [super::smtp_provider_revision::Descriptor]>,
+        ),
         cluster: &str,
         through: &str,
         observed_at: i64,
+        selected: Option<&std::collections::HashMap<super::lifecycle::Event, Vec<&'a str>>>,
     ) -> Result<(), StorageError> {
+        let (revisions, providers) = bindings;
         let PollPreparation {
             candidate,
             deliverable,
@@ -930,6 +960,22 @@ impl Store {
                 .any(|event| !candidate.emitted.contains(event) || !deliveries.insert(event))
         {
             return Err(StorageError::InvalidInput);
+        }
+        if let Some(selected) = selected {
+            if selected.len() != deliverable.len()
+                || deliverable
+                    .iter()
+                    .any(|event| !selected.contains_key(event))
+                || selected.values().any(|names| {
+                    let mut seen = std::collections::HashSet::new();
+                    names.len() > 64
+                        || names
+                            .iter()
+                            .any(|name| !routes.contains(name) || !seen.insert(name))
+                })
+            {
+                return Err(StorageError::InvalidInput);
+            }
         }
         let mut smtp = SmtpPlan {
             providers: std::collections::HashMap::new(),
@@ -982,6 +1028,11 @@ impl Store {
         for message in messages {
             if !deliveries.contains(message.event)
                 || !smtp_routes.contains(message.destination)
+                || selected.is_some_and(|selected| {
+                    !selected
+                        .get(message.event)
+                        .is_some_and(|names| names.contains(&message.destination))
+                })
                 || smtp
                     .messages
                     .insert(
@@ -993,7 +1044,13 @@ impl Store {
                 return Err(StorageError::InvalidInput);
             }
         }
-        self.persist_candidate(preparation, cluster, through, observed_at, smtp)
+        if let Some(selected) = selected {
+            self.persist_selected(preparation, cluster, through, observed_at, smtp, |event| {
+                selected.get(event).cloned().unwrap_or_default()
+            })
+        } else {
+            self.persist_candidate(preparation, cluster, through, observed_at, smtp)
+        }
     }
 
     fn persist_candidate(

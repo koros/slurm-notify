@@ -11,6 +11,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private mixed event-selected SMTP preparation counts only selected pairs, rejects invalid selections and commits frozen messages/profile bindings with ordinary routes atomically; budget, injected-write rollback and reopen preservation acceptance.
+
 - Private event-specific routed polling commits selected outbox pairs with the existing jobs/event/checkpoint transaction; injected enqueue failure and restart tests verify rollback, unmatched-event deduplication and unchanged pending destinations after route edits.
 
 - Private bounded lifecycle route selection with owned aliases, per-event destination unions, duplicate/reference rejection and three boundary tests; no installed routing or public event contract.
