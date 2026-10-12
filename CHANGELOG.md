@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Changed
 
+- Consolidate foreground readiness evidence, correct completed private Rust preparation gaps and document concrete contract/installed activation decisions and the next bounded environment adapter milestone.
+
 - Update commit-pinned CI actions to checkout 7.0.1, upload-artifact 7.0.2 and dependency-review-action 5.0.0; retain existing inputs/gates and document Node 24 runner compatibility and all nine Dependabot assessments.
 
 - Update private prototypes to url 2.5.8, time 0.3.55, powerfmt 0.2.1, base64 0.23.1, rusqlite 0.40.2 and rcgen 0.14.10 on the existing Rust 1.88.0 pin. Migrate checked SQLite count decoding and certificate fixture APIs; retain scalar Base64 and DER/ring-only certificate generation.

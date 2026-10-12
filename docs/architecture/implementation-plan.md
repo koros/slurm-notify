@@ -3682,3 +3682,20 @@ from the unified process evidence. Public and installed gates remain.
 Validation: shared checks pass with 371 Rust tests plus one ignored helper, extended
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.37% (21,812/22,401), above the 80% gate.
+
+
+### Foreground readiness consolidation
+
+Consolidated private evidence by capability after unified process acceptance.
+Corrected obsolete parsing/composition gaps: bounded Rust preparation and mixed
+foreground orchestration already exist privately. Listed concrete contract decisions
+and installed OS/resource, public payload, UX and external acceptance gates.
+
+Next: private bounded explicit environment lookup through the existing injected
+resource boundary, with missing/non-Unicode/oversized-value and redaction acceptance.
+Effective-user and OS signal adapters follow separately. Public activation still
+requires explicit contract review. No source, dependencies or defaults change.
+
+Validation: documentation-only milestone; shared checks run through required commit
+and push hooks. Latest source coverage remains the recorded `bc81d27` measurement:
+97.37% (21,812/22,401), above the 80% gate.

@@ -1,9 +1,8 @@
 # Product readiness assessment
 
-Assessment after selected mixed-route runtime-cycle acceptance and private bounded
-Rust JSON decoding, draft-shape validation and private webhook/mixed composition.
-This supersedes the initial scaffold assessment for current readiness; historical
-entries in the implementation plan describe individual increments.
+Assessment after unified private runtime process acceptance (`bc81d27`).
+Historical increments remain in the implementation plan; this assessment groups
+current evidence by capability and identifies the remaining activation gates.
 
 ## Verified private prototype
 
@@ -33,17 +32,22 @@ custom process acceptance, eight SQLite tests, six hook tests and 11 draft-confi
 Python tests. Rust line coverage was 97.37% (21,812/22,401); the gate is 80%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
-| Private evidence | Location | Remaining integration gap |
+| Private capability | Evidence | Remaining installed gap |
 | --- | --- | --- |
-| Protected configuration and DER trust reads | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Private bounded Rust decoding and draft-shape/control validation exist; Webhook and mixed SMTP injected composition exist; Composed runtime acceptance supports per-destination SMTP deadlines; Protected snapshot-to-runtime acceptance exists; Composed guarded state acquisition exists for the fixed private basename; Independent configured capacity budgets flow through reconciliation/restore/preflight/health; Private composed status snapshots exist; Metadata-only status preparation exists; Read-only existing-state inspection exists for closed rollback-journal state; Process-boundary status owner-exit/cancellation acceptance exists; installed parsing remains pending |
-| Owned secret/provider resources | [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs), [process acceptance](../../tests/integration/transport_boundary.rs) | Lookups/helpers remain injected; installed explicit environment resolution must enforce bounds and redaction |
-| Operational and observation policy mapping | [Controls](../../crates/notify-cli/src/runtime_mapping.rs), [identity mapping](../../crates/notify-cli/src/observation_mapping.rs) | No effective-user OS adapter or installed configuration mapping |
-| Selected mixed poll/dispatch/reopen | [Route selection](../../crates/notify-cli/src/route_selection.rs), [runtime cycles](../../crates/notify-cli/src/polling_cycle.rs) | Owned caller-driven sessions compose startup, ticks, live status, cancellation and restart; Private monotonic finite scheduling and blocked-batch restart acceptance exist; Process-boundary scheduled cancellation/termination/replay acceptance exists; A private shared cancellation/condition-variable wait adapter exists; Real-wait process cancellation/termination/timed-exhaustion acceptance exists; Shared-signal active tick wiring and callback cancellation/restart acceptance exist; Active-tick process cancellation and partial-delivery/frozen-work replay acceptance exist; Private bounded shutdown classification/reporting exists; Process-boundary bounded shutdown reports exist; Private bounded startup reporting exists; Process-boundary startup failure reporting exists; Combined reported lifecycle replacement/recovery acceptance exists; A private reported orchestration adapter exists; Unified adapter process replacement/cancellation/recovery acceptance exists; readiness consolidation and OS signals remain pending |
-| Webhook wire behavior | [Webhook transport](../../crates/notify-cli/src/webhook.rs), [payload proposal](../proposals/webhook-payload-v1.md) | Public opaque IDs, timestamps and frozen JSON payload bytes are not implemented |
+| Protected config and trust | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [Rust decoder](../../crates/notify-cli/src/config_decode.rs), [draft validator](../../crates/notify-cli/src/config_validate.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Reviewed schema baselines and installed bindings; decoding and validation already exist privately |
+| Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Effective-user OS lookup and explicit bounded environment lookup; current hooks are injected |
+| Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
+| Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
+| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | OS signal binding and installed lifecycle/exit acceptance; cancellation currently uses an injected shared signal |
+| Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
+| Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public opaque IDs and frozen webhook JSON; authorized real-provider acceptance |
 
-In particular, frozen SMTP messages do not establish frozen public webhook payloads.
-Controlled SMTP result helpers do not establish real provider acceptance. The
-private configuration validator is Python review tooling, not an installed parser.
+Private Rust decoding and validation are implemented. Python draft checks provide
+additional review fixtures; neither establishes an approved installed schema.
+Frozen SMTP messages do not establish frozen public webhook payloads. Controlled
+SMTP helpers do not establish real-provider acceptance. Cancellation is cooperative
+at hook/stage boundaries; synchronous lookup/filesystem hooks do not acquire a
+universal deadline from the foreground scheduler.
 
 ## Work before a usable MVP
 
@@ -62,39 +66,43 @@ private configuration validator is Python review tooling, not an installed parse
 Log monitoring and remote SSH are later design phases. Their discovery, privacy,
 rotation, host-key, reconnect and platform acceptance remain outstanding.
 
-## Next sequence
+## Next sequence and activation decisions
 
-1. Review the prepared [local contract package](../proposals/local-contract-review-v1.md)
-   and settle resource limits, initial-scan/catch-up semantics and pending-profile UX.
-   The proposal does not establish a supported contract.
-2. After explicit contract review, activate the smallest foreground local runtime
-   slice using the verified internal boundaries and controlled install fixtures.
-3. Complete public event persistence/serialization, effective-user resolution,
-   configuration-to-resource composition and bounded blocked-work scheduling before
-   claiming monitoring. Add onboarding/diagnostics in separate increments.
-4. Validate the agreed support matrix and cluster/provider policy, then complete
-   packaging and release acceptance. Do not publish a release without authorization.
+The [contract review package](../proposals/local-contract-review-v1.md) contains
+concrete CLI, config, SMTP, limits and payload proposals. Its recommendations remain
+unapproved. Before installed activation, record acceptance or edits for:
 
-No percentage-complete estimate is assigned: product decisions and external
-acceptance gates are substantial work even though the private pipeline is tested.
+- Strict JSON and explicit operational values, including limits, initial observation
+  and catch-up policy.
+- Foreground command grammar, exact output/exit policy and restart-based resource
+  changes, including how users diagnose blocked pending work.
+- Minimal payload fields, opaque identity, timestamp/null semantics and compatibility;
+  source identity widths/timezones need a supported Slurm baseline.
+- Required STARTTLS SMTP, explicit trust/auth identity and exact profile permissions;
+  webhook-first activation is sequencing, with SMTP still required for the MVP.
 
-## Proposed activation milestones after review
+The following implementation sequence reuses the completed private pipeline:
 
-1. Establish reviewed CLI/config/event baselines and valid/invalid/version fixtures.
-   Review parser and opaque-ID dependencies; do not treat draft Python checks as a
-   production parser. Exact CLI text and unresolved source identity/time bounds need
-   review before activation.
-2. Implement protected Rust configuration decoding and explicit identity/resource
-   composition. Verify invalid inputs fail before querying or sending and do not
-   expose private resource values.
-3. Persist opaque public event IDs and frozen webhook JSON in the poll transaction.
-   Verify rollback, collisions, restart, suppression and edited destinations; retain
-   documented replay risk after remote acceptance and failed local commit.
-4. Activate reviewed finite commands and then the bounded foreground webhook loop.
-   Installed-binary acceptance must cover signals, blocked batches without spinning,
-   ownership loss, partial progress and restart. SMTP activation follows with exact
-   profile permissions and resource recovery; both are required for the public MVP.
-5. Complete setup/diagnostics, permitted cluster/provider acceptance and installation
-   gates. Licensing/support decisions and release authorization remain separate.
+1. Record reviewed contracts and positive/negative/version compatibility fixtures.
+   Assess opaque-ID dependencies; do not silently turn draft examples into baselines.
+2. Add private effective-user and bounded explicit environment adapters, with static
+   failures, missing/non-Unicode/oversized-value acceptance and secret redaction.
+   Bind OS signals to the existing shared cancellation adapter with process tests.
+3. Implement the reviewed public event transaction: opaque ID and frozen webhook
+   bytes committed with routes/outbox; test collisions, rollback, suppression,
+   restart and edited destinations. Establish source timestamps without fabrication.
+4. Activate reviewed finite commands and foreground orchestration. Fresh installed
+   binary acceptance must cover invalid inputs before access, ownership, signals,
+   blocked scheduling without spinning, partial delivery and resource recovery.
+   Reuse protected Rust preparation, mixed composition and scheduling already tested.
+5. Complete setup/test/doctor UX and authorized cluster/provider acceptance. Settle
+   license and support baselines, then installation/upgrade and release gates.
 
-This sequence is a review plan; no public contract or activation is approved here.
+Next private milestone: bounded explicit environment lookup, integrated with the
+existing injected resource boundary. It does not require activating a public command
+or choosing a public schema. Effective-user lookup and OS signal handling follow as
+separate increments with platform-specific acceptance.
+
+No percentage-complete estimate is assigned: unresolved product decisions and
+external acceptance are substantial work. This sequence approves no public contract,
+real-cluster test, external notification or release.
