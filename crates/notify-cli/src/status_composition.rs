@@ -14,6 +14,7 @@ pub(super) enum Error {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum InspectionError {
+    Cancelled,
     State(crate::state_path::Error),
     Storage,
     UnsupportedVersion,
@@ -40,6 +41,19 @@ impl Plan {
         now: i64,
         lock_timeout: std::time::Duration,
     ) -> Result<HealthReport, InspectionError> {
+        self.inspect_with(cycles, now, lock_timeout, || false)
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn inspect_with(
+        &self,
+        cycles: &Cycles,
+        now: i64,
+        lock_timeout: std::time::Duration,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> Result<HealthReport, InspectionError> {
+        if cancelled() {
+            return Err(InspectionError::Cancelled);
+        }
         let parent = crate::state_path::database_parent(self.storage_path())
             .map_err(InspectionError::State)?;
         let mut store = Store::open_status(parent, lock_timeout).map_err(|error| match error {
@@ -47,8 +61,16 @@ impl Plan {
             crate::storage::StorageError::UnsupportedVersion => InspectionError::UnsupportedVersion,
             _ => InspectionError::Storage,
         })?;
-        self.status(cycles, &mut store, now)
-            .map_err(InspectionError::Report)
+        if cancelled() {
+            return Err(InspectionError::Cancelled);
+        }
+        let report = self
+            .status(cycles, &mut store, now)
+            .map_err(InspectionError::Report)?;
+        if cancelled() {
+            return Err(InspectionError::Cancelled);
+        }
+        Ok(report)
     }
     pub(super) fn status(
         &self,
@@ -154,6 +176,43 @@ mod tests {
             .collect();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         entries
+    }
+    #[test]
+    fn inspection_cancellation_precedes_access_and_releases_acquired_owner() {
+        let directory = crate::storage::tests::Directory::new();
+        let plan = prepare(&serde_json::to_vec(&fixture(&directory)).unwrap()).unwrap();
+        let state = Path::new(plan.storage_path()).parent().unwrap();
+        let cycles = Cycles::new(1).unwrap();
+        assert!(matches!(
+            plan.inspect_with(&cycles, 10, Duration::from_millis(50), || true),
+            Err(InspectionError::Cancelled)
+        ));
+        assert!(!state.exists());
+        drop(Store::open_private(state, Duration::from_millis(50)).unwrap());
+        let before = files(state);
+        for stop in [2, 3] {
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            loop {
+                let mut calls = 0;
+                let result = plan.inspect_with(&cycles, 10, Duration::from_millis(50), || {
+                    calls += 1;
+                    calls == stop
+                });
+                match result {
+                    Err(InspectionError::State(crate::state_path::Error::AlreadyOwned))
+                        if std::time::Instant::now() < until =>
+                    {
+                        std::thread::sleep(Duration::from_millis(2))
+                    }
+                    other => {
+                        assert!(matches!(other, Err(InspectionError::Cancelled)));
+                        break;
+                    }
+                }
+            }
+            assert_eq!(files(state), before);
+            assert!(inspect_fixture(&plan).is_ok());
+        }
     }
     #[test]
     fn inspection_does_not_create_absent_state_and_rejects_concurrent_owner() {

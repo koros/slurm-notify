@@ -80,12 +80,31 @@ mod smtp_submit_frame;
 #[path = "../../crates/notify-cli/src/smtp_tls.rs"]
 mod smtp_tls;
 
+#[path = "../../crates/notify-cli/src/config_decode.rs"]
+mod config_decode;
+#[allow(unused_imports)]
+#[path = "../../crates/notify-cli/src/config_validate.rs"]
+mod config_validate;
+#[allow(unused_imports)]
+#[path = "../../crates/notify-cli/src/route_selection.rs"]
+mod route_selection;
+#[path = "../../crates/notify-cli/src/runtime_mapping.rs"]
+mod runtime_mapping;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod status_boundary;
+#[path = "../../crates/notify-cli/src/status_composition.rs"]
+mod status_composition;
+
 use delivery::ProviderOutcome;
 use rusqlite::OptionalExtension;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn main() {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if status_boundary::child() {
+        return;
+    }
     if matches!(
         std::env::args().nth(1).as_deref(),
         Some("--smtp-frozen-fixture" | "--smtp-frozen-lost-result")
@@ -294,6 +313,7 @@ fn acceptance() {
     assert!(
         transport::supervise(&mut child, vec![255; 4], Duration::from_secs(2), 4096, 64).is_err()
     );
+    status_boundary::acceptance();
     owned_pipeline_restart();
     orchestrated_owned_http_restart();
     orchestrated_cleanup_failure_and_post_delivery_cancellation();
@@ -317,7 +337,7 @@ fn acceptance() {
     smtp_negotiation_boundary::acknowledgment_acceptance();
     owned_smtp_progress_restart();
     owned_smtp_upgrade_policy_restart();
-    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart and mixed-route rendering-failure recovery passed");
+    println!("transport_boundary: HTTP acknowledgment, rate limit, rejection, past HTTP-date, slow HTTP, TLS rejection, blocked resolver, malformed frame, owned polling/restart, accepted-send rollback/replay, orchestrated owned HTTP restart/cancellation, cleanup failure/post-delivery cancellation, timeout retry recovery, blocked dispatch restart, mid-batch cancellation restart, cancelled preflight ownership, SMTP stalled/drip-fed greeting and upgrade deadlines, SMTP refusal and malformed frame, SMTP stalled/drip-fed/disconnected TLS handshake, SMTP certificate/protocol diagnostics, SMTP wrong/failed acknowledgments, owned SMTP I/O/timeout retry and certificate block restart, precise STARTTLS refusal and owned retry/block restart, supervised verified-TLS AUTH responses and SMTP submission final-reply boundaries and owned prepared SMTP tick retry/partial-progress restart and mixed-route rendering-failure recovery and status inspection owner exit/cancellation/privacy passed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -28,9 +28,9 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 349 Rust tests plus one ignored helper,
+The latest implementation milestone passed 350 Rust tests plus one ignored helper,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.53% (20,689/21,212); the gate is 80%.
+Python tests. Rust line coverage was 97.51% (20,730/21,259); the gate is 80%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private evidence | Location | Remaining integration gap |

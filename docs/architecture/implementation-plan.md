@@ -3424,3 +3424,20 @@ cancellation and credential-free diagnostics. Public and installed gates remain.
 Validation: shared checks pass with 349 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.53% (20,689/21,212), above the 80% gate.
+
+
+### Private status process acceptance and cancellation
+
+Inspection samples cancellation before state access, after acquisition and after
+the snapshot. A new unit test checks all boundaries and lock release. Trusted
+child fixtures verify cross-process contention, normal exit, cancellation and
+forced termination, followed by fresh reinspection and unchanged filenames/bytes.
+Bounded exact static stdout tokens exclude private metadata. ADR 0036 records
+cooperative cancellation and controlled-child limits. No public contracts change.
+
+Next: private foreground lifecycle composition using configuration, owned-cycle
+and status adapters, with cancellation and restart acceptance. Public gates remain.
+
+Validation: shared checks pass with 350 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.51% (20,730/21,259), above the 80% gate.

@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private status inspection samples cooperative cancellation before access, after acquisition and after reading; process acceptance verifies owner exit, cancellation, forced termination, fixed diagnostics and unchanged pending state.
+
 - Private metadata-only status inspection opens existing guarded SQLite state read-only without creation, migration or repair; active-owner, unsafe/recovery-artifact, schema/header and unchanged pending-state acceptance.
 
 - Private metadata-only status preparation validates protected configuration without identity, environment or trust access; ownership, unavailable-resource, validation and reopened pressure/freshness tests, without creating state or introducing commands.
