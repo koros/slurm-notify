@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground scheduling uses monotonic completion-relative delays, finite tick/wake budgets and interruptible injected waits; delayed/blocked tick, cancellation, clock/error and owner-release/restart acceptance.
+
 - Private foreground sessions own a protected mixed plan, guarded state and cycle health; startup/active cancellation, stop, ownership, live status and frozen pending-work restart tests, without scheduling or installed activation.
 
 - Private status inspection samples cooperative cancellation before access, after acquisition and after reading; process acceptance verifies owner exit, cancellation, forced termination, fixed diagnostics and unchanged pending state.

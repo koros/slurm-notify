@@ -3459,3 +3459,21 @@ interruptible waiting, delayed ticks and blocked batches. Public gates remain.
 Validation: shared checks pass with 352 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.48% (20,930/21,470), above the 80% gate.
+
+
+### Private monotonic foreground scheduling
+
+Sessions schedule caller-provided ticks using their prepared poll interval and
+injected monotonic clocks, waits and cancellation. Completion-relative delays avoid
+catch-up bursts, while finite tick/wake budgets reject unbounded wake loops. Every
+scheduling exit releases ownership. Five new tests plus extended restart acceptance
+cover delays, early/late wakes, cancellation, clock/deadline errors, failed hooks,
+no/tiny progress and repeated blocked delivery without duplicate or altered work.
+ADR 0038 records caller-hook bounds and separate tick/poll budgets.
+
+Next: process-boundary foreground wait cancellation and forced owner termination
+acceptance, with pending-work recovery. Public and installed gates remain.
+
+Validation: shared checks pass with 357 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.43% (21,177/21,736), above the 80% gate.

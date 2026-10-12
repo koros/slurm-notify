@@ -71,6 +71,9 @@ impl Smtp {
     }
 }
 impl Plan {
+    pub(super) fn poll_interval(&self) -> Duration {
+        self.common.controls.poll
+    }
     // Existing owned namespace fixes the database basename; never reinterpret a path.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(super) fn open_owned(
@@ -725,14 +728,45 @@ mod tests {
         drop(store);
         let mut restarted = start_session(&path);
         assert_eq!(restarted.status(7202).unwrap().poll.consecutive_failures, 0);
-        let replay = run(&mut restarted, 7202, false, false).unwrap();
-        assert!(matches!(
-            replay.poll,
-            Some(Ok(crate::polling_cycle::Outcome::Committed {
-                events: 0,
-                ..
-            }))
-        ));
+        let monotonic = std::cell::Cell::new(Duration::ZERO);
+        let mut ticks = 0;
+        let mut waits = 0;
+        let scheduled = restarted
+            .run_with(
+                2,
+                crate::foreground_schedule::Hooks {
+                    tick: |session: &mut crate::foreground_session::Session| {
+                        let replay = run(session, 7202, false, false)?;
+                        assert!(matches!(
+                            replay.poll,
+                            Some(Ok(crate::polling_cycle::Outcome::Committed {
+                                events: 0,
+                                ..
+                            }))
+                        ));
+                        assert!(matches!(
+                            replay.delivery,
+                            Some(Err(StageError::DispatchBlocked))
+                        ));
+                        ticks += 1;
+                        Ok(replay)
+                    },
+                    monotonic: || Some(monotonic.get()),
+                    wait: |remaining| {
+                        waits += 1;
+                        monotonic.set(monotonic.get() + remaining);
+                        Ok(crate::foreground_schedule::Wake::Ready)
+                    },
+                    cancelled: || false,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            scheduled,
+            crate::foreground_schedule::Exit::Exhausted { ticks: 2 }
+        );
+        assert_eq!((ticks, waits), (2, 1));
+        assert!(matches!(restarted.status(7202), Err(E::Closed)));
         drop(restarted);
         let store = open_owned_fixture(&plan);
         assert_eq!(
@@ -747,6 +781,71 @@ mod tests {
             store.due_deliveries("research-cluster", 7202, 10).unwrap()[0].attempt_number,
             1
         );
+    }
+    #[test]
+    fn scheduled_session_wait_cancellation_and_errors_release_ownership() {
+        use crate::foreground_schedule::{Error as E, Exit, Hooks, Wake};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        for case in 0..4 {
+            let mut session = start_session(&path);
+            let mut ticks = 0;
+            let result = session.run_with(
+                if case == 0 { 0 } else { 2 },
+                Hooks {
+                    tick: |_: &mut crate::foreground_session::Session| {
+                        ticks += 1;
+                        Ok(crate::polling_cycle::TickReport::default())
+                    },
+                    monotonic: || {
+                        if case == 1 {
+                            None
+                        } else {
+                            Some(Duration::ZERO)
+                        }
+                    },
+                    wait: |remaining| {
+                        assert_eq!(remaining, plan.poll_interval());
+                        if case == 3 {
+                            Err(())
+                        } else {
+                            Ok(Wake::Cancelled)
+                        }
+                    },
+                    cancelled: || false,
+                },
+            );
+            assert_eq!(
+                result,
+                match case {
+                    0 => Err(E::Policy),
+                    1 => Err(E::Clock),
+                    2 => Ok(Exit::Cancelled { ticks: 1 }),
+                    _ => Err(E::Wait),
+                }
+            );
+            assert_eq!(ticks, usize::from(case >= 2));
+            assert!(matches!(
+                session.status(7200),
+                Err(crate::foreground_session::Error::Closed)
+            ));
+            assert_eq!(
+                session.run_with(
+                    1,
+                    Hooks {
+                        tick: |_: &mut crate::foreground_session::Session| panic!("closed tick"),
+                        monotonic: || panic!("closed clock"),
+                        wait: |_| panic!("closed wait"),
+                        cancelled: || panic!("closed cancellation"),
+                    }
+                ),
+                Err(E::Tick)
+            );
+            drop(open_owned_fixture(&plan));
+        }
     }
     #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
