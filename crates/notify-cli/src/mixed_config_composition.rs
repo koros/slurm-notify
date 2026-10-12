@@ -542,6 +542,212 @@ mod tests {
             }
         }
     }
+    fn start_session(path: &Path) -> crate::foreground_session::Session {
+        let until = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            let result = crate::foreground_session::Session::start(
+                path,
+                2,
+                Duration::from_millis(50),
+                |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                |name, _| {
+                    Ok(Zeroizing::new(if name.ends_with("_URL") {
+                        b"https://fixture.invalid/hook".to_vec()
+                    } else {
+                        b"Bearer fixture".to_vec()
+                    }))
+                },
+                || false,
+            );
+            match result {
+                Ok(session) => return session,
+                Err(crate::foreground_session::Error::Ownership)
+                    if std::time::Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                Err(error) => panic!("session fixture startup failed: {error:?}"),
+            }
+        }
+    }
+    #[test]
+    fn foreground_startup_rejects_before_resources_and_releases_cancelled_owner() {
+        use crate::foreground_session::{Error as E, Session};
+        let d = crate::storage::tests::Directory::new();
+        let path = config_path(&d);
+        for (limit, cancel, expected) in [
+            (0, false, E::InvalidLimit),
+            (1, true, E::Cancelled),
+            (1, false, E::Preparation),
+        ] {
+            assert!(
+                matches!(Session::start(&path, limit, Duration::from_millis(50),
+                |_| panic!("identity"), |_, _| panic!("lookup"), || cancel), Err(error) if error == expected)
+            );
+        }
+        let mut v = fixture(&d);
+        let database = owned_path(&d);
+        v["storage"]["path"] = json!(database);
+        drop(prepare_file_fixture(&v, &path));
+        for sample in [2, 3] {
+            let mut calls = 0;
+            assert!(matches!(
+                Session::start(
+                    &path,
+                    2,
+                    Duration::from_millis(50),
+                    |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                    |name, _| Ok(Zeroizing::new(if name.ends_with("_URL") {
+                        b"https://fixture.invalid/hook".to_vec()
+                    } else {
+                        b"Bearer fixture".to_vec()
+                    })),
+                    || {
+                        calls += 1;
+                        calls == sample
+                    }
+                ),
+                Err(E::Cancelled)
+            ));
+            assert_eq!(database.exists(), sample == 3);
+        }
+        let mut session = start_session(&path);
+        assert!(session.status(7200).unwrap().poll.stale);
+        session.stop();
+        session.stop();
+        assert!(matches!(session.status(7200), Err(E::Closed)));
+        drop(start_session(&path));
+    }
+    #[test]
+    fn foreground_session_owns_plan_and_preserves_pending_work_through_cancel_restart() {
+        use crate::{
+            foreground_session::Error as E,
+            polling_cycle::{Hooks, StageError},
+            storage::DueDelivery,
+        };
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        let path = config_path(&d);
+        drop(prepare_file_fixture(&v, &path));
+        let mut session = start_session(&path);
+        assert!(matches!(session.status(-1), Err(E::Status)));
+        assert!(matches!(
+            crate::foreground_session::Session::start(
+                &path,
+                1,
+                Duration::from_millis(50),
+                |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                |name, _| Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                })),
+                || false,
+            ),
+            Err(E::Ownership)
+        ));
+        let status = crate::status_composition::prepare_path(&path).unwrap();
+        assert!(matches!(
+            status.inspect(
+                &crate::polling_cycle::Cycles::new(1).unwrap(),
+                7200,
+                Duration::from_millis(50)
+            ),
+            Err(crate::status_composition::InspectionError::State(
+                crate::state_path::Error::AlreadyOwned
+            ))
+        ));
+        // The running session owns its prepared plan even after configuration disappears.
+        std::fs::remove_file(&path).unwrap();
+        let run = |session: &mut crate::foreground_session::Session,
+                   now: i64,
+                   cancelled: bool,
+                   fail: bool| {
+            session.tick_with(
+                (Path::new("squeue"), Path::new("sacct")),
+                Hooks {
+                    query: |command: &mut std::process::Command, _, _| {
+                        assert!(!cancelled);
+                        if fail {
+                            return Err(crate::scheduler::QueryError::Timeout);
+                        }
+                        Ok(if command.get_program() == "squeue" {
+                            ""
+                        } else {
+                            "research-cluster|1|alice|s|actual|COMPLETED|0:0"
+                        }
+                        .into())
+                    },
+                    send: (
+                        |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> { panic!("denied secret") },
+                        |_: &DueDelivery| -> std::process::Command { panic!("denied helper") },
+                        |_: &DueDelivery| -> Result<
+                            crate::delivery::ProviderOutcome,
+                            crate::supervised_provider::Diagnostic,
+                        > { panic!("ordinary") },
+                    ),
+                    clock: || {
+                        assert!(!cancelled);
+                        Some(now)
+                    },
+                    cancelled: || cancelled,
+                },
+            )
+        };
+        let first = run(&mut session, 7200, false, false).unwrap();
+        assert!(matches!(
+            first.delivery,
+            Some(Err(StageError::DispatchBlocked))
+        ));
+        assert!(!session.status(7200).unwrap().poll.stale);
+        let failed = run(&mut session, 7201, false, true).unwrap();
+        assert!(matches!(failed.poll, Some(Err(StageError::Poll))));
+        assert_eq!(session.status(7201).unwrap().poll.consecutive_failures, 1);
+        assert!(run(&mut session, 7202, true, false).unwrap().cancelled);
+        assert!(matches!(session.status(7202), Err(E::Closed)));
+        assert!(matches!(
+            run(&mut session, 7202, true, false),
+            Err(E::Closed)
+        ));
+        let plan = prepare_file_fixture(&v, &path);
+        let store = open_owned_fixture(&plan);
+        let pending = store.due_deliveries("research-cluster", 7202, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempt_number, 1);
+        let id = pending[0].event_id.clone();
+        let frozen = store
+            .frozen_smtp(&id, "research_email")
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        drop(store);
+        let mut restarted = start_session(&path);
+        assert_eq!(restarted.status(7202).unwrap().poll.consecutive_failures, 0);
+        let replay = run(&mut restarted, 7202, false, false).unwrap();
+        assert!(matches!(
+            replay.poll,
+            Some(Ok(crate::polling_cycle::Outcome::Committed {
+                events: 0,
+                ..
+            }))
+        ));
+        drop(restarted);
+        let store = open_owned_fixture(&plan);
+        assert_eq!(
+            store
+                .frozen_smtp(&id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            frozen
+        );
+        assert_eq!(
+            store.due_deliveries("research-cluster", 7202, 10).unwrap()[0].attempt_number,
+            1
+        );
+    }
     #[test]
     fn composed_owned_state_creates_private_namespace_and_excludes_second_owner() {
         use std::os::unix::fs::PermissionsExt;

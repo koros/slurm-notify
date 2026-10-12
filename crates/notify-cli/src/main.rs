@@ -1,4 +1,6 @@
 //! Repository foundation executable; monitoring is not implemented.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod foreground_session;
 #[cfg(test)]
 mod mixed_config_composition;
 #[cfg(test)]

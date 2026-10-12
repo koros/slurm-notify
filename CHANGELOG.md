@@ -15,6 +15,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground sessions own a protected mixed plan, guarded state and cycle health; startup/active cancellation, stop, ownership, live status and frozen pending-work restart tests, without scheduling or installed activation.
+
 - Private status inspection samples cooperative cancellation before access, after acquisition and after reading; process acceptance verifies owner exit, cancellation, forced termination, fixed diagnostics and unchanged pending state.
 
 - Private metadata-only status inspection opens existing guarded SQLite state read-only without creation, migration or repair; active-owner, unsafe/recovery-artifact, schema/header and unchanged pending-state acceptance.

@@ -3441,3 +3441,21 @@ and status adapters, with cancellation and restart acceptance. Public gates rema
 Validation: shared checks pass with 350 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.51% (20,730/21,259), above the 80% gate.
+
+
+### Private owned foreground session
+
+A session owns a protected mixed plan, guarded Store and caller-bounded Cycles.
+Startup cancellation checks bracket preparation and acquisition; cancelled ticks
+and idempotent stop release ownership. Closed operations reject hooks. Two tests
+cover failure ordering, ownership, owned configuration removal, live failure health
+and unchanged pending frozen SMTP work across cancellation/restart. ADR 0037 records
+initialization side effects and poll-budget/cooperative cancellation semantics.
+No public contracts, dependencies or defaults change.
+
+Next: private monotonic scheduling with finite tick budgets and caller-supplied
+interruptible waiting, delayed ticks and blocked batches. Public gates remain.
+
+Validation: shared checks pass with 352 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
+tests. Rust line coverage is 97.48% (20,930/21,470), above the 80% gate.
