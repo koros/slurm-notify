@@ -1,4 +1,4 @@
-//! Private injected identity/observation mapping; no effective-user adapter.
+//! Private identity/observation mapping; installed identity binding remains pending.
 use zeroize::Zeroizing;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
@@ -44,14 +44,7 @@ pub(super) fn map(
         _ => return Err(Error::Policy),
     };
     let user = lookup(256).map_err(|_| Error::Lookup)?;
-    // Private limitation: printable ASCII without separators/whitespace or flag prefixes.
-    if user.is_empty()
-        || user.len() > 256
-        || user[0] == b'-'
-        || !user
-            .iter()
-            .all(|byte| (33..=126).contains(byte) && *byte != b'|')
-    {
+    if !valid_identity(&user) {
         return Err(Error::Identity);
     }
     Ok(Plan {
@@ -59,6 +52,15 @@ pub(super) fn map(
         user,
         emit,
     })
+}
+// Private limitation: ASCII without separators, whitespace or flag prefixes.
+pub(super) fn valid_identity(user: &[u8]) -> bool {
+    !user.is_empty()
+        && user.len() <= 256
+        && user[0] != b'-'
+        && user
+            .iter()
+            .all(|byte| (33..=126).contains(byte) && *byte != b'|')
 }
 #[cfg(test)]
 mod tests {

@@ -3717,3 +3717,21 @@ failures; OS signal binding follows separately. Public contract review remains a
 Validation: shared checks pass with 375 Rust tests plus two ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
 tests. Rust line coverage is 97.34% (21,910/22,508), above the 80% gate.
+
+
+### Private effective-user resolution
+
+Added Linux/macOS effective-UID lookup using the already pinned libc ABI with one
+fixed zeroizing account-record buffer. Validate bounds before OS access, then
+result/UID/name offsets and bounded NUL termination before shared observation
+identity validation. No USER/LOGNAME fallback. Synthetic failure/boundary cases
+and a bounded isolated host child compose the actual adapter with observation
+policy. ADR 0052 records synchronous NSS duration and platform support limits.
+No dependencies, defaults or public contracts change.
+
+Next: private OS signal binding to shared cancellation with process acceptance.
+Installed activation and public contract review remain separate gates.
+
+Validation: shared checks pass with 378 Rust tests plus three ignored child helpers,
+custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
+tests. Rust line coverage is 97.31% (22,059/22,668), above the 80% gate.

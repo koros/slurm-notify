@@ -17,6 +17,8 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private Linux/macOS effective-UID account lookup uses fixed zeroizing scratch storage, static failures and shared observation identity validation; boundary and isolated host-composition acceptance preserve installed behavior.
+
 - Private explicit environment lookup validates references and byte ceilings before access, preserves owned zeroizing bytes and rejects missing/non-Unicode/oversized values with static errors; isolated bounded child acceptance composes SMTP and webhook resources.
 
 - Unified private runtime process fixtures now use the reported orchestration adapter directly; shared cancellation, protected source replacement, failed restart and durable frozen/partial-delivery recovery acceptance cover the single entry path.

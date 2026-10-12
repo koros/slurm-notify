@@ -44,6 +44,9 @@ mod webhook_resolution;
 #[cfg(test)]
 mod runtime_mapping;
 
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod effective_user;
+
 #[cfg(test)]
 mod observation_mapping;
 
