@@ -244,8 +244,9 @@ mod tests {
     fn fixture(mode: TlsMode) -> (Resolved, FrozenMessage) {
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let hash = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "smtp",

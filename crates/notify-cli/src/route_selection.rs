@@ -393,8 +393,9 @@ mod tests {
         .unwrap();
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let trust = crate::smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "mail",

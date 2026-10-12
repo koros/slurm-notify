@@ -108,7 +108,7 @@ pub(super) fn acceptance() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let cert = rcgen::generate_simple_self_signed(vec!["relay.invalid".into()]).unwrap();
-    let root = cert.serialize_der().unwrap();
+    let root = cert.cert.der().to_vec();
     let frame = smtp_auth_frame::encode(listener.local_addr().unwrap().port(), "u", "p").unwrap();
     for (root, trailing, expected) in [
         (&root[..], true, Ack::Input),
@@ -161,12 +161,12 @@ pub(super) fn fixture_result(mode: u8) -> Result<Ack, super::transport::Error> {
     // Explicit success/refusals, malformed reply, disconnect, stall, drip.
 
     let cert = rcgen::generate_simple_self_signed(vec!["relay.invalid".into()]).unwrap();
-    let root = cert.serialize_der().unwrap();
+    let root = cert.cert.der().to_vec();
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(
             vec![CertificateDer::from(root.clone())],
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der())),
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der())),
         )
         .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

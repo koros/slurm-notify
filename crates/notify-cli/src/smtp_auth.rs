@@ -235,21 +235,20 @@ mod tests {
         capabilities: &'static [u8],
         response: &'static [u8],
     ) -> (Result<(), Error>, usize) {
-        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-        let mut params = rcgen::CertificateParams::new(vec![name.into()]);
+        use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+        let mut params = rcgen::CertificateParams::new(vec![name.into()]).unwrap();
         if expired {
             params.not_before = rcgen::date_time_ymd(2000, 1, 1);
             params.not_after = rcgen::date_time_ymd(2001, 1, 1);
         }
-        let certificate = rcgen::Certificate::from_params(params).unwrap();
-        let der = CertificateDer::from(certificate.serialize_der().unwrap());
+        let key_pair = rcgen::KeyPair::generate().unwrap();
+        let certificate = params.self_signed(&key_pair).unwrap();
+        let der = certificate.der().clone();
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
                 vec![der.clone()],
-                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                    certificate.serialize_private_key_der(),
-                )),
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der())),
             )
             .unwrap();
         let mut roots = rustls::RootCertStore::empty();

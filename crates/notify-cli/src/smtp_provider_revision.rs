@@ -464,12 +464,14 @@ mod tests {
     fn trust_set_fingerprint_is_order_stable_bounded_and_content_sensitive() {
         let first = rcgen::generate_simple_self_signed(vec!["first.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let second = rcgen::generate_simple_self_signed(vec!["second.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let a = trust_fingerprint(&[&first, &second]).unwrap();
         assert_eq!(a, trust_fingerprint(&[&second, &first]).unwrap());
         assert_ne!(a, trust_fingerprint(&[&first]).unwrap());

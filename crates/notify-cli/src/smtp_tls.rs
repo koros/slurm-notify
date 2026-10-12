@@ -159,7 +159,7 @@ pub(super) fn verified_starttls(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use std::{
         io::Read,
         net::TcpListener,
@@ -180,16 +180,15 @@ mod tests {
         greeting_bytes: &'static [u8],
         ehlo_reply: &'static [u8],
     ) -> (Result<(), Error>, Observation) {
-        let mut params = rcgen::CertificateParams::new(names);
+        let mut params = rcgen::CertificateParams::new(names).unwrap();
         if expired {
             params.not_before = rcgen::date_time_ymd(2000, 1, 1);
             params.not_after = rcgen::date_time_ymd(2001, 1, 1);
         }
-        let certificate = rcgen::Certificate::from_params(params).unwrap();
-        let der = CertificateDer::from(certificate.serialize_der().unwrap());
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-            certificate.serialize_private_key_der(),
-        ));
+        let key_pair = rcgen::KeyPair::generate().unwrap();
+        let certificate = params.self_signed(&key_pair).unwrap();
+        let der = certificate.der().clone();
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
         let server = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![der.clone()], key)
@@ -328,14 +327,15 @@ mod tests {
         trust: bool,
         secure_reply: &'static [u8],
     ) -> (Result<(), Error>, usize, usize) {
-        let mut params = rcgen::CertificateParams::new(vec![certificate_name.into()]);
+        let mut params = rcgen::CertificateParams::new(vec![certificate_name.into()]).unwrap();
         if expired {
             params.not_before = rcgen::date_time_ymd(2000, 1, 1);
             params.not_after = rcgen::date_time_ymd(2001, 1, 1);
         }
-        let cert = rcgen::Certificate::from_params(params).unwrap();
-        let der = CertificateDer::from(cert.serialize_der().unwrap());
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der()));
+        let key_pair = rcgen::KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key_pair).unwrap();
+        let der = cert.der().clone();
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
         let server = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![der.clone()], key)

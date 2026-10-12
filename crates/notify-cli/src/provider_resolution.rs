@@ -120,8 +120,9 @@ mod tests {
     fn certificate(name: &str) -> Vec<u8> {
         rcgen::generate_simple_self_signed(vec![format!("{name}.fixture.invalid")])
             .unwrap()
-            .serialize_der()
-            .unwrap()
+            .cert
+            .der()
+            .to_vec()
     }
     #[test]
     fn composed_resources_survive_rotation_and_removal_with_same_binding() {

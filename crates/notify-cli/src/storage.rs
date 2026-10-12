@@ -253,12 +253,20 @@ impl Store {
             let jobs: usize = tx.query_row(
                 "SELECT count(*) FROM (SELECT 1 FROM jobs WHERE cluster=?1 LIMIT ?2)",
                 params![cluster, capacity_probe],
-                |r| r.get(0),
+                |r| {
+                    let count: i64 = r.get(0)?;
+                    usize::try_from(count)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, count))
+                },
             )?;
             let events: usize = tx.query_row(
                 "SELECT count(*) FROM (SELECT 1 FROM events WHERE cluster=?1 LIMIT ?2)",
                 params![cluster, capacity_probe],
-                |r| r.get(0),
+                |r| {
+                    let count: i64 = r.get(0)?;
+                    usize::try_from(count)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, count))
+                },
             )?;
             let mut health = StorageHealth {
                 jobs_sampled: jobs,

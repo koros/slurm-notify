@@ -2585,7 +2585,7 @@ fn owned_bound_transport_restart() {
     }
     for mode in [1, 10] {
         let cert = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()]).unwrap();
-        let root = cert.serialize_der().unwrap();
+        let root = cert.cert.der().to_vec();
         let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let config = Arc::new(
             rustls::ServerConfig::builder()
@@ -2593,7 +2593,7 @@ fn owned_bound_transport_restart() {
                 .with_single_cert(
                     vec![CertificateDer::from(root.clone())],
                     PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                        cert.serialize_private_key_der(),
+                        cert.signing_key.serialize_der(),
                     )),
                 )
                 .unwrap(),

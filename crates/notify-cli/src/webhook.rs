@@ -276,16 +276,15 @@ pub(super) mod tests {
     ) {
         use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
         use std::sync::Arc;
-        let mut params = rcgen::CertificateParams::new(names);
+        let mut params = rcgen::CertificateParams::new(names).unwrap();
         if expired {
             params.not_before = rcgen::date_time_ymd(2000, 1, 1);
             params.not_after = rcgen::date_time_ymd(2001, 1, 1);
         }
-        let certificate = rcgen::Certificate::from_params(params).unwrap();
-        let der = rustls::pki_types::CertificateDer::from(certificate.serialize_der().unwrap());
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-            certificate.serialize_private_key_der(),
-        ));
+        let key_pair = rcgen::KeyPair::generate().unwrap();
+        let certificate = params.self_signed(&key_pair).unwrap();
+        let der = certificate.der().clone();
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![der.clone()], key)

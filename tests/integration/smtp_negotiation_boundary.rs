@@ -246,9 +246,9 @@ pub(super) fn handshake_fixture(mode: u8) -> (String, std::thread::JoinHandle<us
             let config = rustls::ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(
-                    vec![CertificateDer::from(cert.serialize_der().unwrap())],
+                    vec![CertificateDer::from(cert.cert.der().to_vec())],
                     PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                        cert.serialize_private_key_der(),
+                        cert.signing_key.serialize_der(),
                     )),
                 )
                 .unwrap();

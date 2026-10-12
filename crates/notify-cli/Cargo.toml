@@ -13,28 +13,28 @@ path = "src/main.rs"
 # Private bounded draft JSON decoding; no installed schema/parser adoption.
 serde_json = "=1.0.152"
 serde_core = "=1.0.229"
-rusqlite = { version = "=0.31.0", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
-url = "=2.5.4"
+url = "=2.5.8"
 httpdate = "=1.0.3"
 # Explicit zeroization version for the private prototypes.
 zeroize = "=1.8.1"
 # Reuse locked TLS crypto for bounded deterministic private SMTP identities.
 ring = "=0.17.14"
-# Reuse the locked codec for private AUTH PLAIN fixtures; no new package version.
-base64 = "=0.22.1"
+# Private AUTH PLAIN codec; retain scalar implementation without new unsafe SIMD.
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 # Message builder only: SMTP transport, TLS, pooling and async features stay disabled.
 lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
 # Retain unrelated builder transitive versions during the security update.
 email-encoding = "=0.4.1"
 idna_adapter = "=1.1.0"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
-rcgen = "=0.12.1"
-time = "=0.3.47"
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
+time = "=0.3.55"
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 # Explicit formatting dependency version for reproducible private TLS fixtures.
-powerfmt = { version = "=0.2.0", default-features = false }
+powerfmt = { version = "=0.2.1", default-features = false }
 
 # Private process-boundary acceptance harness; not an installed helper binary.
 [[test]]

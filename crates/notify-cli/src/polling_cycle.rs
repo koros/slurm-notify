@@ -1060,8 +1060,9 @@ mod tests {
         };
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "primary",
@@ -1221,8 +1222,9 @@ mod tests {
         let ordinary_calls = std::cell::Cell::new(0);
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "primary",
@@ -1394,8 +1396,9 @@ mod tests {
         let ordinary_calls = std::cell::Cell::new(0);
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "primary",
@@ -1606,8 +1609,9 @@ mod tests {
         let ordinary_calls = std::cell::Cell::new(0);
         let root = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()])
             .unwrap()
-            .serialize_der()
-            .unwrap();
+            .cert
+            .der()
+            .to_vec();
         let trust = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
         let profile = Profile {
             destination: "primary",

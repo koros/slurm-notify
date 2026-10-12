@@ -299,12 +299,12 @@ mod tests {
     fn real_verified_authenticated_tls_observes_one_envelope_and_one_data_message() {
         use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
         let cert = rcgen::generate_simple_self_signed(vec!["relay.invalid".into()]).unwrap();
-        let der = CertificateDer::from(cert.serialize_der().unwrap());
+        let der = CertificateDer::from(cert.cert.der().to_vec());
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
                 vec![der.clone()],
-                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.serialize_private_key_der())),
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der())),
             )
             .unwrap();
         let mut roots = rustls::RootCertStore::empty();

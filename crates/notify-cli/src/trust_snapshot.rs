@@ -89,8 +89,9 @@ mod tests {
     fn root(name: &str) -> Vec<u8> {
         rcgen::generate_simple_self_signed(vec![format!("{name}.fixture.invalid")])
             .unwrap()
-            .serialize_der()
-            .unwrap()
+            .cert
+            .der()
+            .to_vec()
     }
     #[test]
     fn validated_owned_set_survives_reopen_rotation_and_removal() {

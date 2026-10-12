@@ -3214,3 +3214,19 @@ and public compatibility baselines still require explicit contract review.
 Validation: shared checks pass with 322 Rust tests plus one ignored helper, custom
 process acceptance, eight SQLite tests, six hook tests and 11 draft configuration
 tests. Rust line coverage is 97.59% (18,490/18,947), above the 80% gate.
+
+### Dependabot Rust compatibility updates
+
+Validated and applied the six proposed Cargo updates on Rust 1.88.0. url/time/
+powerfmt/Base64 retain existing API usage; rusqlite requires checked i64-to-usize
+count decoding and rcgen requires separate certificate/signing-key fixture APIs.
+Certificate generation uses DER/ring only; Base64's new unsafe SIMD default is
+not enabled, including transitively. Bundled SQLite advances through libsqlite3-sys
+0.38.2; certificate encoding uses yasna 0.6.0 and time-core 0.1.9. Optional X.509
+parser packages appear in the lock but are not activated. No installed behavior,
+product support baseline or public contract changes.
+
+Validation: shared checks pass with 322 Rust tests plus one ignored helper, custom
+process acceptance, eight SQLite, six hook and 11 draft configuration tests. Rust
+line coverage is 97.59% (18,509/18,966), above the 80% gate. Existing restart,
+rollback, capacity, TLS identity/expiry and AUTH/submission tests cover the migrations.
