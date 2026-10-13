@@ -13,10 +13,12 @@ pub(super) enum Error {
 }
 // No Debug/Clone; retain the exact validated bytes independently of source paths.
 pub(super) struct Trust {
+    #[cfg(test)]
     snapshots: Vec<config_snapshot::Snapshot>,
     fingerprint: String,
 }
 impl Trust {
+    #[cfg(test)]
     pub(super) fn roots(&self) -> Vec<&[u8]> {
         self.snapshots
             .iter()
@@ -55,6 +57,7 @@ pub(super) fn load(paths: &[PathBuf]) -> Result<Trust, Error> {
     let fingerprint =
         smtp_provider_revision::trust_fingerprint(&roots).map_err(|_| Error::Trust)?;
     Ok(Trust {
+        #[cfg(test)]
         snapshots,
         fingerprint,
     })

@@ -10,14 +10,14 @@ preserves past increments without treating their next steps as current instructi
 The target is a local foreground MVP with generic HTTPS webhook and required
 STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
 setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
-help/version and webhook-only configuration validation are installed. MIT licensing, refreshed guidance,
+help/version and webhook/SMTP configuration validation are installed. MIT licensing, refreshed guidance,
 90% coverage and accurate badges are complete.
 
 Continuous scheduling and first-signal reason retention are now implemented
 privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
 Continuous scheduling now retains one owned session across poll-batch renewal
 ([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Next bind finite
-SMTP configuration validation/status, OS-backed orchestration and monitoring commands.
+status, OS-backed orchestration and monitoring commands.
 
 ## Next product milestones
 

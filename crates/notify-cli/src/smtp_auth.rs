@@ -24,13 +24,7 @@ pub(super) struct Credentials {
 }
 impl Credentials {
     pub(super) fn new(username: Option<&str>, password: Option<&str>) -> Result<Self, Error> {
-        fn valid(text: Option<&str>, bound: usize) -> Option<&str> {
-            text.filter(|value| {
-                !value.is_empty()
-                    && value.len() <= bound
-                    && value.bytes().all(|byte| (32..=126).contains(&byte))
-            })
-        }
+        use crate::credential_policy::valid;
         let username = valid(username, 64).ok_or(Error::Credentials)?;
         let password = valid(password, 128).ok_or(Error::Credentials)?;
         let mut plain = Zeroizing::new(Vec::with_capacity(username.len() + password.len() + 2));

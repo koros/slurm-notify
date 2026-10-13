@@ -17,25 +17,25 @@ zeroize = "=1.8.1"
 url = "=2.5.8"
 libc = "=0.2.190"
 
-# Prototype-only: bundled SQLite makes schema tests independent of system SQLite.
+# Existing locked hashing, strict address parsing and trust-anchor validation.
+ring = "=0.17.14"
+lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+
 [dev-dependencies]
+# Prototype-only bundled SQLite.
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 httpdate = "=1.0.3"
-# Reuse locked TLS crypto for bounded deterministic private SMTP identities.
-ring = "=0.17.14"
 # Private AUTH PLAIN codec; retain scalar implementation without new unsafe SIMD.
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
-# Message builder only: SMTP transport, TLS, pooling and async features stay disabled.
-lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
 # Retain unrelated builder transitive versions during the security update.
 email-encoding = "=0.4.1"
 idna_adapter = "=1.1.0"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
 time = "=0.3.55"
-rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 # Explicit formatting dependency version for reproducible private TLS fixtures.
 powerfmt = { version = "=0.2.1", default-features = false }
 

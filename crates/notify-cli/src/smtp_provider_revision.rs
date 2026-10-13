@@ -19,6 +19,7 @@ const LIMIT: usize = 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TlsMode {
+    #[cfg(test)]
     Implicit,
     RequiredStartTls,
 }
@@ -37,6 +38,7 @@ pub(super) struct Profile<'a> {
     pub(super) credential_reference: &'a str,
 }
 pub(super) struct Descriptor {
+    #[cfg(test)]
     canonical: Zeroizing<Vec<u8>>,
     token: String,
 }
@@ -44,8 +46,10 @@ pub(super) struct Descriptor {
 pub(super) enum Error {
     Policy,
     Trust,
+    #[cfg(test)]
     Format,
     Limit,
+    #[cfg(test)]
     Fingerprint,
 }
 
@@ -58,6 +62,7 @@ impl Descriptor {
             profile.relay,
             port.as_str(),
             match profile.tls {
+                #[cfg(test)]
                 TlsMode::Implicit => "implicit",
                 TlsMode::RequiredStartTls => "required-starttls",
             },
@@ -85,8 +90,13 @@ impl Descriptor {
             canonical.extend_from_slice(value.as_bytes());
         }
         let token = hex(digest(&SHA256, &canonical).as_ref());
-        Ok(Self { canonical, token })
+        Ok(Self {
+            #[cfg(test)]
+            canonical,
+            token,
+        })
     }
+    #[cfg(test)]
     pub(super) fn from_stored(token: &str, canonical: Zeroizing<Vec<u8>>) -> Result<Self, Error> {
         let profile = decode(&canonical)?;
         let validated = Self::new(&profile)?;
@@ -98,15 +108,18 @@ impl Descriptor {
             token: token.to_owned(),
         })
     }
+    #[cfg(test)]
     pub(super) fn canonical(&self) -> &[u8] {
         &self.canonical
     }
     pub(super) fn token(&self) -> &str {
         &self.token
     }
+    #[cfg(test)]
     pub(super) fn profile(&self) -> Profile<'_> {
         decode(&self.canonical).expect("validated provider descriptor")
     }
+    #[cfg(test)]
     pub(super) fn matches(&self, profile: &Profile<'_>) -> Result<bool, Error> {
         let candidate = Self::new(profile)?;
         Ok(candidate.token() == self.token() && candidate.canonical() == self.canonical())
@@ -175,6 +188,7 @@ fn validate(profile: &Profile<'_>) -> Result<(), Error> {
     }
     Ok(())
 }
+#[cfg(test)]
 fn decode(bytes: &[u8]) -> Result<Profile<'_>, Error> {
     if bytes.len() > LIMIT {
         return Err(Error::Limit);

@@ -12,11 +12,11 @@ It aims to discover the current user's jobs and send lifecycle alerts without ro
 access or changes to batch scripts.
 
 **Current status: tested private engine; installed monitoring is unavailable.**
-The executable supports `--help`, `--version`, and webhook-only
+The executable supports `--help`, `--version`, and
 `config validate --config <absolute-path>`. Empty or invalid
-invocations exit 2; monitoring commands remain unavailable. No supported
+invocations exit 2; unapproved SMTP profiles exit 3. Monitoring commands remain unavailable. No supported
 monitoring release is available yet. See the [installed configuration contract](contracts/config/README.md)
-for file permissions, resource requirements and the pending SMTP validation path.
+for file permissions, resource requirements and exact SMTP permission checks.
 
 ## Implemented
 

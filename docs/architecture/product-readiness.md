@@ -29,15 +29,15 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 383 private Rust tests plus six installed
-CLI acceptance tests and four ignored child helpers,
+The latest implementation milestone passed 384 private Rust tests plus seven installed CLI acceptance tests
+and six provider-codec checks and four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.26% (22,474/23,108); the gate is 90%.
+Python tests. Rust line coverage was 97.27% (22,685/23,322); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
 | --- | --- | --- |
-| Protected config and trust | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [Rust decoder](../../crates/notify-cli/src/config_decode.rs), [draft validator](../../crates/notify-cli/src/config_validate.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Installed protected webhook-only validation and structural schema exist; SMTP validation and monitoring bindings remain pending |
+| Protected config and trust | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [Rust decoder](../../crates/notify-cli/src/config_decode.rs), [draft validator](../../crates/notify-cli/src/config_validate.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Installed protected webhook/SMTP validation and schema exist; status and monitoring bindings remain pending |
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private environment and effective-UID adapters exist; installed bindings and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed command/output bindings; status inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |

@@ -1,7 +1,11 @@
 //! Custom test harness doubles as a trusted private child, never installed.
 #![allow(dead_code)]
+#[path = "../../crates/notify-cli/src/config_reference.rs"]
+mod config_reference;
 #[path = "../../crates/notify-cli/src/config_snapshot.rs"]
 mod config_snapshot;
+#[path = "../../crates/notify-cli/src/credential_policy.rs"]
+mod credential_policy;
 #[path = "../../crates/notify-cli/src/credential_resolution.rs"]
 mod credential_resolution;
 #[path = "../../crates/notify-cli/src/delivery.rs"]
@@ -10,8 +14,12 @@ mod delivery;
 mod lifecycle;
 #[path = "../../crates/notify-cli/src/provider_resolution.rs"]
 mod provider_resolution;
+#[path = "../../crates/notify-cli/src/rendering_fingerprint.rs"]
+mod rendering_fingerprint;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
+#[path = "../../crates/notify-cli/src/smtp_address.rs"]
+mod smtp_address;
 #[path = "../../crates/notify-cli/src/smtp_bound_transport.rs"]
 mod smtp_bound_transport;
 #[path = "../../crates/notify-cli/src/smtp_frozen_frame.rs"]

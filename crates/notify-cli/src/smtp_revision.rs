@@ -35,7 +35,7 @@ impl Descriptor {
             JobVisibility::Hidden => "hidden",
             JobVisibility::Identifier => "identifier",
         };
-        let canonical = encode(&[
+        let canonical = crate::rendering_fingerprint::encode(&[
             ("destination", route.name),
             ("sender", route.metadata.sender),
             ("recipient", route.metadata.recipient),
@@ -44,7 +44,8 @@ impl Descriptor {
             ("renderer", smtp_render::VERSION),
             ("identity", identity),
             ("domain", smtp_message::ID_DOMAIN),
-        ])?;
+        ])
+        .map_err(|_| Error::Limit)?;
         let fingerprint = digest(&SHA256, &canonical);
         let mut token = String::with_capacity(64);
         const HEX: &[u8] = b"0123456789abcdef";
@@ -146,30 +147,10 @@ fn decode(bytes: &[u8]) -> Result<[&str; 8], Error> {
 
 // Fixed field order; unsigned big-endian u16 tag/u32 value byte lengths.
 // Check the complete bound before allocation, copying or hashing.
+
+#[cfg(test)]
 fn encode(fields: &[(&str, &str)]) -> Result<Zeroizing<Vec<u8>>, Error> {
-    let length = fields
-        .iter()
-        .try_fold(PREFIX.len(), |length, (tag, value)| {
-            if tag.len() > u16::MAX as usize || value.len() > u32::MAX as usize {
-                return None;
-            }
-            length
-                .checked_add(2)?
-                .checked_add(tag.len())?
-                .checked_add(4)?
-                .checked_add(value.len())
-                .filter(|length| *length <= LIMIT)
-        })
-        .ok_or(Error::Limit)?;
-    let mut bytes = Zeroizing::new(Vec::with_capacity(length));
-    bytes.extend_from_slice(PREFIX);
-    for (tag, value) in fields {
-        bytes.extend_from_slice(&(tag.len() as u16).to_be_bytes());
-        bytes.extend_from_slice(tag.as_bytes());
-        bytes.extend_from_slice(&(value.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(value.as_bytes());
-    }
-    Ok(bytes)
+    crate::rendering_fingerprint::encode(fields).map_err(|_| Error::Limit)
 }
 
 #[cfg(test)]

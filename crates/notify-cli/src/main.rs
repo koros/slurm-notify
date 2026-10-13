@@ -1,5 +1,7 @@
 //! Finite local CLI; monitoring is not implemented.
+mod config_reference;
 mod control_validation;
+mod credential_policy;
 #[cfg(test)]
 mod foreground_report;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
@@ -13,9 +15,12 @@ mod foreground_signals;
 #[cfg(test)]
 mod foreground_wait;
 mod installed_config;
+mod installed_smtp;
 #[cfg(test)]
 mod mixed_config_composition;
+mod rendering_fingerprint;
 mod routing_validation;
+mod smtp_address;
 #[cfg(test)]
 mod status_composition;
 
@@ -28,7 +33,6 @@ mod config_decode;
 
 mod config_snapshot;
 
-#[cfg(test)]
 mod trust_snapshot;
 
 #[cfg(test)]
@@ -124,7 +128,6 @@ mod smtp_routes;
 mod smtp_bound_transport;
 #[cfg(test)]
 mod smtp_provider_delivery;
-#[cfg(test)]
 mod smtp_provider_revision;
 #[cfg(test)]
 mod smtp_revision;
@@ -170,9 +173,9 @@ fn main() -> std::process::ExitCode {
                 eprintln!("Configuration invalid or required resource unavailable.");
                 std::process::ExitCode::from(2)
             }
-            Err(crate::installed_config::Error::UnsupportedSmtp) => {
-                eprintln!("SMTP configuration validation is not available in this build.");
-                std::process::ExitCode::from(2)
+            Err(crate::installed_config::Error::Permission) => {
+                eprintln!("SMTP delivery permission is not approved for the current profile.");
+                std::process::ExitCode::from(3)
             }
         };
     }

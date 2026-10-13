@@ -7,6 +7,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed SMTP/mixed configuration validation with protected DER trust loading,
+  current profile/rendering fingerprints, exact permission checks before credentials,
+  static exit-3 denial diagnostics and no-connect/no-state binary acceptance.
+
 - Installed webhook-only `config validate --config <absolute-path>` with protected
   bounded strict JSON loading, HTTPS/auth environment checks, exact output snapshots
   and installed permission/symlink/redaction/no-state acceptance. SMTP configs return

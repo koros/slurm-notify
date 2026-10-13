@@ -231,7 +231,7 @@ fn installed_config_validation_checks_resources_and_preserves_files() {
         invoke(&config_args, None, None),
         2,
         b"",
-        include_bytes!("../../../contracts/cli/config-smtp-unavailable.stderr"),
+        include_bytes!("../../../contracts/cli/config-invalid.stderr"),
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -259,4 +259,146 @@ fn config_grammar_and_help_require_no_resources() {
         let args: Vec<_> = args.iter().map(OsStr::new).collect();
         expect(run(&args), 2, b"", INVALID);
     }
+}
+
+#[path = "../src/config_reference.rs"]
+mod config_reference;
+#[path = "../src/rendering_fingerprint.rs"]
+mod rendering_fingerprint;
+#[path = "../src/smtp_provider_revision.rs"]
+mod smtp_provider_revision;
+
+#[cfg(unix)]
+#[test]
+fn installed_smtp_validation_approves_exact_pairs_without_state_or_network() {
+    use ring::digest::{digest, SHA256};
+    use std::os::unix::fs::PermissionsExt;
+    let directory =
+        std::env::temp_dir().join(format!("slurm-notify-smtp-cli-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let directory = directory.canonicalize().unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.join("config.json");
+    let trust_path = directory.join("trust.der");
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["smtp.example.invalid".into()]).unwrap();
+    std::fs::write(&trust_path, certificate.cert.der()).unwrap();
+    std::fs::set_permissions(&trust_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["providers"]
+        .as_object_mut()
+        .unwrap()
+        .remove("primary");
+    source["routes"] =
+        serde_json::json!([{"events":["JOB_COMPLETED"],"send_to":["research_email"]}]);
+    source["storage"]["path"] = serde_json::json!(directory.join("absent-state/state.sqlite3"));
+    source["providers"]["research_email"]["trust_der_files"] = serde_json::json!([trust_path]);
+    let trust_hash =
+        smtp_provider_revision::trust_fingerprint(&[certificate.cert.der().as_ref()]).unwrap();
+    let trust_reference = config_reference::reference(b"trust\0", &[trust_path.to_str().unwrap()]);
+    let credential_reference = config_reference::reference(
+        b"credentials\0",
+        &["SLURM_NOTIFY_SMTP_USERNAME", "SLURM_NOTIFY_SMTP_PASSWORD"],
+    );
+    let provider = smtp_provider_revision::Descriptor::new(&smtp_provider_revision::Profile {
+        destination: "research_email",
+        relay: "smtp.example.invalid",
+        port: 587,
+        tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+        server_name: "smtp.example.invalid",
+        trust_reference: &trust_reference,
+        trust_fingerprint: &trust_hash,
+        authentication_identity: "researcher",
+        credential_reference: &credential_reference,
+    })
+    .unwrap();
+    let canonical = rendering_fingerprint::encode(&[
+        ("destination", "research_email"),
+        ("sender", "researcher@example.invalid"),
+        ("recipient", "researcher@example.invalid"),
+        ("namespace", "research_email"),
+        ("disclosure", "hidden"),
+        ("renderer", "allowlist-v1"),
+        ("identity", "sha256-event-route-revision-v2"),
+        ("domain", "fixture.invalid"),
+    ])
+    .unwrap();
+    let rendering: String = digest(&SHA256, &canonical)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    source["delivery"]["smtp_permissions"] = serde_json::json!([{
+        "cluster_id":"research-cluster", "destination":"research_email",
+        "rendering_revision":rendering, "provider_revision":provider.token()
+    }]);
+    let write = |source: &serde_json::Value| {
+        std::fs::write(&path, serde_json::to_vec(source).unwrap()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    let invoke = |credentials: bool| {
+        let mut process = command();
+        process
+            .args([
+                OsStr::new("config"),
+                OsStr::new("validate"),
+                OsStr::new("--config"),
+                path.as_os_str(),
+            ])
+            .current_dir(&directory);
+        if credentials {
+            process
+                .env("SLURM_NOTIFY_SMTP_USERNAME", "researcher")
+                .env("SLURM_NOTIFY_SMTP_PASSWORD", "private-fixture-password");
+        }
+        process.output().unwrap()
+    };
+    write(&source);
+    expect(invoke(true),0,b"Configuration valid: schema_version=1 cluster=research-cluster destinations=1 smtp_permissions=approved\n",b"");
+    expect(
+        invoke(false),
+        2,
+        b"",
+        include_bytes!("../../../contracts/cli/config-invalid.stderr"),
+    );
+    let mut denied = source.clone();
+    denied["delivery"]["smtp_permissions"] = serde_json::json!([]);
+    write(&denied);
+    expect(
+        invoke(false),
+        3,
+        b"",
+        include_bytes!("../../../contracts/cli/config-permission.stderr"),
+    );
+    let mut changed = source.clone();
+    changed["providers"]["research_email"]["relay"] = serde_json::json!("changed.example.invalid");
+    write(&changed);
+    expect(
+        invoke(false),
+        3,
+        b"",
+        include_bytes!("../../../contracts/cli/config-permission.stderr"),
+    );
+    write(&source);
+    std::fs::set_permissions(&trust_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    expect(
+        invoke(true),
+        2,
+        b"",
+        include_bytes!("../../../contracts/cli/config-invalid.stderr"),
+    );
+    std::fs::set_permissions(&trust_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&trust_path, b"invalid private certificate").unwrap();
+    expect(
+        invoke(true),
+        2,
+        b"",
+        include_bytes!("../../../contracts/cli/config-invalid.stderr"),
+    );
+    assert!(!directory.join("absent-state").exists());
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
+    std::fs::remove_dir_all(directory).unwrap();
 }

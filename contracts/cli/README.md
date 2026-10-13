@@ -21,3 +21,11 @@ relative or non-Unicode paths fail before file access with the invocation diagno
 Global help now lists this command. Webhook validation succeeds with schema/cluster/
 count output; invalid config/resources or unsupported SMTP scope exit 2 with the
 corresponding static stderr snapshot and empty stdout. No monitoring command is active.
+
+## SMTP-validation addition (2026-10-13)
+
+Configuration validation now supports webhook, SMTP and mixed configs. Success
+with SMTP reports `smtp_permissions=approved`. A denied/mismatched current pair
+returns `config-permission.stderr`, empty stdout, exit 3; config/resource failure
+still uses `config-invalid.stderr`, exit 2. The earlier unavailable-SMTP diagnostic
+is retired. No network/SMTP submission or state inspection occurs.

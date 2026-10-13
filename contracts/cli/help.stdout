@@ -7,6 +7,6 @@ Options:
   --config   Explicit absolute configuration path
 
 Commands:
-  config validate  Validate webhook configuration and local resources
+  config validate  Validate configuration and local resources
 
-SMTP validation and monitoring commands are not available in this build.
+Monitoring commands are not available in this build.
