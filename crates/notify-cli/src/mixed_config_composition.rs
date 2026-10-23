@@ -42,6 +42,13 @@ pub(super) struct Plan {
     permissions: Vec<[Zeroizing<String>; 4]>,
     max_messages: usize,
 }
+pub(super) struct PublicDeliveryHooks<L, S, W, C, X> {
+    pub(super) lookup: L,
+    pub(super) smtp_helper: S,
+    pub(super) webhook_helper: W,
+    pub(super) clock: C,
+    pub(super) cancelled: X,
+}
 use crate::config_reference::reference;
 impl Smtp {
     fn route(&self) -> smtp_routes::Route<'_> {
@@ -138,6 +145,67 @@ impl Plan {
             .find(|s| s.name.as_str() == name)
             .map(|s| s.timeout)
             .ok_or(Error::Profile)
+    }
+    pub(super) fn deliver_public_with<L, S, W, C, X>(
+        &self,
+        store: &mut crate::storage::Store,
+        now: i64,
+        hooks: PublicDeliveryHooks<L, S, W, C, X>,
+    ) -> Result<Result<crate::delivery::BatchReport, crate::delivery::BatchFailure>, Error>
+    where
+        L: FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        S: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        W: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let entries = self.permissions();
+        let permissions =
+            smtp_provider_delivery::Permissions::new(&entries).map_err(|_| Error::Shape)?;
+        let PublicDeliveryHooks {
+            mut lookup,
+            mut smtp_helper,
+            webhook_helper,
+            clock,
+            cancelled,
+        } = hooks;
+        Ok(smtp_provider_delivery::deliver_due_public_mixed(
+            store,
+            self.common.observation.cluster(),
+            now,
+            self.common.controls.maintenance.delivery_limit,
+            self.common.controls.maintenance.retry,
+            smtp_provider_delivery::PublicMixedHooks {
+                webhooks: &self.common.webhooks,
+                helper: webhook_helper,
+                smtp: smtp_provider_delivery::Hooks {
+                    permissions: &permissions,
+                    resolve: |bound: &Descriptor| {
+                        self.resolve(bound, &mut lookup)
+                            .map_err(|error| match error {
+                                Error::Credentials(_) => smtp_provider_delivery::Error::Credentials,
+                                _ => smtp_provider_delivery::Error::Profile,
+                            })
+                    },
+                    send: |item: &crate::storage::DueDelivery,
+                           _: &crate::smtp_revision::Descriptor,
+                           frozen: &crate::storage::FrozenMessage,
+                           resolved| {
+                        let timeout = self.timeout(&item.destination).map_err(|_| {
+                            crate::supervised_provider::Diagnostic::SmtpConfiguration
+                        })?;
+                        crate::smtp_bound_transport::dispatch(
+                            &mut smtp_helper(item),
+                            resolved,
+                            frozen,
+                            timeout,
+                        )
+                    },
+                    clock,
+                    cancelled,
+                },
+            },
+        ))
     }
     // Each SMTP destination retains its configured transport deadline.
     pub(super) fn tick_with<Q, L, H, O, C, X>(
@@ -1570,6 +1638,172 @@ mod tests {
             Err(Error::Credentials(_))
         ));
     }
+    #[test]
+    fn public_mixed_delivery_cancellation_and_provider_confusion_do_not_resolve_or_spawn() {
+        let d = crate::storage::tests::Directory::new();
+        let v = fixture(&d);
+        let mut plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        plan.poll_public_with(
+            config_composition::PollInput {
+                active_program: Path::new("squeue"),
+                accounting_program: Path::new("sacct"),
+                history_start: "2026-10-10T00:00:00",
+                history_end: "2026-10-11T00:00:00",
+                observed_at: 10,
+            },
+            &mut reconciler,
+            &mut store,
+            |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "research-cluster|1|alice|s|a|COMPLETED|0:0"
+                }
+                .into())
+            },
+        )
+        .unwrap();
+        let blocked = |plan: &Plan, store: &mut Store, cancel| {
+            plan.deliver_public_with(
+                store,
+                10,
+                PublicDeliveryHooks {
+                    lookup: |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                        panic!("blocked lookup")
+                    },
+                    smtp_helper: |_: &crate::storage::DueDelivery| -> std::process::Command {
+                        panic!("blocked SMTP child")
+                    },
+                    webhook_helper: |_: &crate::storage::DueDelivery| -> std::process::Command {
+                        panic!("blocked webhook child")
+                    },
+                    clock: || panic!("blocked completion"),
+                    cancelled: || cancel,
+                },
+            )
+            .unwrap()
+            .unwrap_err()
+        };
+        assert_eq!(
+            blocked(&plan, &mut store, true).kind,
+            crate::delivery::FailureKind::Cancelled
+        );
+        plan.common.webhooks[0].alias = Zeroizing::new("research_email".into());
+        assert_eq!(
+            blocked(&plan, &mut store, false).diagnostic,
+            Some(crate::supervised_provider::Diagnostic::SmtpProviderDenied)
+        );
+        assert_eq!(
+            store.due_deliveries("research-cluster", 10, 10).unwrap()[0].attempt_number,
+            1
+        );
+    }
+
+    #[test]
+    fn public_mixed_delivery_preserves_webhook_completion_when_smtp_denied_then_resumes_after_restart(
+    ) {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        let plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        plan.poll_public_with(
+            config_composition::PollInput {
+                active_program: Path::new("squeue"),
+                accounting_program: Path::new("sacct"),
+                history_start: "2026-10-10T00:00:00",
+                history_end: "2026-10-11T00:00:00",
+                observed_at: 10,
+            },
+            &mut reconciler,
+            &mut store,
+            |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "research-cluster|1|alice|s|a|COMPLETED|0:0"
+                }
+                .into())
+            },
+        )
+        .unwrap();
+        let helper = |ack: &str| {
+            let mut command = std::process::Command::new("python3");
+            command.args([
+                "-c",
+                &format!(
+                    "import sys; assert sys.stdin.buffer.read(); sys.stdout.write('{ack}\\n')"
+                ),
+            ]);
+            command
+        };
+        let denied = plan
+            .deliver_public_with(
+                &mut store,
+                10,
+                PublicDeliveryHooks {
+                    lookup: |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                        panic!("denied secret lookup")
+                    },
+                    smtp_helper: |_: &crate::storage::DueDelivery| -> std::process::Command {
+                        panic!("denied SMTP child")
+                    },
+                    webhook_helper: |_: &crate::storage::DueDelivery| helper("OK"),
+                    clock: || Some(10),
+                    cancelled: || false,
+                },
+            )
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(denied.committed.delivered, 1);
+        assert_eq!(
+            denied.diagnostic,
+            Some(crate::supervised_provider::Diagnostic::SmtpProviderDenied)
+        );
+        let pending = store.due_deliveries("research-cluster", 10, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].destination, "research_email");
+        assert_eq!(pending[0].attempt_number, 1);
+        let (_, rendering, provider) = plan.revisions()[0];
+        v["delivery"]["smtp_permissions"][0]["rendering_revision"] = json!(rendering);
+        v["delivery"]["smtp_permissions"][0]["provider_revision"] = json!(provider);
+        drop(store);
+        let plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let report = plan
+            .deliver_public_with(
+                &mut store,
+                10,
+                PublicDeliveryHooks {
+                    lookup: |name: &str, _| {
+                        Ok(Zeroizing::new(if name.ends_with("USERNAME") {
+                            b"researcher".to_vec()
+                        } else {
+                            b"fixture-password".to_vec()
+                        }))
+                    },
+                    smtp_helper: |_: &crate::storage::DueDelivery| {
+                        helper("SMTP_SUBMIT FINAL ACCEPTED RA")
+                    },
+                    webhook_helper: |_: &crate::storage::DueDelivery| -> std::process::Command {
+                        panic!("completed webhook replayed")
+                    },
+                    clock: || Some(10),
+                    cancelled: || false,
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(report.delivered, 1);
+        assert!(store
+            .due_deliveries("research-cluster", 10, 10)
+            .unwrap()
+            .is_empty());
+    }
+
     #[test]
     fn public_mixed_poll_is_atomic_and_restores_both_provider_preparations() {
         let d = crate::storage::tests::Directory::new();

@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private mixed public delivery now routes frozen HTTPS webhook requests and
+  permission-guarded SMTP messages through one completion-based retry worker.
+  Controlled children verify partial completion, denied SMTP without credential
+  lookup, restart recovery and cancellation/provider-confusion blocking.
+
 - Private stored-public-webhook delivery adapter rechecks endpoint revision, HTTPS
   and current payload limits, then supervises an owned secret-stdin request.
   Controlled child retry/restart acceptance preserves frozen UUIDs/bytes; changed

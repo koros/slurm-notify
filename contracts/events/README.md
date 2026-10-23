@@ -62,7 +62,10 @@ advances only after commit. Supervised runtime cycles still need wiring.
 The stored-frame adapter checks HTTPS, current endpoint revision and payload limits
 again before constructing an owned secret-stdin request. Controlled children prove
 exact public UUID/bytes, completion-based retry and restart; changed resources block
-dispatch without consuming attempts. Wire this adapter into mixed owned continuous
-sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
+dispatch without consuming attempts. Mixed delivery composition uses the checked retry worker for both this adapter
+and permission-guarded SMTP, with destination-specific transport deadlines. Partial
+completion stays committed when another destination is blocked; denied destinations
+consume no attempt and are resumable after configuration/permission repair. Connect
+public poll/delivery to owned continuous sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.

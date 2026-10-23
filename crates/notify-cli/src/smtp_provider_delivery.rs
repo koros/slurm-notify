@@ -278,6 +278,82 @@ where
     )
 }
 
+// Public webhooks never use the legacy ordinary-destination bypass. Both kinds
+// authorize against frozen storage before sending or retiring exhausted work.
+pub(super) struct PublicMixedHooks<'a, R, S, H, C, X> {
+    pub(super) smtp: Hooks<'a, R, S, C, X>,
+    pub(super) webhooks: &'a [crate::config_composition::Webhook],
+    pub(super) helper: H,
+}
+enum PublicContext {
+    Smtp(Box<Context>),
+    Webhook(crate::webhook_resolution::PublicRequest),
+}
+pub(super) fn deliver_due_public_mixed<R, S, H, C, X>(
+    store: &mut Store,
+    cluster: &str,
+    now: i64,
+    limit: usize,
+    policy: RetryPolicy,
+    mut mixed: PublicMixedHooks<'_, R, S, H, C, X>,
+) -> Result<BatchReport, BatchFailure>
+where
+    R: FnMut(&Descriptor) -> Result<Resolved, Error>,
+    S: FnMut(
+        &DueDelivery,
+        &smtp_revision::Descriptor,
+        &FrozenMessage,
+        Resolved,
+    ) -> Result<ProviderOutcome, Diagnostic>,
+    H: FnMut(&DueDelivery) -> std::process::Command,
+    C: FnMut() -> Option<i64>,
+    X: FnMut() -> bool,
+{
+    let hooks = &mut mixed.smtp;
+    delivery::deliver_due_checked(
+        store,
+        cluster,
+        now,
+        limit,
+        policy,
+        delivery::CheckedHooks {
+            authorize: |store: &Store, item: &DueDelivery| {
+                let mut matching = mixed
+                    .webhooks
+                    .iter()
+                    .filter(|webhook| webhook.alias.as_str() == item.destination);
+                if let Some(webhook) = matching.next() {
+                    if matching.next().is_some()
+                        || store
+                            .has_smtp_artifacts(&item.event_id, &item.destination)
+                            .map_err(|_| Diagnostic::SmtpRevisionInvalid)?
+                    {
+                        return Err(Diagnostic::SmtpProviderDenied);
+                    }
+                    webhook
+                        .resources
+                        .prepare_public(store, item)
+                        .map(PublicContext::Webhook)
+                } else {
+                    authorize(store, item, cluster, hooks.permissions, &mut hooks.resolve)
+                        .map(|context| PublicContext::Smtp(Box::new(context)))
+                }
+            },
+            send: |item: &DueDelivery, context| match context {
+                PublicContext::Smtp(context) => {
+                    let (rendering, frozen, resolved) = *context;
+                    (hooks.send)(item, &rendering, &frozen, resolved)
+                }
+                PublicContext::Webhook(request) => {
+                    request.supervise(&mut (mixed.helper)(item)).into_dispatch()
+                }
+            },
+            clock: &mut hooks.clock,
+            cancelled: &mut hooks.cancelled,
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
