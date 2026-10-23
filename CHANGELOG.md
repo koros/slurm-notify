@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private local continuous orchestration now binds effective-UID identity, explicit
+  environment references, bounded direct scheduler execution and wall-clock samples
+  to public owned ticks. Absolute scheduler paths and explicit helper commands are
+  required; isolated synthetic-process acceptance covers delivery and cancellation.
+
 - Private continuous startup/shutdown orchestration now uses owned public ticks,
   OS monotonic timing and interruptible waits. Continuous summaries preserve large
   tick counts without finite-run narrowing; cancellation/invalid-budget preflight

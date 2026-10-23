@@ -799,6 +799,96 @@ mod tests {
         }
     }
     #[test]
+    fn local_os_adapter_uses_effective_identity_environment_and_synthetic_scheduler_children() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        let path = config_path(&d);
+        replace_config(&path, &serde_json::to_vec(&v).unwrap());
+        let user = crate::effective_user::lookup(256).unwrap();
+        let user = std::str::from_utf8(&user).unwrap();
+        let active = path.with_extension("squeue");
+        let accounting = path.with_extension("sacct");
+        for (program,body) in [(&active,"#!/bin/sh\nexit 0\n".to_owned()),
+            (&accounting,"#!/bin/sh\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$SLURM_NOTIFY_LOCAL_EXPECTED_USER\"\n".to_owned())] {
+            std::fs::OpenOptions::new().write(true).create_new(true).mode(0o700)
+                .open(program).unwrap().write_all(body.as_bytes()).unwrap();
+        }
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "mixed_config_composition::tests::local_os_adapter_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SLURM_NOTIFY_LOCAL_EXPECTED_USER", user)
+            .env("SLURM_NOTIFY_LOCAL_CHILD_CONFIG", &path)
+            .env("SLURM_NOTIFY_LOCAL_CHILD_ACTIVE", &active)
+            .env("SLURM_NOTIFY_LOCAL_CHILD_ACCOUNTING", &accounting)
+            .env("SLURM_NOTIFY_WEBHOOK_URL", "https://fixture.invalid/hook")
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture");
+        let output = crate::scheduler::run(&mut command, Duration::from_secs(10), 8192).unwrap();
+        assert!(output.contains("local OS adapter accepted"));
+    }
+    #[test]
+    #[ignore = "isolated OS environment/process helper invoked by parent acceptance"]
+    fn local_os_adapter_child() {
+        let path = PathBuf::from(std::env::var_os("SLURM_NOTIFY_LOCAL_CHILD_CONFIG").unwrap());
+        let active = PathBuf::from(std::env::var_os("SLURM_NOTIFY_LOCAL_CHILD_ACTIVE").unwrap());
+        let accounting =
+            PathBuf::from(std::env::var_os("SLURM_NOTIFY_LOCAL_CHILD_ACCOUNTING").unwrap());
+        let signal = crate::foreground_wait::Signal::new();
+        let summary = crate::foreground_runtime::run_local_continuous(
+            crate::foreground_runtime::ContinuousRequest {
+                path: &path,
+                poll_batch: 1,
+                lock_timeout: Duration::from_millis(50),
+            },
+            &signal,
+            (&active, &accounting),
+            (
+                |_: &crate::storage::DueDelivery| -> std::process::Command {
+                    panic!("cancelled SMTP helper")
+                },
+                |_: &crate::storage::DueDelivery| {
+                    signal.cancel().unwrap();
+                    let mut command = std::process::Command::new("python3");
+                    command.args(["-c","import sys,struct,json; b=sys.stdin.buffer.read(); f=[]\nwhile b:\n n=struct.unpack('>I',b[:4])[0]; f.append(b[4:4+n]); b=b[4+n:]\nassert len(f)==5; assert f[0]==b'https://fixture.invalid/hook'; assert f[1]==b'Bearer fixture'; assert json.loads(f[3])['event_id']==f[2].decode(); sys.stdout.write('OK\\n')"]);
+                    command
+                },
+            ),
+        );
+        assert_eq!(summary.render(), "foreground outcome=cancelled ticks=1\n");
+        let plan = prepare_path(
+            &path,
+            crate::effective_user::lookup,
+            crate::environment_resolution::lookup,
+        )
+        .unwrap();
+        let store = open_owned_fixture(&plan);
+        let now = crate::delivery::unix_time().unwrap();
+        let due = store.due_deliveries("research-cluster", now, 10).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].destination, "research_email");
+        assert_eq!(due[0].attempt_number, 1);
+        assert!(store
+            .public_delivery(
+                &due[0].event_id,
+                "primary",
+                plan.common.webhooks[0].resources.public_revision().unwrap()
+            )
+            .unwrap()
+            .is_some());
+        assert!(store
+            .frozen_smtp(&due[0].event_id, "research_email")
+            .unwrap()
+            .is_some());
+        println!("local OS adapter accepted");
+    }
+
+    #[test]
     fn public_continuous_orchestration_cancels_after_durable_poll_and_releases_owner() {
         let d = crate::storage::tests::Directory::new();
         let mut v = fixture(&d);

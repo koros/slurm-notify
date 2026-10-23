@@ -70,7 +70,11 @@ fn prepare_environment(command: &mut Command) {
 
 // Each call owns one direct child. Callers must serialize queries. stderr is
 // drained but never included in diagnostics because it may contain sensitive data.
-fn run(command: &mut Command, timeout: Duration, limit: usize) -> Result<String, QueryError> {
+pub(super) fn run(
+    command: &mut Command,
+    timeout: Duration,
+    limit: usize,
+) -> Result<String, QueryError> {
     prepare_environment(command);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {

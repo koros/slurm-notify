@@ -34,8 +34,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    cancellation, health and maintenance. Owned sessions and the continuous runner now accept public ticks, with
    lock/resource retention, poll-budget renewal and cancellation recovery acceptance.
    Continuous startup/shutdown orchestration now uses OS monotonic/interruptible
-   waits and correctly bounded summaries for unbounded tick counts. Next bind
-   command/resource/helper adapters and activate installed monitoring.
+   waits and correctly bounded summaries for unbounded tick counts. Local orchestration now binds effective UID, explicit environment references,
+   absolute scheduler programs, bounded subprocesses and caller-owned provider helpers.
+   Next define installed helper selection and bind signal/exit semantics for monitoring.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

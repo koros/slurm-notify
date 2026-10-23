@@ -30,7 +30,9 @@ for file permissions, resource requirements and exact SMTP permission checks.
 - Protected config/trust snapshots, bounded Rust validation, explicit environment
   resources and effective-user lookup.
 - Owned foreground sessions, continuous scheduling, SIGINT/SIGTERM cancellation and
-  process tests for shutdown, partial delivery and restart recovery.
+  process tests for shutdown, partial delivery and restart recovery. Local continuous
+  orchestration binds OS identity/environment and bounded synthetic scheduler children
+  with explicit provider helper commands.
 - Linux/macOS CI, pre-commit/pre-push checks and a 90% minimum Rust coverage gate.
 
 These capabilities use synthetic scheduler data and controlled process/loopback
