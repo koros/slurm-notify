@@ -19,6 +19,8 @@ mod installed_smtp;
 mod installed_status;
 #[cfg(test)]
 mod mixed_config_composition;
+#[cfg(test)]
+mod public_event;
 mod rendering_fingerprint;
 mod routing_validation;
 mod smtp_address;

@@ -14,6 +14,8 @@ mod delivery;
 mod lifecycle;
 #[path = "../../crates/notify-cli/src/provider_resolution.rs"]
 mod provider_resolution;
+#[path = "../../crates/notify-cli/src/public_event.rs"]
+mod public_event;
 #[path = "../../crates/notify-cli/src/rendering_fingerprint.rs"]
 mod rendering_fingerprint;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]

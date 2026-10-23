@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slurm Notify webhook sender payload 1.0",
+  "$comment": "Strict current sender shape. Receivers should tolerate unknown additive fields within major version 1. Total encoded payload is capped at 16384 bytes independently of numeric identifier width.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "source",
+    "cluster_id",
+    "event_type",
+    "severity",
+    "observed_at",
+    "occurred_at",
+    "job"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "source": {
+      "const": "slurm"
+    },
+    "cluster_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "event_type": {
+      "enum": [
+        "JOB_STARTED",
+        "JOB_COMPLETED",
+        "JOB_FAILED",
+        "JOB_TIMEOUT",
+        "JOB_CANCELLED",
+        "JOB_OUT_OF_MEMORY",
+        "JOB_NODE_FAILURE",
+        "JOB_BOOT_FAILURE",
+        "JOB_DEADLINE"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "INFO",
+        "WARN",
+        "ERROR"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "occurred_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "job": {
+      "type": "object",
+      "required": [
+        "id",
+        "array_task_id",
+        "submitted_at",
+        "started_at",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "array_task_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "RUNNING",
+            "COMPLETED",
+            "FAILED",
+            "TIMEOUT",
+            "CANCELLED",
+            "OUT_OF_MEMORY",
+            "NODE_FAIL",
+            "BOOT_FAIL",
+            "DEADLINE"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_STARTED"
+        },
+        "severity": {
+          "const": "INFO"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "RUNNING"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_COMPLETED"
+        },
+        "severity": {
+          "const": "INFO"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "COMPLETED"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_FAILED"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "FAILED"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_TIMEOUT"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "TIMEOUT"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_CANCELLED"
+        },
+        "severity": {
+          "const": "WARN"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "CANCELLED"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_OUT_OF_MEMORY"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "OUT_OF_MEMORY"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_NODE_FAILURE"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "NODE_FAIL"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_BOOT_FAILURE"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "BOOT_FAIL"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "event_type": {
+          "const": "JOB_DEADLINE"
+        },
+        "severity": {
+          "const": "ERROR"
+        },
+        "job": {
+          "properties": {
+            "state": {
+              "const": "DEADLINE"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
