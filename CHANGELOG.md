@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private stored-public-webhook delivery adapter rechecks endpoint revision, HTTPS
+  and current payload limits, then supervises an owned secret-stdin request.
+  Controlled child retry/restart acceptance preserves frozen UUIDs/bytes; changed
+  resources block dispatch without consuming attempts. Installed sending is pending.
+
 - Private mixed poll composition admits complete prepared HTTPS resources and
   bounded public payloads, then atomically freezes selected webhook/SMTP work;
   rollback leaves the caller unchanged and restart preserves both provider frames.

@@ -59,9 +59,10 @@ webhook destinations receive public frame route rows; SMTP retains its existing
 message and profile bindings. Mixed poll composition now verifies complete prepared HTTPS bindings before querying
 and admits selected payloads against provider limits before commit. Caller state
 advances only after commit. Supervised runtime cycles still need wiring.
-Wire stored
-public IDs/bytes into supervised transport and owned continuous sessions, enforce
-current-resource admission again before a send, and add installed send/restart
-acceptance. At-least-once replay can still duplicate a provider-accepted request
+The stored-frame adapter checks HTTPS, current endpoint revision and payload limits
+again before constructing an owned secret-stdin request. Controlled children prove
+exact public UUID/bytes, completion-based retry and restart; changed resources block
+dispatch without consuming attempts. Wire this adapter into mixed owned continuous
+sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.

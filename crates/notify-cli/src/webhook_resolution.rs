@@ -21,6 +21,26 @@ pub(super) struct Resources {
     revision: String,
     public_https: bool,
 }
+// Owned secret-stdin request; constructed only from a checked frozen delivery.
+// No Debug/Clone and no endpoint/header/payload command arguments.
+pub(super) struct PublicRequest {
+    frame: Zeroizing<Vec<u8>>,
+    timeout: Duration,
+}
+impl PublicRequest {
+    pub(super) fn supervise(
+        self,
+        command: &mut std::process::Command,
+    ) -> crate::supervised_provider::Report {
+        crate::supervised_provider::classify(transport::supervise(
+            command,
+            self.frame,
+            self.timeout,
+            20 + 4096 + 4096 + 128 + 16384 + 5,
+            64,
+        ))
+    }
+}
 impl Resources {
     pub(super) fn accepts_public_payload(&self, payload: &[u8]) -> bool {
         self.public_https && payload.len() <= self.payload_limit
@@ -28,11 +48,35 @@ impl Resources {
     pub(super) fn public_revision(&self) -> Option<&str> {
         self.public_https.then_some(self.revision.as_str())
     }
+    pub(super) fn prepare_public(
+        &self,
+        store: &crate::storage::Store,
+        item: &crate::storage::DueDelivery,
+    ) -> Result<PublicRequest, crate::supervised_provider::Diagnostic> {
+        let invalid = crate::supervised_provider::Diagnostic::InvalidInput;
+        let revision = self.public_revision().ok_or(invalid)?;
+        let frozen = store
+            .public_delivery(&item.event_id, &item.destination, revision)
+            .map_err(|_| invalid)?
+            .ok_or(invalid)?;
+        if !self.accepts_public_payload(&frozen.payload) {
+            return Err(invalid);
+        }
+        Ok(PublicRequest {
+            frame: self
+                .frame(&frozen.id, &frozen.payload)
+                .map_err(|_| invalid)?,
+            timeout: self.timeout,
+        })
+    }
     pub(super) fn into_frame(
         self,
         event_id: &str,
         payload: &[u8],
     ) -> Result<Zeroizing<Vec<u8>>, Error> {
+        self.frame(event_id, payload)
+    }
+    fn frame(&self, event_id: &str, payload: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
         if event_id.is_empty()
             || event_id.len() > 128
             || !event_id.bytes().all(|byte| (32..=126).contains(&byte))
@@ -120,6 +164,170 @@ pub(super) fn resolve(
 mod tests {
     #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use super::*;
+    fn public_resources(url: &str, limit: usize) -> Resources {
+        resolve(
+            "URL",
+            Some("AUTH"),
+            Duration::from_secs(2),
+            limit,
+            |name, _| {
+                Ok(Zeroizing::new(if name == "URL" {
+                    url.as_bytes().to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+        )
+        .unwrap()
+    }
+    fn public_seed(
+        store: &mut crate::storage::Store,
+        resources: &Resources,
+        job: &str,
+    ) -> crate::storage::DueDelivery {
+        let mut candidate = crate::lifecycle::Reconciler::with_capacity(10);
+        let events = candidate
+            .observe_snapshot(
+                "",
+                &format!("cluster|{job}|alice|s|a|COMPLETED|0:0"),
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        store
+            .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
+                vec![crate::storage::PublicRoute {
+                    destination: "primary",
+                    revision: resources.public_revision().unwrap(),
+                }]
+            })
+            .unwrap();
+        store.due_deliveries("cluster", 10, 10).unwrap().remove(0)
+    }
+    #[test]
+    fn public_request_uses_frozen_uuid_and_bytes_and_blocks_changed_resources() {
+        let d = crate::storage::tests::Directory::new();
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let resources = public_resources("https://fixture.invalid/secret", 16384);
+        let item = public_seed(&mut store, &resources, "1");
+        let request = resources.prepare_public(&store, &item).unwrap();
+        let frozen = store
+            .public_delivery(
+                &item.event_id,
+                "primary",
+                resources.public_revision().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        transport::serve(
+            request.frame.as_slice(),
+            std::io::sink(),
+            request.frame.len(),
+            |fields| {
+                assert_eq!(fields[0], b"https://fixture.invalid/secret");
+                assert_eq!(fields[1], b"Bearer fixture");
+                assert_eq!(fields[2], frozen.id.as_bytes());
+                assert_eq!(fields[3], frozen.payload);
+                assert_ne!(fields[2], item.event_id.as_bytes());
+                Ok(crate::delivery::ProviderOutcome::Delivered)
+            },
+        )
+        .unwrap();
+        let changed = public_resources("https://fixture.invalid/changed", 16384);
+        assert!(changed.prepare_public(&store, &item).is_err());
+        let blocked = crate::delivery::deliver_due_checked(
+            &mut store,
+            "cluster",
+            10,
+            10,
+            crate::delivery::RetryPolicy {
+                max_attempts: 3,
+                initial_delay_seconds: 5,
+                max_delay_seconds: 20,
+                jitter_seconds: 0,
+                jitter_seed: 0,
+            },
+            crate::delivery::CheckedHooks {
+                authorize: |store: &crate::storage::Store, item: &crate::storage::DueDelivery| {
+                    changed.prepare_public(store, item)
+                },
+                send: |_: &crate::storage::DueDelivery, _: PublicRequest| {
+                    panic!("blocked request spawned")
+                },
+                clock: || panic!("blocked request clock"),
+                cancelled: || false,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(blocked.kind, crate::delivery::FailureKind::DispatchBlocked);
+        assert!(!blocked.acceptance_uncertain);
+        assert_eq!(
+            store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+            1
+        );
+
+        let http = public_resources("http://127.0.0.1:1234/hook", 16384);
+        assert!(http.prepare_public(&store, &item).is_err());
+        let mut unknown = item;
+        unknown.destination = "missing".into();
+        assert!(resources.prepare_public(&store, &unknown).is_err());
+    }
+    #[test]
+    fn public_request_rechecks_current_size_limit_without_mutating_queue() {
+        let d = crate::storage::tests::Directory::new();
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let resources = public_resources("https://fixture.invalid/hook", 16384);
+        let item = public_seed(&mut store, &resources, &"1".repeat(1200));
+        let limited = public_resources("https://fixture.invalid/hook", 1024);
+        assert_eq!(limited.public_revision(), resources.public_revision());
+        assert!(limited.prepare_public(&store, &item).is_err());
+        assert_eq!(
+            store.due_deliveries("cluster", 10, 10).unwrap()[0].attempt_number,
+            1
+        );
+    }
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn public_supervised_retry_and_restart_preserve_exact_frame_and_commit_completion() {
+        use crate::delivery::{self, CheckedHooks, RetryPolicy};
+        let d = crate::storage::tests::Directory::new();
+        let resources = public_resources("https://fixture.invalid/hook", 16384);
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let item = public_seed(&mut store, &resources, "1");
+        let original = resources.prepare_public(&store, &item).unwrap().frame;
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_seconds: 5,
+            max_delay_seconds: 20,
+            jitter_seconds: 0,
+            jitter_seed: 0,
+        };
+        for (now, ack) in [(10, "RETRY"), (15, "OK")] {
+            let report = delivery::deliver_due_checked(&mut store, "cluster", now, 10, policy,
+                CheckedHooks {
+                    authorize: |store: &crate::storage::Store, item: &crate::storage::DueDelivery| {
+                        let request = resources.prepare_public(store, item)?;
+                        assert_eq!(request.frame.as_slice(), original.as_slice());
+                        Ok(request)
+                    },
+                    send: |_: &crate::storage::DueDelivery, request: PublicRequest| {
+                        let mut command = std::process::Command::new("python3");
+                        command.args(["-c", &format!("import sys,struct,json; b=sys.stdin.buffer.read(); f=[]\nwhile b:\n n=struct.unpack('>I',b[:4])[0]; f.append(b[4:4+n]); b=b[4+n:]\nassert len(f)==5; assert f[2].decode()==json.loads(f[3])['event_id']; assert f[2].startswith(b'evt_'); sys.stdout.write('{ack}\\n')")]);
+                        request.supervise(&mut command).into_dispatch()
+                    }, clock: || Some(now), cancelled: || false,
+                }).unwrap();
+            if now == 10 {
+                assert_eq!(report.retrying, 1);
+            } else {
+                assert_eq!(report.delivered, 1);
+            }
+            drop(store);
+            store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        }
+        assert!(store.due_deliveries("cluster", 20, 10).unwrap().is_empty());
+    }
+
     #[test]
     fn exact_owned_resources_survive_source_rotation_and_use_existing_frame() {
         let mut endpoint = Zeroizing::new(b"https://fixture.invalid/hook?token=fixture".to_vec());
