@@ -31,8 +31,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    Stored-frame supervised delivery now has controlled child retry/restart acceptance.
    Mixed delivery composition now shares the checked retry worker with SMTP,
    preserving exact permissions and partial completion. Public poll and delivery composition now share runtime-cycle preflight,
-   cancellation, health and maintenance. Next expose public ticks through the owned
-   session/continuous runner and bind installed monitoring.
+   cancellation, health and maintenance. Owned sessions and the continuous runner now accept public ticks, with
+   lock/resource retention, poll-budget renewal and cancellation recovery acceptance.
+   Next bind OS-backed command/resource adapters and activate installed monitoring.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

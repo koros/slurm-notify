@@ -233,6 +233,33 @@ impl Session {
             },
         )
     }
+    pub(super) fn tick_public_with<Q, L, H, W, C, X>(
+        &mut self,
+        programs: (&std::path::Path, &std::path::Path),
+        hooks: crate::polling_cycle::Hooks<Q, (L, H, W), C, X>,
+    ) -> Result<crate::polling_cycle::TickReport, Error>
+    where
+        Q: FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+        L: FnMut(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        H: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        W: FnMut(&crate::storage::DueDelivery) -> std::process::Command,
+        C: FnMut() -> Option<i64>,
+        X: FnMut() -> bool,
+    {
+        let active = self.active.as_mut().ok_or(Error::Closed)?;
+        let result = active
+            .plan
+            .tick_public_with(programs, &mut active.cycles, &mut active.store, hooks)
+            .map_err(|_| Error::Cycle);
+        if result.as_ref().is_ok_and(|report| report.cancelled) {
+            self.stop();
+        }
+        result
+    }
     pub(super) fn tick_with<Q, L, H, O, C, X>(
         &mut self,
         programs: (&std::path::Path, &std::path::Path),

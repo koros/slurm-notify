@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private owned sessions now expose public mixed-provider ticks to the continuous
+  runner. Controlled acceptance verifies exclusive ownership through poll-budget
+  renewal, retained resources after config removal, retry completion, cancellation
+  releasing ownership and durable pending webhook/SMTP recovery.
+
 - Private public-event runtime ticks now share cycle preflight, finite poll budgets,
   checkpoint windows, health reporting and maintenance with mixed guarded delivery.
   Controlled acceptance covers both provider completions, query failure, exhausted

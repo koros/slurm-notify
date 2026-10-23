@@ -67,7 +67,9 @@ and permission-guarded SMTP, with destination-specific transport deadlines. Part
 completion stays committed when another destination is blocked; denied destinations
 consume no attempt and are resumable after configuration/permission repair. Public poll/delivery now share runtime-cycle preflight, bounded poll budgets,
 checkpoint planning, health, cancellation and maintenance. Cancellation after query
-completion preserves the atomic poll while stopping before delivery. Connect these
-public ticks to owned continuous sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
+completion preserves the atomic poll while stopping before delivery. Owned continuous sessions now retain the prepared plan and single state owner
+across public poll-budget renewal. Controlled child acceptance verifies retry and
+cancellation recovery after configuration removal. OS-backed installed send/restart
+acceptance remains pending. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.

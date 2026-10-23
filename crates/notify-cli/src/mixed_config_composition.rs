@@ -799,6 +799,161 @@ mod tests {
         }
     }
     #[test]
+    fn public_session_cancel_after_commit_closes_owner_and_leaves_both_deliveries_pending() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let mut session = start_session(&path);
+        let cancel = std::cell::Cell::new(false);
+        let run = |session: &mut crate::foreground_session::Session| {
+            session.tick_public_with(
+                (Path::new("squeue"), Path::new("sacct")),
+                crate::polling_cycle::Hooks {
+                    query: |command: &mut std::process::Command, _, _| {
+                        Ok(if command.get_program() == "squeue" {
+                            ""
+                        } else {
+                            cancel.set(true);
+                            "research-cluster|1|alice|s|a|COMPLETED|0:0"
+                        }
+                        .into())
+                    },
+                    send: (
+                        |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                            panic!("cancelled credentials")
+                        },
+                        |_: &crate::storage::DueDelivery| -> std::process::Command {
+                            panic!("cancelled SMTP")
+                        },
+                        |_: &crate::storage::DueDelivery| -> std::process::Command {
+                            panic!("cancelled webhook")
+                        },
+                    ),
+                    clock: || Some(7200),
+                    cancelled: || cancel.get(),
+                },
+            )
+        };
+        assert!(run(&mut session).unwrap().cancelled);
+        assert!(matches!(
+            run(&mut session),
+            Err(crate::foreground_session::Error::Closed)
+        ));
+        let store = open_owned_fixture(&plan);
+        let due = store.due_deliveries("research-cluster", 7200, 10).unwrap();
+        assert_eq!(due.len(), 2);
+        assert!(due.iter().all(|item| item.attempt_number == 1));
+        assert!(store
+            .public_delivery(
+                &due[0].event_id,
+                "primary",
+                plan.common.webhooks[0].resources.public_revision().unwrap()
+            )
+            .unwrap()
+            .is_some());
+        assert!(store
+            .frozen_smtp(&due[0].event_id, "research_email")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn public_continuous_session_retains_owner_and_prepared_resources_across_poll_renewal() {
+        use crate::{
+            foreground_schedule::{self, Wake},
+            polling_cycle::Hooks,
+        };
+        use std::cell::{Cell, RefCell};
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        v["delivery"]["jitter_seconds"] = json!(0);
+        let initial = prepare_fixture(&v);
+        let (_, rendering, provider) = initial.revisions()[0];
+        v["delivery"]["smtp_permissions"][0]["rendering_revision"] = json!(rendering);
+        v["delivery"]["smtp_permissions"][0]["provider_revision"] = json!(provider);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let mut session = start_session(&path);
+        let ticks = Cell::new(0);
+        let mono = Cell::new(Duration::ZERO);
+        let cancel = Cell::new(false);
+        let event_id = RefCell::new(String::new());
+        let helper = |ack: &str| {
+            let mut command = std::process::Command::new("python3");
+            command.args([
+                "-c",
+                &format!(
+                    "import sys; assert sys.stdin.buffer.read(); sys.stdout.write('{ack}\\n')"
+                ),
+            ]);
+            command
+        };
+        let exit = session.run_continuous_with(1,foreground_schedule::Hooks {
+            tick: |session: &mut crate::foreground_session::Session| {
+                let tick = ticks.get()+1;
+                ticks.set(tick);
+                assert!(matches!(plan.open_owned(Duration::from_millis(10)),
+                    Err(crate::storage::StorageError::StatePath(crate::state_path::Error::AlreadyOwned))));
+                if tick==1 { std::fs::remove_file(&path).unwrap(); }
+                let report = session.tick_public_with((Path::new("squeue"),Path::new("sacct")),Hooks {
+                    query: |command: &mut std::process::Command,_,_| Ok(if command.get_program()=="squeue" { "" }
+                        else { "research-cluster|1|alice|s|a|COMPLETED|0:0" }.into()),
+                    send: (
+                        |name: &str,_| Ok(Zeroizing::new(if name.ends_with("USERNAME") { b"researcher".to_vec() } else { b"fixture-password".to_vec() })),
+                        |item: &crate::storage::DueDelivery| { assert_eq!(tick,1); *event_id.borrow_mut()=item.event_id.clone(); helper("SMTP_SUBMIT FINAL ACCEPTED RA") },
+                        |item: &crate::storage::DueDelivery| { assert!(tick<=2); *event_id.borrow_mut()=item.event_id.clone(); helper(if tick==1 { "RETRY" } else { "OK" }) },
+                    ),clock: || Some(7200+(tick-1)*60),cancelled: || false,
+                })?;
+                assert!(matches!(report.poll,Some(Ok(crate::polling_cycle::Outcome::Committed { events,.. })) if events==usize::from(tick==1)));
+                let delivery = report.delivery.as_ref().unwrap().as_ref().unwrap();
+                assert_eq!(delivery.delivered,usize::from(tick<=2));
+                assert_eq!(delivery.retrying,usize::from(tick==1));
+                assert!(session.status(7200+(tick-1)*60).unwrap().poll.last_failure.is_none());
+                Ok(report)
+            },monotonic: || Some(mono.get()),
+            wait: |remaining| { mono.set(mono.get()+remaining); if ticks.get()==3 { cancel.set(true); Ok(Wake::Cancelled) } else { Ok(Wake::Ready) } },
+            cancelled: || cancel.get(),
+        }).unwrap();
+        assert_eq!(exit, foreground_schedule::Exit::Cancelled { ticks: 3 });
+        assert!(matches!(
+            session.status(7400),
+            Err(crate::foreground_session::Error::Closed)
+        ));
+        let mut store = open_owned_fixture(&plan);
+        assert!(store
+            .due_deliveries("research-cluster", 7400, 10)
+            .unwrap()
+            .is_empty());
+        let frame = store
+            .public_delivery(
+                &event_id.borrow(),
+                "primary",
+                plan.common.webhooks[0].resources.public_revision().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(crate::public_event::valid_id(&frame.id));
+        assert!(store
+            .frozen_smtp(&event_id.borrow(), "research_email")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            store
+                .restore("research-cluster", 10)
+                .unwrap()
+                .0
+                .emitted
+                .len(),
+            1
+        );
+    }
+
+    #[test]
     fn foreground_startup_rejects_before_resources_and_releases_cancelled_owner() {
         use crate::foreground_session::{Error as E, Session};
         let d = crate::storage::tests::Directory::new();
