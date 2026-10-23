@@ -158,6 +158,58 @@ fn public_revision(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn freeze_public_event(
+    tx: &rusqlite::Transaction<'_>,
+    event: &Event<'_>,
+    routes: &[PublicRoute<'_>],
+    observed_at: i64,
+    random: &mut impl FnMut() -> Result<[u8; 16], ()>,
+) -> Result<(), StorageError> {
+    if routes.is_empty() {
+        return Ok(());
+    }
+    let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version == 4 {
+        tx.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))?;
+    }
+    let mut id = None;
+    for _ in 0..8 {
+        let candidate =
+            crate::public_event::identifier(random().map_err(|_| StorageError::Random)?);
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM public_event_frames WHERE public_id=?1)",
+            [&candidate],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            id = Some(candidate);
+            break;
+        }
+    }
+    let id = id.ok_or(StorageError::Conflict)?;
+    let payload = crate::public_event::payload(
+        &id,
+        event.job.cluster,
+        event.job.id,
+        event.job.state,
+        observed_at,
+    )
+    .map_err(|_| StorageError::InvalidInput)?;
+    // Deferred parent FK allows the frame insert to seal the route set.
+    for route in routes {
+        tx.execute(
+            "INSERT INTO public_event_routes VALUES (?1,?2,?3)",
+            params![event.id, route.destination, route.revision],
+        )?;
+    }
+    let hash = ring::digest::digest(&ring::digest::SHA256, &payload);
+    tx.execute(
+        "INSERT INTO public_event_frames VALUES (?1,?2,?3,?4)",
+        params![event.id, id, payload, hash.as_ref()],
+    )?;
+    Ok(())
+}
+
 impl Store {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(super) fn open_private(
@@ -902,48 +954,8 @@ impl Store {
                 if event.destinations.is_empty() {
                     return Ok(());
                 }
-                let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
-                if version == 4 {
-                    tx.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))?;
-                }
-                let mut id = None;
-                for _ in 0..8 {
-                    let candidate = crate::public_event::identifier(
-                        random().map_err(|_| StorageError::Random)?,
-                    );
-                    let exists: bool = tx.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM public_event_frames WHERE public_id=?1)",
-                        [&candidate],
-                        |row| row.get(0),
-                    )?;
-                    if !exists {
-                        id = Some(candidate);
-                        break;
-                    }
-                }
-                let id = id.ok_or(StorageError::Conflict)?;
-                let payload = crate::public_event::payload(
-                    &id,
-                    event.job.cluster,
-                    event.job.id,
-                    event.job.state,
-                    context.2,
-                )
-                .map_err(|_| StorageError::InvalidInput)?;
                 let routes = selected.get(event.id).ok_or(StorageError::InvalidInput)?;
-                // Deferred parent FK allows the frame insert to seal the route set.
-                for route in routes {
-                    tx.execute(
-                        "INSERT INTO public_event_routes VALUES (?1,?2,?3)",
-                        params![event.id, route.destination, route.revision],
-                    )?;
-                }
-                let hash = ring::digest::digest(&ring::digest::SHA256, &payload);
-                tx.execute(
-                    "INSERT INTO public_event_frames VALUES (?1,?2,?3,?4)",
-                    params![event.id, id, payload, hash.as_ref()],
-                )?;
-                Ok(())
+                freeze_public_event(tx, event, routes, context.2, &mut random)
             },
         )
     }
@@ -1057,6 +1069,45 @@ impl Store {
         )
     }
 
+    pub(super) fn persist_public_profiles<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        revisions: SmtpRevisions<'a>,
+        context: (&str, &str, i64),
+        selected: &std::collections::HashMap<super::lifecycle::Event, Vec<&'a str>>,
+        webhooks: &[PublicRoute<'_>],
+    ) -> Result<(), StorageError> {
+        let mut names = std::collections::HashSet::new();
+        if webhooks.iter().any(|route| {
+            !public_alias(route.destination)
+                || !public_revision(route.revision)
+                || !preparation.destinations.contains(&route.destination)
+                || preparation.smtp_destinations.contains(&route.destination)
+                || !names.insert(route.destination)
+        }) || preparation
+            .destinations
+            .iter()
+            .any(|name| !preparation.smtp_destinations.contains(name) && !names.contains(name))
+        {
+            return Err(StorageError::InvalidInput);
+        }
+        let mut random = crate::public_event::random;
+        self.persist_prepared_using(
+            preparation,
+            (Some(revisions.rendering), Some(revisions.providers)),
+            context,
+            Some(selected),
+            |tx, event| {
+                let routes: Vec<_> = webhooks
+                    .iter()
+                    .copied()
+                    .filter(|route| event.destinations.contains(&route.destination))
+                    .collect();
+                freeze_public_event(tx, event, &routes, context.2, &mut random)
+            },
+        )
+    }
+
     fn persist_prepared<'a>(
         &mut self,
         preparation: PollPreparation<'a>,
@@ -1068,6 +1119,26 @@ impl Store {
         through: &str,
         observed_at: i64,
         selected: Option<&std::collections::HashMap<super::lifecycle::Event, Vec<&'a str>>>,
+    ) -> Result<(), StorageError> {
+        self.persist_prepared_using(
+            preparation,
+            bindings,
+            (cluster, through, observed_at),
+            selected,
+            |_, _| Ok(()),
+        )
+    }
+
+    fn persist_prepared_using<'a>(
+        &mut self,
+        preparation: PollPreparation<'a>,
+        bindings: (
+            Option<&'a [super::smtp_revision::Descriptor]>,
+            Option<&'a [super::smtp_provider_revision::Descriptor]>,
+        ),
+        context: (&str, &str, i64),
+        selected: Option<&std::collections::HashMap<super::lifecycle::Event, Vec<&'a str>>>,
+        freeze: impl FnMut(&rusqlite::Transaction<'_>, &Event<'_>) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
         let (revisions, providers) = bindings;
         let PollPreparation {
@@ -1175,13 +1246,17 @@ impl Store {
                 return Err(StorageError::InvalidInput);
             }
         }
-        if let Some(selected) = selected {
-            self.persist_selected(preparation, cluster, through, observed_at, smtp, |event| {
-                selected.get(event).cloned().unwrap_or_default()
-            })
-        } else {
-            self.persist_candidate(preparation, cluster, through, observed_at, smtp)
-        }
+        self.persist_selected_using(
+            preparation,
+            context,
+            smtp,
+            |event| {
+                selected
+                    .map(|selected| selected.get(event).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| destinations.to_vec())
+            },
+            freeze,
+        )
     }
 
     fn persist_candidate(
@@ -2743,6 +2818,144 @@ pub(super) mod tests {
             })
             .collect()
     }
+    #[test]
+    fn mixed_public_profiles_reject_incomplete_duplicate_invalid_and_smtp_webhook_bindings() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = atomic_candidate();
+        let rendering = [provider_rendering()];
+        let providers = [provider("smtp", "relay.fixture.invalid")];
+        let selected = events
+            .iter()
+            .cloned()
+            .map(|event| (event, vec!["plain", "smtp"]))
+            .collect();
+        let revision = "a".repeat(64);
+        let valid = PublicRoute {
+            destination: "plain",
+            revision: &revision,
+        };
+        for routes in [
+            vec![],
+            vec![valid, valid],
+            vec![PublicRoute {
+                destination: "smtp",
+                revision: &revision,
+            }],
+            vec![PublicRoute {
+                destination: "missing",
+                revision: &revision,
+            }],
+            vec![PublicRoute {
+                destination: "plain",
+                revision: "bad",
+            }],
+        ] {
+            assert!(matches!(
+                store.persist_public_profiles(
+                    atomic_plan(&candidate, &events, &[]),
+                    SmtpRevisions {
+                        rendering: &rendering,
+                        providers: &providers
+                    },
+                    ("cluster", "window-1", 10),
+                    &selected,
+                    &routes
+                ),
+                Err(StorageError::InvalidInput)
+            ));
+        }
+        assert_eq!(count(&store, "events"), 0);
+        assert_eq!(count(&store, "checkpoints"), 0);
+    }
+
+    #[test]
+    fn mixed_public_profiles_commit_and_late_failure_rolls_back_every_provider() {
+        for fail in [true, false] {
+            let directory = Directory::new();
+            let mut store = open(&directory);
+            let (candidate, events) = atomic_candidate();
+            let rendering = [provider_rendering()];
+            let providers = [provider("smtp", "relay.fixture.invalid")];
+            let owned = provider_messages(&events, &rendering[0]);
+            let messages: Vec<_> = events
+                .iter()
+                .zip(&owned)
+                .map(|(event, message)| SmtpPreparation {
+                    event,
+                    destination: "smtp",
+                    message,
+                })
+                .collect();
+            let selected = events
+                .iter()
+                .cloned()
+                .map(|event| (event, vec!["plain", "smtp"]))
+                .collect();
+            let revision = "a".repeat(64);
+            if fail {
+                store.db.execute_batch("CREATE TRIGGER reject_checkpoint BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+            }
+            let result = store.persist_public_profiles(
+                atomic_plan(&candidate, &events, &messages),
+                SmtpRevisions {
+                    rendering: &rendering,
+                    providers: &providers,
+                },
+                ("cluster", "window-1", 10),
+                &selected,
+                &[PublicRoute {
+                    destination: "plain",
+                    revision: &revision,
+                }],
+            );
+            if fail {
+                assert!(result.is_err());
+                for table in [
+                    "jobs",
+                    "events",
+                    "outbox",
+                    "smtp_messages",
+                    "smtp_provider_bindings",
+                    "checkpoints",
+                ] {
+                    assert_eq!(count(&store, table), 0);
+                }
+                assert_eq!(
+                    store
+                        .db
+                        .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                        .unwrap(),
+                    4
+                );
+            } else {
+                result.unwrap();
+                assert_eq!(count(&store, "outbox"), 4);
+                assert_eq!(count(&store, "smtp_messages"), 2);
+                let id = event_id(&events[0]);
+                let frame = store
+                    .public_delivery(&id, "plain", &revision)
+                    .unwrap()
+                    .unwrap();
+                assert!(store
+                    .public_delivery(&id, "smtp", &revision)
+                    .unwrap()
+                    .is_none());
+                drop(store);
+                let store = open(&directory);
+                assert_eq!(
+                    store
+                        .public_delivery(&id, "plain", &revision)
+                        .unwrap()
+                        .unwrap()
+                        .payload,
+                    frame.payload
+                );
+                assert!(store.bound_smtp_provider(&id, "smtp").unwrap().is_some());
+            }
+        }
+    }
+
     #[test]
     fn atomic_provider_profiles_reopen_and_changes_apply_only_to_new_events() {
         let directory = Directory::new();

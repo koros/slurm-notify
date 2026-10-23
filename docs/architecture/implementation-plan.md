@@ -27,8 +27,8 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
 2. Completed: installed webhook/SMTP configuration validation and offline historical
    status, with deliberate schemas/output baselines and no hidden sending.
 3. Transactional webhook public IDs/bytes/route revisions are implemented and tested
-   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Next compose them
-   atomically with mixed SMTP preparation and bind stored frames to supervised delivery.
+   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Mixed SMTP/public storage preparation now shares that transaction. Next wire
+   composition admission and bind stored frames to supervised delivery.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

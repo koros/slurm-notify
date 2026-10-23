@@ -53,8 +53,11 @@ Changed/missing resources must block old pending work rather than retarget it.
 
 ## Remaining activation work
 
-This path is webhook-only. Compose public frames atomically with the existing mixed
-SMTP preparation path before claiming full mixed-provider persistence. Wire stored
+Mixed-provider storage preparation can commit public webhook frames alongside
+frozen SMTP messages and rendering/provider bindings in one poll transaction. Only
+webhook destinations receive public frame route rows; SMTP retains its existing
+message and profile bindings. Mixed runtime composition still needs admission wiring.
+Wire stored
 public IDs/bytes into supervised transport and owned continuous sessions, enforce
 current-resource admission again before a send, and add installed send/restart
 acceptance. At-least-once replay can still duplicate a provider-accepted request
