@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private continuous startup/shutdown orchestration now uses owned public ticks,
+  OS monotonic timing and interruptible waits. Continuous summaries preserve large
+  tick counts without finite-run narrowing; cancellation/invalid-budget preflight
+  and post-commit shutdown/reopen acceptance are covered.
+
 - Private owned sessions now expose public mixed-provider ticks to the continuous
   runner. Controlled acceptance verifies exclusive ownership through poll-budget
   renewal, retained resources after config removal, retry completion, cancellation

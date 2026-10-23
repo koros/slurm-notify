@@ -86,6 +86,27 @@ impl Session {
             },
         )
     }
+    pub(super) fn run_continuous_interruptible<T>(
+        &mut self,
+        poll_batch: usize,
+        signal: &crate::foreground_wait::Signal,
+        tick: T,
+    ) -> Result<crate::foreground_schedule::Exit, crate::foreground_schedule::Error>
+    where
+        T: FnMut(&mut Self) -> Result<polling_cycle::TickReport, Error>,
+    {
+        let start = std::time::Instant::now();
+        self.run_continuous_with(
+            poll_batch,
+            crate::foreground_schedule::Hooks {
+                tick,
+                monotonic: || Some(start.elapsed()),
+                wait: |remaining| signal.wait(remaining).map_err(|_| ()),
+                // Poison is fail-closed: never start another tick with unknown cancellation.
+                cancelled: || signal.cancelled().unwrap_or(true),
+            },
+        )
+    }
     // Every scheduling exit closes ownership; stage reports remain caller-observed.
     pub(super) fn run_reported<T, M, W, X>(
         &mut self,

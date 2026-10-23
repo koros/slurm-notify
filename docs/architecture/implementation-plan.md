@@ -33,7 +33,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    preserving exact permissions and partial completion. Public poll and delivery composition now share runtime-cycle preflight,
    cancellation, health and maintenance. Owned sessions and the continuous runner now accept public ticks, with
    lock/resource retention, poll-budget renewal and cancellation recovery acceptance.
-   Next bind OS-backed command/resource adapters and activate installed monitoring.
+   Continuous startup/shutdown orchestration now uses OS monotonic/interruptible
+   waits and correctly bounded summaries for unbounded tick counts. Next bind
+   command/resource/helper adapters and activate installed monitoring.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

@@ -799,6 +799,79 @@ mod tests {
         }
     }
     #[test]
+    fn public_continuous_orchestration_cancels_after_durable_poll_and_releases_owner() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["storage"]["path"] = json!(owned_path(&d));
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        let path = config_path(&d);
+        let plan = prepare_file_fixture(&v, &path);
+        let signal = crate::foreground_wait::Signal::new();
+        let summary = crate::foreground_runtime::run_continuous(
+            crate::foreground_runtime::ContinuousRequest {
+                path: &path,
+                poll_batch: 1,
+                lock_timeout: Duration::from_millis(50),
+            },
+            &signal,
+            crate::foreground_runtime::Hooks {
+                identity: |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                lookup: |name: &str, _| {
+                    Ok(Zeroizing::new(if name.ends_with("_URL") {
+                        b"https://fixture.invalid/hook".to_vec()
+                    } else {
+                        b"Bearer fixture".to_vec()
+                    }))
+                },
+                tick: |session: &mut crate::foreground_session::Session,
+                       signal: &crate::foreground_wait::Signal| {
+                    std::fs::remove_file(&path).unwrap();
+                    session.tick_public_with(
+                        (Path::new("squeue"), Path::new("sacct")),
+                        crate::polling_cycle::Hooks {
+                            query: |command: &mut std::process::Command, _, _| {
+                                Ok(if command.get_program() == "squeue" {
+                                    ""
+                                } else {
+                                    signal.cancel().unwrap();
+                                    "research-cluster|1|alice|s|a|COMPLETED|0:0"
+                                }
+                                .into())
+                            },
+                            send: (
+                                |_: &str, _| -> Result<Zeroizing<Vec<u8>>, ()> {
+                                    panic!("cancelled credentials")
+                                },
+                                |_: &crate::storage::DueDelivery| -> std::process::Command {
+                                    panic!("cancelled SMTP")
+                                },
+                                |_: &crate::storage::DueDelivery| -> std::process::Command {
+                                    panic!("cancelled webhook")
+                                },
+                            ),
+                            clock: || Some(7200),
+                            cancelled: || signal.cancelled().unwrap_or(true),
+                        },
+                    )
+                },
+            },
+        );
+        assert_eq!(summary.render(), "foreground outcome=cancelled ticks=1\n");
+        let store = open_owned_fixture(&plan);
+        let due = store.due_deliveries("research-cluster", 7200, 10).unwrap();
+        assert_eq!(due.len(), 2);
+        assert!(due.iter().all(|item| item.attempt_number == 1));
+        assert!(store
+            .public_delivery(
+                &due[0].event_id,
+                "primary",
+                plan.common.webhooks[0].resources.public_revision().unwrap()
+            )
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
     fn public_session_cancel_after_commit_closes_owner_and_leaves_both_deliveries_pending() {
         let d = crate::storage::tests::Directory::new();
         let mut v = fixture(&d);

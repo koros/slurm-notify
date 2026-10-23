@@ -22,18 +22,18 @@ enum Outcome {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Report {
     outcome: Outcome,
-    ticks: Option<u16>,
+    ticks: Option<usize>,
 }
 impl Report {
     pub(super) fn classify(result: &Result<Exit, Error>) -> Self {
         match result {
             Ok(Exit::Cancelled { ticks }) if *ticks <= 1024 => Self {
                 outcome: Outcome::Cancelled,
-                ticks: Some(*ticks as u16),
+                ticks: Some(*ticks),
             },
             Ok(Exit::Exhausted { ticks }) if (1..=1024).contains(ticks) => Self {
                 outcome: Outcome::Exhausted,
-                ticks: Some(*ticks as u16),
+                ticks: Some(*ticks),
             },
             Ok(_) => Self {
                 outcome: Outcome::Failed(Reason::InvalidCount),
@@ -52,6 +52,21 @@ impl Report {
                 }),
                 ticks: None,
             },
+        }
+    }
+    // Continuous scheduling has no finite tick ceiling; keep finite validation
+    // unchanged and preserve the full saturating usize count without narrowing.
+    pub(super) fn classify_continuous(result: &Result<Exit, Error>) -> Self {
+        match result {
+            Ok(Exit::Cancelled { ticks }) => Self {
+                outcome: Outcome::Cancelled,
+                ticks: Some(*ticks),
+            },
+            Ok(Exit::Exhausted { .. }) => Self {
+                outcome: Outcome::Failed(Reason::InvalidCount),
+                ticks: None,
+            },
+            Err(_) => Self::classify(result),
         }
     }
     pub(super) fn render(&self) -> String {
@@ -82,6 +97,26 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn continuous_summaries_preserve_large_tick_counts_with_bounded_static_output() {
+        for ticks in [0, 1024, 1025, usize::MAX] {
+            let result = Ok(Exit::Cancelled { ticks });
+            let rendered = Report::classify_continuous(&result).render();
+            assert_eq!(
+                rendered,
+                format!("foreground outcome=cancelled ticks={ticks}\n")
+            );
+            assert!(rendered.len() <= MAX_BYTES);
+        }
+        assert_eq!(
+            Report::classify_continuous(&Ok(Exit::Exhausted { ticks: 1 })).render(),
+            "foreground outcome=failed_invalid_count ticks=unknown\n"
+        );
+        assert_eq!(
+            Report::classify_continuous(&Err(Error::Wait)).render(),
+            "foreground outcome=failed_wait ticks=unknown\n"
+        );
+    }
     #[test]
     fn cancellation_and_exhaustion_retain_only_valid_completed_call_counts() {
         for ticks in [0, 1, 1024] {
