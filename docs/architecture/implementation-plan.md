@@ -30,8 +30,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Mixed SMTP/public storage preparation now shares that transaction. Mixed composition admission now checks complete HTTPS bindings and payload limits.
    Stored-frame supervised delivery now has controlled child retry/restart acceptance.
    Mixed delivery composition now shares the checked retry worker with SMTP,
-   preserving exact permissions and partial completion. Next connect public poll
-   and delivery composition to owned runtime cycles.
+   preserving exact permissions and partial completion. Public poll and delivery composition now share runtime-cycle preflight,
+   cancellation, health and maintenance. Next expose public ticks through the owned
+   session/continuous runner and bind installed monitoring.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

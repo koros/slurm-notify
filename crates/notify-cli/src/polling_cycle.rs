@@ -197,7 +197,7 @@ pub(super) struct MixedBoundSmtp<'a> {
     pub(super) ordinary_destinations: &'a [&'a str],
 }
 
-fn prepared_error(error: super::smtp_poll::Error) -> Error {
+pub(super) fn prepared_error(error: super::smtp_poll::Error) -> Error {
     match error {
         super::smtp_poll::Error::InvalidInput => Error::Poll(DurablePollError::Poll(
             super::scheduler::PollError::InvalidRequest,
@@ -753,7 +753,7 @@ impl Cycles {
     }
 
     #[allow(clippy::too_many_arguments)] // Shared stage engine keeps poll and delivery policies explicit.
-    fn tick_using_delivery<V, S, C, X, D>(
+    pub(super) fn tick_using_delivery<V, S, C, X, D>(
         &mut self,
         settings: &Settings<'_>,
         maintenance: &Maintenance,
@@ -1082,7 +1082,7 @@ impl Cycles {
         )
     }
 
-    fn step_using(
+    pub(super) fn step_using(
         &mut self,
         settings: &Settings<'_>,
         store: &mut Store,

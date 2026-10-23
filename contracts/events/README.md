@@ -65,7 +65,9 @@ exact public UUID/bytes, completion-based retry and restart; changed resources b
 dispatch without consuming attempts. Mixed delivery composition uses the checked retry worker for both this adapter
 and permission-guarded SMTP, with destination-specific transport deadlines. Partial
 completion stays committed when another destination is blocked; denied destinations
-consume no attempt and are resumable after configuration/permission repair. Connect
-public poll/delivery to owned continuous sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
+consume no attempt and are resumable after configuration/permission repair. Public poll/delivery now share runtime-cycle preflight, bounded poll budgets,
+checkpoint planning, health, cancellation and maintenance. Cancellation after query
+completion preserves the atomic poll while stopping before delivery. Connect these
+public ticks to owned continuous sessions and add installed send/restart acceptance. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.

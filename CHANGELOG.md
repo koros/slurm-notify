@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private public-event runtime ticks now share cycle preflight, finite poll budgets,
+  checkpoint windows, health reporting and maintenance with mixed guarded delivery.
+  Controlled acceptance covers both provider completions, query failure, exhausted
+  polling and cancellation after commit with durable pending work on reopen.
+
 - Private mixed public delivery now routes frozen HTTPS webhook requests and
   permission-guarded SMTP messages through one completion-based retry worker.
   Controlled children verify partial completion, denied SMTP without credential
