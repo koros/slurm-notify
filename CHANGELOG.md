@@ -7,6 +7,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private transactional public webhook UUID-v4 mapping, frozen allowlisted JSON and
+  sealed endpoint-revision bindings with atomic opt-in schema-5 migration, payload
+  admission, collision/entropy/rollback/retry/restart/corruption acceptance.
+
 - Installed metadata-only historical `status --config <absolute-path>` with sampled
   queue/checkpoint output, explicit busy/missing/unsafe/schema diagnostics, cooperative
   SQL timeout and binary acceptance proving read-only, existing-only inspection.

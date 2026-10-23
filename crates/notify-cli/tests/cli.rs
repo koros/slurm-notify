@@ -467,6 +467,20 @@ fn installed_status_is_existing_only_read_only_private_and_bounded() {
     );
     assert_eq!(std::fs::read(&database).unwrap(), before);
     assert_eq!(std::fs::read_dir(&state).unwrap().count(), 2);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    db.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))
+        .unwrap();
+    db.execute_batch("COMMIT;").unwrap();
+    drop(db);
+    let version_five = std::fs::read(&database).unwrap();
+    expect(
+        invoke(),
+        0,
+        include_bytes!("../../../contracts/cli/status-empty.stdout"),
+        b"",
+    );
+    assert_eq!(std::fs::read(&database).unwrap(), version_five);
     let owner = std::fs::File::open(&lock_path).unwrap();
     assert_eq!(
         unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },

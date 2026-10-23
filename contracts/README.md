@@ -4,8 +4,9 @@ These directories reserve reviewed baselines for CLI, configuration, events, and
 any deliberately supported Rust library API. The [finite help/version CLI](cli/README.md)
 is approved. The local MVP configuration, event, SMTP, CLI and limits proposals
 were adopted on 2026-10-13; schema/snapshot baselines and implementation acceptance
-remain pending for unfinished surfaces. [Webhook-only configuration validation](config/README.md)
-has an installed structural schema and CLI snapshots. No public Rust library API is approved.
+remain pending for unfinished surfaces. [Configuration validation](config/README.md) and historical status
+have installed baselines. [Public webhook payloads](events/README.md) have a sender
+schema and internal transactional persistence acceptance; installed sending remains pending. No public Rust library API is approved.
 The handoff examples remain proposals and must not be copied as final contracts.
 
 Before introducing a public surface, document its semantics and version policy,

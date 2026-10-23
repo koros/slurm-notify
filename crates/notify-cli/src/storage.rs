@@ -15,6 +15,7 @@ pub(super) enum StorageError {
     UnsupportedVersion,
     Conflict,
     InvalidInput,
+    Random,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     StatePath(super::state_path::Error),
 }
@@ -114,6 +115,17 @@ struct SmtpPlan<'a> {
     messages: std::collections::HashMap<(String, &'a str), &'a super::smtp_message::Prepared>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct PublicRoute<'a> {
+    pub(super) destination: &'a str,
+    pub(super) revision: &'a str,
+}
+// No Debug/Clone: payload contains private user-selected cluster/job metadata.
+pub(super) struct PublicFrame {
+    pub(super) id: String,
+    pub(super) payload: Vec<u8>,
+}
+
 pub(super) struct Store {
     db: Connection,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -131,6 +143,20 @@ pub(super) struct RetentionCandidate {
 }
 
 pub(super) use crate::storage_health::{HealthError, StorageHealth};
+
+fn public_alias(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+}
+fn public_revision(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
 
 impl Store {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -189,7 +215,7 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1..=4 => {}
+            1..=5 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
@@ -807,6 +833,156 @@ impl Store {
         )
     }
 
+    // Explicit webhook-only public path; private/SMTP paths remain unchanged.
+    pub(super) fn persist_public_webhooks<'a>(
+        &mut self,
+        candidate: &super::lifecycle::Reconciler,
+        deliverable: &[super::lifecycle::Event],
+        context: (&str, &str, i64),
+        select: impl FnMut(&super::lifecycle::Event) -> Vec<PublicRoute<'a>>,
+    ) -> Result<(), StorageError> {
+        self.persist_public_webhooks_with(
+            candidate,
+            deliverable,
+            context,
+            select,
+            crate::public_event::random,
+        )
+    }
+    fn persist_public_webhooks_with<'a>(
+        &mut self,
+        candidate: &super::lifecycle::Reconciler,
+        deliverable: &[super::lifecycle::Event],
+        context: (&str, &str, i64),
+        mut select: impl FnMut(&super::lifecycle::Event) -> Vec<PublicRoute<'a>>,
+        mut random: impl FnMut() -> Result<[u8; 16], ()>,
+    ) -> Result<(), StorageError> {
+        let mut selected = std::collections::HashMap::new();
+        for event in deliverable {
+            if !candidate.emitted.contains(event) {
+                return Err(StorageError::InvalidInput);
+            }
+            let routes = select(event);
+            let mut names = std::collections::HashSet::new();
+            if routes.len() > 64
+                || routes.iter().any(|route| {
+                    !public_alias(route.destination)
+                        || !public_revision(route.revision)
+                        || !names.insert(route.destination)
+                })
+            {
+                return Err(StorageError::InvalidInput);
+            }
+            if selected.insert(event_id(event), routes).is_some() {
+                return Err(StorageError::InvalidInput);
+            }
+        }
+        self.persist_selected_using(
+            PollPreparation {
+                candidate,
+                deliverable,
+                destinations: &[],
+                smtp_destinations: &[],
+                messages: &[],
+            },
+            context,
+            SmtpPlan {
+                providers: std::collections::HashMap::new(),
+                revisions: std::collections::HashMap::new(),
+                destinations: &[],
+                messages: std::collections::HashMap::new(),
+            },
+            |event| {
+                selected
+                    .get(&event_id(event))
+                    .map(|routes| routes.iter().map(|route| route.destination).collect())
+                    .unwrap_or_default()
+            },
+            |tx, event| {
+                if event.destinations.is_empty() {
+                    return Ok(());
+                }
+                let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+                if version == 4 {
+                    tx.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))?;
+                }
+                let mut id = None;
+                for _ in 0..8 {
+                    let candidate = crate::public_event::identifier(
+                        random().map_err(|_| StorageError::Random)?,
+                    );
+                    let exists: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM public_event_frames WHERE public_id=?1)",
+                        [&candidate],
+                        |row| row.get(0),
+                    )?;
+                    if !exists {
+                        id = Some(candidate);
+                        break;
+                    }
+                }
+                let id = id.ok_or(StorageError::Conflict)?;
+                let payload = crate::public_event::payload(
+                    &id,
+                    event.job.cluster,
+                    event.job.id,
+                    event.job.state,
+                    context.2,
+                )
+                .map_err(|_| StorageError::InvalidInput)?;
+                let routes = selected.get(event.id).ok_or(StorageError::InvalidInput)?;
+                // Deferred parent FK allows the frame insert to seal the route set.
+                for route in routes {
+                    tx.execute(
+                        "INSERT INTO public_event_routes VALUES (?1,?2,?3)",
+                        params![event.id, route.destination, route.revision],
+                    )?;
+                }
+                let hash = ring::digest::digest(&ring::digest::SHA256, &payload);
+                tx.execute(
+                    "INSERT INTO public_event_frames VALUES (?1,?2,?3,?4)",
+                    params![event.id, id, payload, hash.as_ref()],
+                )?;
+                Ok(())
+            },
+        )
+    }
+    pub(super) fn public_delivery(
+        &self,
+        internal_id: &str,
+        destination: &str,
+        revision: &str,
+    ) -> Result<Option<PublicFrame>, StorageError> {
+        if internal_id.is_empty() || !public_alias(destination) || !public_revision(revision) {
+            return Err(StorageError::InvalidInput);
+        }
+        let version: i64 = self
+            .db
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version < 5 {
+            return Ok(None);
+        }
+        let row = self.db.query_row("SELECT CASE WHEN length(p.public_id)=36 THEN p.public_id ELSE NULL END,CASE WHEN length(p.payload) BETWEEN 1 AND 16384 THEN p.payload ELSE NULL END,CASE WHEN length(p.sha256)=32 THEN p.sha256 ELSE NULL END,CASE WHEN length(r.revision)=64 THEN r.revision ELSE NULL END
+            FROM public_event_frames p JOIN public_event_routes r ON r.internal_event_id=p.internal_event_id
+            JOIN outbox o ON o.event_id=r.internal_event_id AND o.destination=r.destination
+            WHERE p.internal_event_id=?1 AND r.destination=?2",params![internal_id,destination],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Vec<u8>>(1)?,row.get::<_,Vec<u8>>(2)?,row.get::<_,String>(3)?))).optional()?;
+        let Some((id, payload, hash, bound)) = row else {
+            return Ok(None);
+        };
+        if bound != revision
+            || !crate::public_event::valid_id(&id)
+            || ring::digest::digest(&ring::digest::SHA256, &payload).as_ref() != hash
+        {
+            return Err(StorageError::Conflict);
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&payload).map_err(|_| StorageError::Conflict)?;
+        if value.get("event_id").and_then(serde_json::Value::as_str) != Some(&id) {
+            return Err(StorageError::Conflict);
+        }
+        Ok(Some(PublicFrame { id, payload }))
+    }
+
     // Rendering occurs before this call; all eligible new pairs commit together.
     // Historical events retain their routes and never consume new preparations.
     pub(super) fn persist_prepared_reconciler(
@@ -1028,8 +1204,25 @@ impl Store {
         through: &str,
         observed_at: i64,
         smtp: SmtpPlan<'_>,
-        mut select: impl FnMut(&super::lifecycle::Event) -> Vec<&'a str>,
+        select: impl FnMut(&super::lifecycle::Event) -> Vec<&'a str>,
     ) -> Result<(), StorageError> {
+        self.persist_selected_using(
+            preparation,
+            (cluster, through, observed_at),
+            smtp,
+            select,
+            |_, _| Ok(()),
+        )
+    }
+    fn persist_selected_using<'a>(
+        &mut self,
+        preparation: PollPreparation<'_>,
+        context: (&str, &str, i64),
+        smtp: SmtpPlan<'_>,
+        mut select: impl FnMut(&super::lifecycle::Event) -> Vec<&'a str>,
+        freeze: impl FnMut(&rusqlite::Transaction<'_>, &Event<'_>) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        let (cluster, through, observed_at) = context;
         let PollPreparation {
             candidate,
             deliverable,
@@ -1075,7 +1268,13 @@ impl Store {
                 destinations,
             })
             .collect();
-        self.record_poll_with_smtp(&jobs, &events, cluster, through, observed_at, smtp)
+        self.record_poll_using(
+            &jobs,
+            &events,
+            (cluster, through, observed_at),
+            smtp,
+            freeze,
+        )
     }
 
     // A read transaction gives jobs/events/checkpoint one consistent snapshot.
@@ -1211,8 +1410,25 @@ impl Store {
         cluster: &str,
         through: &str,
         observed_at: i64,
-        mut smtp: SmtpPlan<'a>,
+        smtp: SmtpPlan<'a>,
     ) -> Result<(), StorageError> {
+        self.record_poll_using(
+            jobs,
+            events,
+            (cluster, through, observed_at),
+            smtp,
+            |_, _| Ok(()),
+        )
+    }
+    fn record_poll_using<'a>(
+        &mut self,
+        jobs: &[Job<'_>],
+        events: &[Event<'a>],
+        context: (&str, &str, i64),
+        mut smtp: SmtpPlan<'a>,
+        mut freeze: impl FnMut(&rusqlite::Transaction<'_>, &Event<'_>) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        let (cluster, through, observed_at) = context;
         if observed_at < 0
             || cluster.is_empty()
             || through.is_empty()
@@ -1329,6 +1545,7 @@ impl Store {
                     }
                 }
             }
+            freeze(&tx, event)?;
         }
         // Extra/historical preparations must not silently overwrite stored bytes.
         if !smtp.messages.is_empty() {
@@ -1374,6 +1591,434 @@ pub(super) mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn public_candidate(
+        rows: &str,
+        emit: bool,
+    ) -> (
+        super::super::lifecycle::Reconciler,
+        Vec<super::super::lifecycle::Event>,
+    ) {
+        let mut candidate = super::super::lifecycle::Reconciler::with_capacity(10);
+        let events = candidate
+            .observe_snapshot("", rows, "cluster", "alice", emit)
+            .unwrap();
+        (candidate, events)
+    }
+    #[test]
+    fn public_frames_and_route_revisions_remain_frozen_across_retry_replay_and_restart() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = public_candidate(
+            "cluster|42_0|alice|private-submit|private-start|COMPLETED|0:0",
+            true,
+        );
+        let revision = "1".repeat(64);
+        store
+            .persist_public_webhooks_with(
+                &candidate,
+                &events,
+                ("cluster", "1970-01-01T00:00:10", 10),
+                |_| {
+                    vec![
+                        PublicRoute {
+                            destination: "a",
+                            revision: &revision,
+                        },
+                        PublicRoute {
+                            destination: "b",
+                            revision: &revision,
+                        },
+                    ]
+                },
+                || Ok([0; 16]),
+            )
+            .unwrap();
+        let id = event_id(&events[0]);
+        let first = store.public_delivery(&id, "a", &revision).unwrap().unwrap();
+        let second = store.public_delivery(&id, "b", &revision).unwrap().unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.payload, second.payload);
+        assert!(!String::from_utf8_lossy(&first.payload).contains("private-submit"));
+        let due = store.due_deliveries("cluster", 10, 10).unwrap();
+        store
+            .record_delivery(
+                due.iter().find(|due| due.destination == "a").unwrap(),
+                DeliveryOutcome::TransientFailure,
+                20,
+                Some(30),
+            )
+            .unwrap();
+        for sql in [
+            "UPDATE public_event_frames SET payload=x'00'",
+            "DELETE FROM public_event_frames",
+            "UPDATE public_event_routes SET revision=revision",
+            "DELETE FROM public_event_routes",
+        ] {
+            assert!(store.db.execute_batch(sql).is_err());
+        }
+        assert!(store
+            .db
+            .execute(
+                "INSERT INTO public_event_routes VALUES (?1,'extra',?2)",
+                params![id, revision]
+            )
+            .is_err());
+        drop(store);
+        let mut store = open(&directory);
+        let changed = "2".repeat(64);
+        store
+            .persist_public_webhooks_with(
+                &candidate,
+                &events,
+                ("cluster", "1970-01-01T00:00:40", 40),
+                |_| {
+                    vec![PublicRoute {
+                        destination: "new",
+                        revision: &changed,
+                    }]
+                },
+                || panic!("replay must not allocate identity"),
+            )
+            .unwrap();
+        let replay = store.public_delivery(&id, "a", &revision).unwrap().unwrap();
+        assert_eq!(replay.id, first.id);
+        assert_eq!(replay.payload, first.payload);
+        assert!(matches!(
+            store.public_delivery(&id, "a", &changed),
+            Err(StorageError::Conflict)
+        ));
+        assert!(store
+            .public_delivery(&id, "new", &changed)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT count(*) FROM public_event_routes", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            store
+                .due_deliveries("cluster", 30, 10)
+                .unwrap()
+                .iter()
+                .find(|due| due.destination == "a")
+                .unwrap()
+                .attempt_number,
+            2
+        );
+        assert_eq!(
+            store.restore("cluster", 10).unwrap().1.as_deref(),
+            Some("1970-01-01T00:00:40")
+        );
+        let (mut next, _) = store.restore("cluster", 10).unwrap();
+        let next_events = next
+            .observe_snapshot(
+                "",
+                "cluster|43|alice|private-submit|private-start|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        let mut calls = 0;
+        store
+            .persist_public_webhooks_with(
+                &next,
+                &next_events,
+                ("cluster", "1970-01-01T00:00:50", 50),
+                |_| {
+                    vec![PublicRoute {
+                        destination: "a",
+                        revision: &revision,
+                    }]
+                },
+                || {
+                    calls += 1;
+                    Ok(if calls == 1 { [0; 16] } else { [3; 16] })
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 2);
+        assert_ne!(
+            store
+                .public_delivery(&event_id(&next_events[0]), "a", &revision)
+                .unwrap()
+                .unwrap()
+                .id,
+            first.id
+        );
+    }
+    #[test]
+    fn public_entropy_collision_payload_and_late_sql_failures_rollback_migration_and_poll() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = public_candidate(
+            "cluster|42|alice|s|a|COMPLETED|0:0\ncluster|43|alice|s|a|FAILED|1:0",
+            true,
+        );
+        let revision = "1".repeat(64);
+        for collision in [false, true] {
+            let mut calls = 0;
+            let result = store.persist_public_webhooks_with(
+                &candidate,
+                &events,
+                ("cluster", "window", 10),
+                |_| {
+                    vec![PublicRoute {
+                        destination: "a",
+                        revision: &revision,
+                    }]
+                },
+                || {
+                    calls += 1;
+                    if !collision && calls == 2 {
+                        Err(())
+                    } else {
+                        Ok([0; 16])
+                    }
+                },
+            );
+            assert!(if collision {
+                matches!(result, Err(StorageError::Conflict))
+            } else {
+                matches!(result, Err(StorageError::Random))
+            });
+            assert_eq!(calls, if collision { 9 } else { 2 });
+            for table in ["jobs", "events", "outbox", "checkpoints"] {
+                assert_eq!(count(&store, table), 0);
+            }
+            assert_eq!(
+                store
+                    .db
+                    .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                4
+            );
+            assert_eq!(
+                store
+                    .db
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master WHERE name='public_event_frames'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+        let (bad, events) = public_candidate("cluster|01|alice|s|a|COMPLETED|0:0", true);
+        assert!(matches!(
+            store.persist_public_webhooks_with(
+                &bad,
+                &events,
+                ("cluster", "window", 10),
+                |_| vec![PublicRoute {
+                    destination: "a",
+                    revision: &revision
+                }],
+                || Ok([0; 16])
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        assert_eq!(count(&store, "events"), 0);
+        store.db.execute_batch("CREATE TRIGGER public_late_failure BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
+        let (one, events) = public_candidate("cluster|42|alice|s|a|COMPLETED|0:0", true);
+        assert!(store
+            .persist_public_webhooks_with(
+                &one,
+                &events,
+                ("cluster", "window", 10),
+                |_| vec![PublicRoute {
+                    destination: "a",
+                    revision: &revision
+                }],
+                || Ok([0; 16])
+            )
+            .is_err());
+        assert_eq!(count(&store, "events"), 0);
+        assert_eq!(
+            store
+                .db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        store
+            .db
+            .execute_batch("DROP TRIGGER public_late_failure")
+            .unwrap();
+        store
+            .persist_public_webhooks(&one, &events, ("cluster", "window", 10), |_| {
+                vec![PublicRoute {
+                    destination: "a",
+                    revision: &revision,
+                }]
+            })
+            .unwrap();
+        assert!(crate::public_event::valid_id(
+            &store
+                .public_delivery(&event_id(&events[0]), "a", &revision)
+                .unwrap()
+                .unwrap()
+                .id
+        ));
+        assert!(matches!(
+            store.public_delivery("x", "a", "wrong"),
+            Err(StorageError::InvalidInput)
+        ));
+    }
+    #[test]
+    fn suppressed_unmatched_and_legacy_events_never_gain_public_delivery_on_replay() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let row = "cluster|42|alice|s|a|COMPLETED|0:0";
+        let (candidate, deliverable) = public_candidate(row, false);
+        assert!(deliverable.is_empty());
+        store
+            .persist_public_webhooks(
+                &candidate,
+                &deliverable,
+                ("cluster", "window-1", 10),
+                |_| panic!("suppressed routing"),
+            )
+            .unwrap();
+        let (mut restored, _) = store.restore("cluster", 10).unwrap();
+        assert!(restored
+            .observe_snapshot("", row, "cluster", "alice", true)
+            .unwrap()
+            .is_empty());
+        let events = restored
+            .observe_snapshot(
+                "",
+                "cluster|43|alice|s|a|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        store
+            .persist_public_webhooks(&restored, &events, ("cluster", "window-2", 20), |_| vec![])
+            .unwrap();
+        let id = event_id(&events[0]);
+        let revision = "1".repeat(64);
+        store
+            .persist_public_webhooks(&restored, &events, ("cluster", "window-3", 30), |_| {
+                vec![PublicRoute {
+                    destination: "new",
+                    revision: &revision,
+                }]
+            })
+            .unwrap();
+        assert!(store
+            .public_delivery(&id, "new", &revision)
+            .unwrap()
+            .is_none());
+        assert_eq!(count(&store, "outbox"), 0);
+        assert_eq!(
+            store
+                .db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        assert!(matches!(
+            store.persist_public_webhooks(
+                &restored,
+                &events,
+                ("cluster", "window-4", 40),
+                |_| vec![
+                    PublicRoute {
+                        destination: "new",
+                        revision: &revision
+                    },
+                    PublicRoute {
+                        destination: "new",
+                        revision: &revision
+                    }
+                ]
+            ),
+            Err(StorageError::InvalidInput)
+        ));
+        let fresh = Directory::new();
+        let mut legacy = open(&fresh);
+        let (candidate, events) = public_candidate(row, true);
+        legacy
+            .persist_reconciler(&candidate, &events, &["old"], "cluster", "window", 10)
+            .unwrap();
+        legacy
+            .persist_public_webhooks(&candidate, &events, ("cluster", "window-2", 20), |_| {
+                vec![PublicRoute {
+                    destination: "old",
+                    revision: &revision,
+                }]
+            })
+            .unwrap();
+        assert!(legacy
+            .public_delivery(&event_id(&events[0]), "old", &revision)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn corrupt_public_frames_fail_closed_before_delivery() {
+        let directory = Directory::new();
+        let mut store = open(&directory);
+        let (candidate, events) = public_candidate("cluster|42|alice|s|a|COMPLETED|0:0", true);
+        let revision = "1".repeat(64);
+        store
+            .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
+                vec![PublicRoute {
+                    destination: "a",
+                    revision: &revision,
+                }]
+            })
+            .unwrap();
+        let id = event_id(&events[0]);
+        let original = store.public_delivery(&id, "a", &revision).unwrap().unwrap();
+        // Simulate external file corruption; normal application SQL cannot modify frames.
+        store
+            .db
+            .execute_batch("DROP TRIGGER public_frame_no_update;")
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE public_event_frames SET payload=?1",
+                [b"bad".as_slice()],
+            )
+            .unwrap();
+        assert!(store.public_delivery(&id, "a", &revision).is_err());
+        for bytes in [
+            b"not-json".to_vec(),
+            br#"{"event_id":"wrong-public-id"}"#.to_vec(),
+        ] {
+            let hash = ring::digest::digest(&ring::digest::SHA256, &bytes);
+            store
+                .db
+                .execute(
+                    "UPDATE public_event_frames SET payload=?1,sha256=?2",
+                    params![bytes, hash.as_ref()],
+                )
+                .unwrap();
+            assert!(store.public_delivery(&id, "a", &revision).is_err());
+        }
+        store
+            .db
+            .execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE public_event_frames SET payload=?1,sha256=?2",
+                params![original.payload, vec![0u8; 33]],
+            )
+            .unwrap();
+        assert!(store.public_delivery(&id, "a", &revision).is_err());
     }
 
     fn job() -> Job<'static> {
@@ -1965,7 +2610,7 @@ pub(super) mod tests {
     fn future_version_is_not_reset() {
         let directory = Directory::new();
         let store = open(&directory);
-        store.db.pragma_update(None, "user_version", 5).unwrap();
+        store.db.pragma_update(None, "user_version", 6).unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
@@ -1975,7 +2620,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            6
         );
     }
 

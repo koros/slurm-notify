@@ -23,6 +23,8 @@ for file permissions, resource requirements and exact SMTP permission checks.
 
 - Synthetic Slurm parsing, lifecycle reconciliation, filtering and routing.
 - Durable SQLite checkpoints/outbox, deduplication, retries and frozen SMTP work.
+- Transactional public webhook UUIDs, frozen payloads and endpoint revision bindings
+  in the internal engine; mixed-provider composition and sending remain pending.
 - Supervised HTTPS webhook and verified required-STARTTLS SMTP transports.
 - Protected config/trust snapshots, bounded Rust validation, explicit environment
   resources and effective-user lookup.
@@ -57,7 +59,7 @@ CI artifacts contain the finite development CLI.
 
 ## Remaining work
 
-The local MVP still needs public webhook payload persistence, installed continuous
+The local MVP still needs mixed public-event/SMTP composition, installed continuous
 monitoring and delivery, setup/test/doctor flows, and permitted cluster/provider
 acceptance. Configuration validation and offline historical status are installed;
 continuous scheduling and owned-session recovery are tested internally. The intended MVP includes generic

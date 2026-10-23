@@ -8,6 +8,9 @@ pub(super) struct Plan {
     masks: [u64; 9],
 }
 impl Plan {
+    pub(super) fn providers(&self) -> Vec<&str> {
+        self.aliases.iter().map(|name| name.as_str()).collect()
+    }
     pub(super) fn poll_with(
         &self,
         request: &crate::scheduler::PollRequest<'_>,

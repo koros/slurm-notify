@@ -71,7 +71,7 @@ public events still need installed acceptance.
 | Continuous foreground run | Continuous owned sessions now renew finite poll batches with shared clock/wait guards, retained health and ownership, plus cancellation/failure/restart acceptance; OS-backed installed orchestration remains pending |
 | Resource lifetime/deadlines | Environment lookup caps accepted bytes after OS allocation; NSS lookup is synchronous. Review deadline/failure behavior before claiming bounded installed startup |
 | Webhook-only foreground | Unified session currently prepares a mixed plan requiring SMTP; compose a reviewed webhook-only path without silently changing the public scope |
-| Public event transaction | Persist opaque IDs, frozen bytes and route bindings atomically; settle identifier widths, source timezone/null semantics and UUID source before public sends |
+| Public event transaction | Webhook-only public transactions now freeze ring-generated UUIDs, bytes and resolved endpoint revisions; mixed SMTP composition and actual dispatch remain pending. Unknown source times remain null; numeric IDs are canonical strings bounded by payload bytes |
 | Setup/provider permissions | Implement reviewed onboarding, safe explicit tests and exact SMTP permission enrollment; no implicit enrollment or retargeting |
 
 These are distinct from already tested cooperative callback cancellation and frozen

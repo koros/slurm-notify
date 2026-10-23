@@ -35,7 +35,7 @@ is retired. No network/SMTP submission or state inspection occurs.
 `status --config <absolute-path>` accepts one config option before or after the
 command. `status --help` or `--help status` reads no resources. Status parses config
 metadata without resolving providers, credentials or identity. It reads existing
-closed schema-4 state only; the current supported database basename is
+closed schema-4 or schema-5 state only; the current supported database basename is
 `state.sqlite3`. It creates/migrates/repairs nothing and requires the existing lock
 and exclusive ownership. Status while monitoring is busy, not a live health view.
 

@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 385 private Rust tests plus nine installed CLI acceptance tests
+The latest implementation milestone passed 391 private Rust tests plus nine installed CLI acceptance tests
 and six provider-codec checks and four ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.26% (22,871/23,516); the gate is 90%.
+Python tests. Rust line coverage was 97.29% (23,797/24,460); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -39,15 +39,16 @@ These are recorded local results, not a claim that hosted checks currently pass.
 | Protected config and trust | [Config snapshot](../../crates/notify-cli/src/config_snapshot.rs), [Rust decoder](../../crates/notify-cli/src/config_decode.rs), [draft validator](../../crates/notify-cli/src/config_validate.rs), [trust snapshot](../../crates/notify-cli/src/trust_snapshot.rs) | Installed protected webhook/SMTP validation, schema and historical status exist; monitoring bindings remain pending |
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Private environment and effective-UID adapters exist; installed bindings and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed historical status/output snapshots exist; inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
-| Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; public webhook persistence remains separate |
+| Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; transactional webhook public frames now exist; mixed SMTP/public composition remains pending |
 | Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; first-signal retention and continuous scheduler exist; owned continuous poll-budget renewal is tested; installed exit mapping and bindings remain pending |
 | Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
-| Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public opaque IDs and frozen webhook JSON; authorized real-provider acceptance |
+| Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public UUID/frozen JSON/endpoint revisions are tested internally; supervised public-frame dispatch and authorized real-provider acceptance remain pending |
 
 Private Rust decoding and validation are implemented. Python draft checks provide
 additional review fixtures; installed config schemas and validation are now recorded
 under contracts/config.
-Frozen SMTP messages do not establish frozen public webhook payloads. Controlled
+Frozen public webhook payloads now have their own transaction/identity/revision tests;
+mixed public/SMTP composition and supervised public-frame dispatch remain pending. Controlled
 SMTP helpers do not establish real-provider acceptance. Cancellation is cooperative
 at hook/stage boundaries; synchronous lookup/filesystem hooks do not acquire a
 universal deadline from the foreground scheduler.
@@ -87,13 +88,13 @@ activation, record schemas/snapshots and implement acceptance for:
 The following implementation sequence reuses the completed private pipeline:
 
 1. Record reviewed contracts and positive/negative/version compatibility fixtures.
-   Assess opaque-ID dependencies; do not silently turn draft examples into baselines.
+   UUID generation now reuses ring SystemRandom; maintain deliberate baselines.
 2. Help/version activation is complete. Bind later reviewed
    finite commands to existing private protected preparation, OS resource adapters
    and status inspection; verify installed failures, privacy and side effects.
-3. Implement the reviewed public event transaction: opaque ID and frozen webhook
-   bytes committed with routes/outbox; test collisions, rollback, suppression,
-   restart and edited destinations. Establish source timestamps without fabrication.
+3. Webhook public-event transactions now freeze UUIDs, bytes and endpoint revisions
+   atomically with tested collision/rollback/suppression/restart behavior. Complete
+   mixed SMTP composition and supervised dispatch; unknown source times stay null.
 4. Activate reviewed finite commands and foreground orchestration. Fresh installed
    binary acceptance must cover invalid inputs before access, ownership, signals,
    blocked scheduling without spinning, partial delivery and resource recovery.
@@ -109,7 +110,7 @@ lifecycle and cooperative active-callback recovery are tested privately.
 
 The [updated activation review](../proposals/local-contract-review-v1.md) identifies
 remaining installed 130-vs-143 mapping, OS-backed continuous bindings, webhook-only
-composition, live-status access and public payload transaction gaps. The
+composition, live-status access and mixed public-event/SMTP composition gaps. The
 [help/version slice](../proposals/finite-cli-activation-v1.md) is approved and
 implemented; further installed commands and public schema choices remain pending.
 

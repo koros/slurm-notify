@@ -18,7 +18,7 @@ privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason
 Continuous scheduling now retains one owned session across poll-batch renewal
 ([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Historical status is
 installed ([ADR 0062](../adr/0062-installed-historical-status.md)); next complete
-public event persistence and bind OS-backed orchestration and monitoring commands.
+mixed public-event/SMTP composition and bind OS-backed orchestration and monitoring commands.
 
 ## Next product milestones
 
@@ -26,8 +26,9 @@ public event persistence and bind OS-backed orchestration and monitoring command
    has exact output/exit snapshots and installed-binary acceptance.
 2. Completed: installed webhook/SMTP configuration validation and offline historical
    status, with deliberate schemas/output baselines and no hidden sending.
-3. Complete public event persistence: opaque IDs, frozen webhook bytes, immutable
-   routes and source timestamp/null semantics. Assess the UUID source/dependencies.
+3. Transactional webhook public IDs/bytes/route revisions are implemented and tested
+   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Next compose them
+   atomically with mixed SMTP preparation and bind stored frames to supervised delivery.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
    webhook-only composition and status contention behavior, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

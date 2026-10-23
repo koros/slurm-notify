@@ -34,6 +34,89 @@ pub(super) struct PollInput<'a> {
     pub(super) observed_at: i64,
 }
 impl Plan {
+    // Public webhook transactions use actual prepared HTTPS resource revisions.
+    // Mixed SMTP composition must opt in separately; never silently drop its routes.
+    pub(super) fn poll_public_with(
+        &self,
+        input: PollInput<'_>,
+        reconciler: &mut crate::lifecycle::Reconciler,
+        store: &mut crate::storage::Store,
+        query: impl FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+    ) -> Result<Vec<crate::lifecycle::Event>, crate::scheduler::DurablePollError> {
+        let invalid = || {
+            crate::scheduler::DurablePollError::Storage(crate::storage::StorageError::InvalidInput)
+        };
+        let mut bindings = std::collections::HashMap::new();
+        for webhook in &self.webhooks {
+            let revision = webhook.resources.public_revision().ok_or_else(invalid)?;
+            if bindings.insert(webhook.alias.as_str(), revision).is_some() {
+                return Err(invalid());
+            }
+        }
+        let names = self.routes.providers();
+        if names.len() != bindings.len() || names.iter().any(|name| !bindings.contains_key(name)) {
+            return Err(invalid());
+        }
+        let request = crate::scheduler::PollRequest {
+            active_program: input.active_program,
+            accounting_program: input.accounting_program,
+            cluster: self.observation.cluster(),
+            user: self.observation.user(),
+            history_start: input.history_start,
+            history_end: input.history_end,
+            timeout: self.controls.query_timeout,
+            output_limit: self.controls.output_limit,
+            emit_discovered: self.observation.emit_discovered(),
+        };
+        let mut candidate = reconciler.clone();
+        let events = crate::scheduler::poll_with(&request, &mut candidate, query)
+            .map_err(crate::scheduler::DurablePollError::Poll)?;
+        // UUID strings have fixed encoded width, so this admission render matches
+        // the eventual payload size without allocating an identity before commit.
+        for event in &events {
+            let selected = self.routes.destinations(&event.state);
+            if selected.is_empty() {
+                continue;
+            }
+            let payload = crate::public_event::payload(
+                "evt_00000000000040008000000000000000",
+                &event.identity.cluster,
+                &event.identity.job,
+                event.state.code(),
+                input.observed_at,
+            )
+            .map_err(|_| invalid())?;
+            if self.webhooks.iter().any(|webhook| {
+                selected.contains(&webhook.alias.as_str())
+                    && !webhook.resources.accepts_public_payload(&payload)
+            }) {
+                return Err(invalid());
+            }
+        }
+        store
+            .persist_public_webhooks(
+                &candidate,
+                &events,
+                (request.cluster, request.history_end, input.observed_at),
+                |event| {
+                    self.routes
+                        .destinations(&event.state)
+                        .into_iter()
+                        .map(|destination| crate::storage::PublicRoute {
+                            destination,
+                            revision: bindings[destination],
+                        })
+                        .collect()
+                },
+            )
+            .map_err(crate::scheduler::DurablePollError::Storage)?;
+        *reconciler = candidate;
+        Ok(events)
+    }
     pub(super) fn poll_with(
         &self,
         input: PollInput<'_>,
@@ -184,6 +267,150 @@ mod tests {
     }
     fn bytes(value: &Value) -> Vec<u8> {
         serde_json::to_vec(value).unwrap()
+    }
+    #[test]
+    fn public_poll_binds_resolved_endpoint_and_publishes_candidate_only_after_commit() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store =
+            crate::storage::Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut source = fixture();
+        source["monitor"]["initial_observation"] = json!("emit");
+        let bytes = serde_json::to_vec(&source).unwrap();
+        let make_plan = |url: &str| {
+            prepare(
+                &bytes,
+                |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                |name, _| {
+                    Ok(Zeroizing::new(if name.ends_with("_URL") {
+                        url.as_bytes().to_vec()
+                    } else {
+                        b"Bearer fixture".to_vec()
+                    }))
+                },
+            )
+            .unwrap()
+        };
+        let plan = make_plan("https://fixture.invalid/private?secret=first");
+        let input = || PollInput {
+            active_program: std::path::Path::new("squeue"),
+            accounting_program: std::path::Path::new("sacct"),
+            history_start: "1970-01-01T00:00:00",
+            history_end: "1970-01-01T00:00:10",
+            observed_at: 10,
+        };
+        let query = |command: &mut std::process::Command, _, _| {
+            Ok(if command.get_program() == "squeue" {
+                String::new()
+            } else {
+                "research-cluster|42|alice|private-submit|private-start|COMPLETED|0:0".to_string()
+            })
+        };
+        let mut reconciler = crate::lifecycle::Reconciler::with_capacity(10);
+        // Fault the final checkpoint after frame preparation: neither ledger nor caller advances.
+        let db = rusqlite::Connection::open(directory.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER public_checkpoint_fault BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'synthetic failure'); END").unwrap();
+        assert!(plan
+            .poll_public_with(input(), &mut reconciler, &mut store, query)
+            .is_err());
+        assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+        db.execute_batch("DROP TRIGGER public_checkpoint_fault")
+            .unwrap();
+        drop(db);
+        assert_eq!(
+            plan.poll_public_with(input(), &mut reconciler, &mut store, query)
+                .unwrap()
+                .len(),
+            1
+        );
+        let due = store.due_deliveries("research-cluster", 10, 10).unwrap();
+        let revision = plan.webhooks[0].resources.public_revision().unwrap();
+        let first = store
+            .public_delivery(&due[0].event_id, "primary", revision)
+            .unwrap()
+            .unwrap();
+        let changed = make_plan("https://fixture.invalid/private?secret=changed");
+        let changed_revision = changed.webhooks[0].resources.public_revision().unwrap();
+        assert_ne!(revision, changed_revision);
+        assert!(matches!(
+            store.public_delivery(&due[0].event_id, "primary", changed_revision),
+            Err(crate::storage::StorageError::Conflict)
+        ));
+        assert_eq!(
+            store
+                .public_delivery(&due[0].event_id, "primary", revision)
+                .unwrap()
+                .unwrap()
+                .payload,
+            first.payload
+        );
+        let http = make_plan("http://127.0.0.1/fixture");
+        assert!(http
+            .poll_public_with(input(), &mut reconciler, &mut store, |_, _, _| panic!(
+                "public HTTP must fail before query"
+            ))
+            .is_err());
+        let mut incomplete = make_plan("https://fixture.invalid/private");
+        incomplete.webhooks.clear();
+        assert!(incomplete
+            .poll_public_with(input(), &mut reconciler, &mut store, |_, _, _| panic!(
+                "incomplete provider set must not query"
+            ))
+            .is_err());
+        let mixed_draft = crate::config_validate::validate(include_bytes!(
+            "../../../docs/proposals/examples/local-mixed-config.json"
+        ))
+        .unwrap();
+        let mixed = prepare_draft(
+            mixed_draft,
+            true,
+            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            |name, _| {
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+        )
+        .unwrap();
+        assert!(mixed
+            .poll_public_with(input(), &mut reconciler, &mut store, |_, _, _| panic!(
+                "mixed plans must not silently drop SMTP routes"
+            ))
+            .is_err());
+        let mut limited_source = source.clone();
+        limited_source["providers"]["primary"]["payload_limit_bytes"] = json!(1024);
+        let limited = prepare(
+            &serde_json::to_vec(&limited_source).unwrap(),
+            |_| Ok(Zeroizing::new(b"alice".to_vec())),
+            |name, _| {
+                Ok(Zeroizing::new(if name.ends_with("_URL") {
+                    b"https://fixture.invalid/hook".to_vec()
+                } else {
+                    b"Bearer fixture".to_vec()
+                }))
+            },
+        )
+        .unwrap();
+        let mut fresh = crate::lifecycle::Reconciler::with_capacity(10);
+        let long_job = "1".repeat(1200);
+        assert!(limited
+            .poll_public_with(input(), &mut fresh, &mut store, |command, _, _| Ok(
+                if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    format!("research-cluster|{long_job}|alice|s|a|COMPLETED|0:0")
+                }
+            ))
+            .is_err());
+        assert!(fresh.latest.is_empty() && fresh.emitted.is_empty());
+        assert_eq!(
+            store
+                .due_deliveries("research-cluster", 10, 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
     #[test]
     fn validation_and_unsupported_provider_fail_before_any_lookup() {

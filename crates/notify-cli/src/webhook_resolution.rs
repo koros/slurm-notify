@@ -18,8 +18,16 @@ pub(super) struct Resources {
     authorization: Option<Zeroizing<Vec<u8>>>,
     timeout: Duration,
     payload_limit: usize,
+    revision: String,
+    public_https: bool,
 }
 impl Resources {
+    pub(super) fn accepts_public_payload(&self, payload: &[u8]) -> bool {
+        self.public_https && payload.len() <= self.payload_limit
+    }
+    pub(super) fn public_revision(&self) -> Option<&str> {
+        self.public_https.then_some(self.revision.as_str())
+    }
     pub(super) fn into_frame(
         self,
         event_id: &str,
@@ -76,7 +84,10 @@ pub(super) fn resolve(
         return Err(Error::Endpoint);
     }
     let text = std::str::from_utf8(&endpoint).map_err(|_| Error::Endpoint)?;
-    webhook::endpoint_url(text).map_err(|_| Error::Endpoint)?;
+    let public_https = webhook::endpoint_url(text)
+        .map_err(|_| Error::Endpoint)?
+        .scheme()
+        == "https";
     let authorization = if let Some(name) = authorization_reference {
         let bytes = lookup(name, 4096).map_err(|_| Error::Lookup)?;
         let text = std::str::from_utf8(&bytes).map_err(|_| Error::Authorization)?;
@@ -87,11 +98,21 @@ pub(super) fn resolve(
     } else {
         None
     };
+    let revision = crate::config_reference::reference(
+        b"webhook\0",
+        &[
+            text,
+            endpoint_reference,
+            authorization_reference.unwrap_or(""),
+        ],
+    );
     Ok(Resources {
         endpoint,
         authorization,
         timeout,
         payload_limit,
+        revision,
+        public_https,
     })
 }
 
