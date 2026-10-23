@@ -57,8 +57,70 @@ impl<'a, 'b> ProviderPlan<'a, 'b> {
         store: &mut Store,
         observed_at: i64,
         query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        select: impl FnMut(&Event) -> Vec<&'s str>,
+    ) -> Result<Vec<Event>, smtp_poll::Error> {
+        self.poll_selected_using(
+            request,
+            reconciler,
+            store,
+            (observed_at, None),
+            query,
+            select,
+        )
+    }
+    pub(super) fn poll_public_selected_with<'s>(
+        &self,
+        request: &PollRequest<'_>,
+        reconciler: &mut Reconciler,
+        store: &mut Store,
+        context: (i64, &[crate::config_composition::Webhook]),
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
+        select: impl FnMut(&Event) -> Vec<&'s str>,
+    ) -> Result<Vec<Event>, smtp_poll::Error> {
+        self.poll_selected_using(
+            request,
+            reconciler,
+            store,
+            (context.0, Some(context.1)),
+            query,
+            select,
+        )
+    }
+    fn poll_selected_using<'s>(
+        &self,
+        request: &PollRequest<'_>,
+        reconciler: &mut Reconciler,
+        store: &mut Store,
+        context: (i64, Option<&[crate::config_composition::Webhook]>),
+        query: impl FnMut(&mut Command, Duration, usize) -> Result<String, QueryError>,
         mut select: impl FnMut(&Event) -> Vec<&'s str>,
     ) -> Result<Vec<Event>, smtp_poll::Error> {
+        let (observed_at, webhooks) = context;
+        let mut bindings = Vec::new();
+        if let Some(webhooks) = webhooks {
+            let mut seen = std::collections::HashSet::new();
+            for webhook in webhooks {
+                let destination = webhook.alias.as_str();
+                if !self.rendering.destinations.contains(&destination)
+                    || self.rendering.smtp_destinations.contains(&destination)
+                    || !seen.insert(destination)
+                {
+                    return Err(smtp_poll::Error::InvalidInput);
+                }
+                bindings.push(crate::storage::PublicRoute {
+                    destination,
+                    revision: webhook
+                        .resources
+                        .public_revision()
+                        .ok_or(smtp_poll::Error::InvalidInput)?,
+                });
+            }
+            if self.rendering.destinations.iter().any(|name| {
+                !self.rendering.smtp_destinations.contains(name) && !seen.contains(name)
+            }) {
+                return Err(smtp_poll::Error::InvalidInput);
+            }
+        }
         if smtp_metadata::timestamp(observed_at).is_err() {
             return Err(smtp_poll::Error::InvalidInput);
         }
@@ -88,6 +150,31 @@ impl<'a, 'b> ProviderPlan<'a, 'b> {
                 .ok_or(smtp_poll::Error::Limit)?;
             selected.insert(event.clone(), names);
         }
+        if let Some(webhooks) = webhooks {
+            for event in &events {
+                let routes: Vec<_> = webhooks
+                    .iter()
+                    .filter(|webhook| selected[event].contains(&webhook.alias.as_str()))
+                    .collect();
+                if routes.is_empty() {
+                    continue;
+                }
+                let payload = crate::public_event::payload(
+                    "evt_00000000000040008000000000000000",
+                    &event.identity.cluster,
+                    &event.identity.job,
+                    event.state.code(),
+                    observed_at,
+                )
+                .map_err(|_| smtp_poll::Error::Preparation)?;
+                if routes
+                    .iter()
+                    .any(|webhook| !webhook.resources.accepts_public_payload(&payload))
+                {
+                    return Err(smtp_poll::Error::Limit);
+                }
+            }
+        }
         let mut owned = Vec::with_capacity(count);
         for event in &events {
             for name in &selected[event] {
@@ -110,25 +197,36 @@ impl<'a, 'b> ProviderPlan<'a, 'b> {
                 },
             )
             .collect();
-        store
-            .persist_selected_profiles(
-                super::storage::PollPreparation {
-                    candidate: &candidate,
-                    deliverable: &events,
-                    destinations: self.rendering.destinations,
-                    smtp_destinations: &self.rendering.smtp_destinations,
-                    messages: &messages,
-                },
-                super::storage::SmtpRevisions {
-                    rendering: &self.revisions,
-                    providers: &self.providers,
-                },
+        let preparation = super::storage::PollPreparation {
+            candidate: &candidate,
+            deliverable: &events,
+            destinations: self.rendering.destinations,
+            smtp_destinations: &self.rendering.smtp_destinations,
+            messages: &messages,
+        };
+        let revisions = super::storage::SmtpRevisions {
+            rendering: &self.revisions,
+            providers: &self.providers,
+        };
+        if webhooks.is_some() {
+            store.persist_public_profiles(
+                preparation,
+                revisions,
+                (request.cluster, request.history_end, observed_at),
+                &selected,
+                &bindings,
+            )
+        } else {
+            store.persist_selected_profiles(
+                preparation,
+                revisions,
                 request.cluster,
                 request.history_end,
                 observed_at,
                 &selected,
             )
-            .map_err(smtp_poll::Error::Storage)?;
+        }
+        .map_err(smtp_poll::Error::Storage)?;
         *reconciler = candidate;
         Ok(events)
     }

@@ -56,7 +56,9 @@ Changed/missing resources must block old pending work rather than retarget it.
 Mixed-provider storage preparation can commit public webhook frames alongside
 frozen SMTP messages and rendering/provider bindings in one poll transaction. Only
 webhook destinations receive public frame route rows; SMTP retains its existing
-message and profile bindings. Mixed runtime composition still needs admission wiring.
+message and profile bindings. Mixed poll composition now verifies complete prepared HTTPS bindings before querying
+and admits selected payloads against provider limits before commit. Caller state
+advances only after commit. Supervised runtime cycles still need wiring.
 Wire stored
 public IDs/bytes into supervised transport and owned continuous sessions, enforce
 current-resource admission again before a send, and add installed send/restart

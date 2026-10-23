@@ -252,6 +252,33 @@ impl Plan {
             usize,
         ) -> Result<String, crate::scheduler::QueryError>,
     ) -> Result<Vec<crate::lifecycle::Event>, crate::smtp_poll::Error> {
+        self.poll_using(false, input, reconciler, store, query)
+    }
+    pub(super) fn poll_public_with(
+        &self,
+        input: config_composition::PollInput<'_>,
+        reconciler: &mut crate::lifecycle::Reconciler,
+        store: &mut crate::storage::Store,
+        query: impl FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+    ) -> Result<Vec<crate::lifecycle::Event>, crate::smtp_poll::Error> {
+        self.poll_using(true, input, reconciler, store, query)
+    }
+    fn poll_using(
+        &self,
+        public: bool,
+        input: config_composition::PollInput<'_>,
+        reconciler: &mut crate::lifecycle::Reconciler,
+        store: &mut crate::storage::Store,
+        query: impl FnMut(
+            &mut std::process::Command,
+            Duration,
+            usize,
+        ) -> Result<String, crate::scheduler::QueryError>,
+    ) -> Result<Vec<crate::lifecycle::Event>, crate::smtp_poll::Error> {
         let mut names: Vec<_> = self
             .common
             .webhooks
@@ -259,30 +286,50 @@ impl Plan {
             .map(|w| w.alias.as_str())
             .collect();
         names.extend(self.smtp.iter().map(|s| s.name.as_str()));
+        if public {
+            let expected = self.common.routes.providers();
+            if expected.len() != names.len() || expected.iter().any(|name| !names.contains(name)) {
+                return Err(crate::smtp_poll::Error::InvalidInput);
+            }
+        }
         let routes: Vec<_> = self.smtp.iter().map(Smtp::route).collect();
         let profiles: Vec<_> = self.smtp.iter().map(|s| s.descriptor.profile()).collect();
         let rendering = smtp_routes::Plan::new(&names, &routes, self.max_messages)
             .map_err(|_| crate::smtp_poll::Error::Preparation)?;
         let provider = smtp_routes::ProviderPlan::new(&rendering, &profiles)
             .map_err(|_| crate::smtp_poll::Error::Preparation)?;
-        provider.poll_selected_with(
-            &crate::scheduler::PollRequest {
-                active_program: input.active_program,
-                accounting_program: input.accounting_program,
-                cluster: self.common.observation.cluster(),
-                user: self.common.observation.user(),
-                history_start: input.history_start,
-                history_end: input.history_end,
-                timeout: self.common.controls.query_timeout,
-                output_limit: self.common.controls.output_limit,
-                emit_discovered: self.common.observation.emit_discovered(),
-            },
-            reconciler,
-            store,
-            input.observed_at,
-            query,
-            |event| self.common.routes.destinations(&event.state),
-        )
+        let request = crate::scheduler::PollRequest {
+            active_program: input.active_program,
+            accounting_program: input.accounting_program,
+            cluster: self.common.observation.cluster(),
+            user: self.common.observation.user(),
+            history_start: input.history_start,
+            history_end: input.history_end,
+            timeout: self.common.controls.query_timeout,
+            output_limit: self.common.controls.output_limit,
+            emit_discovered: self.common.observation.emit_discovered(),
+        };
+        let select =
+            |event: &crate::lifecycle::Event| self.common.routes.destinations(&event.state);
+        if public {
+            provider.poll_public_selected_with(
+                &request,
+                reconciler,
+                store,
+                (input.observed_at, &self.common.webhooks),
+                query,
+                select,
+            )
+        } else {
+            provider.poll_selected_with(
+                &request,
+                reconciler,
+                store,
+                input.observed_at,
+                query,
+                select,
+            )
+        }
     }
 }
 // Read once; owned composition survives subsequent path replacement. No ambient lookups.
@@ -1523,6 +1570,124 @@ mod tests {
             Err(Error::Credentials(_))
         ));
     }
+    #[test]
+    fn public_mixed_poll_is_atomic_and_restores_both_provider_preparations() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        let plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let input = || config_composition::PollInput {
+            active_program: Path::new("squeue"),
+            accounting_program: Path::new("sacct"),
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            observed_at: 10,
+        };
+        let query = |command: &mut std::process::Command, _, _| {
+            Ok(if command.get_program() == "squeue" {
+                ""
+            } else {
+                "research-cluster|1|alice|s|actual|COMPLETED|0:0"
+            }
+            .into())
+        };
+        let db = rusqlite::Connection::open(d.path()).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT,'fixture'); END").unwrap();
+        assert!(plan
+            .poll_public_with(input(), &mut reconciler, &mut store, query)
+            .is_err());
+        assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+        assert!(store
+            .due_deliveries("research-cluster", 10, 10)
+            .unwrap()
+            .is_empty());
+        db.execute_batch("DROP TRIGGER fail_checkpoint").unwrap();
+        plan.poll_public_with(input(), &mut reconciler, &mut store, query)
+            .unwrap();
+        let due = store.due_deliveries("research-cluster", 10, 10).unwrap();
+        assert_eq!(due.len(), 2);
+        let id = due[0].event_id.clone();
+        let revision = plan.common.webhooks[0].resources.public_revision().unwrap();
+        let frame = store
+            .public_delivery(&id, "primary", revision)
+            .unwrap()
+            .unwrap();
+        let smtp = store
+            .frozen_smtp(&id, "research_email")
+            .unwrap()
+            .unwrap()
+            .data()
+            .to_vec();
+        drop(store);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let (mut restored, _) = store.restore("research-cluster", 10).unwrap();
+        assert!(plan
+            .poll_public_with(input(), &mut restored, &mut store, query)
+            .unwrap()
+            .is_empty());
+        let reopened = store
+            .public_delivery(&id, "primary", revision)
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened.id, frame.id);
+        assert_eq!(reopened.payload, frame.payload);
+        assert_eq!(
+            store
+                .frozen_smtp(&id, "research_email")
+                .unwrap()
+                .unwrap()
+                .data(),
+            smtp
+        );
+        assert!(store
+            .bound_smtp_provider(&id, "research_email")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn public_mixed_poll_rejects_incomplete_resources_before_query_and_payload_overflow_before_commit(
+    ) {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+        v["providers"]["primary"]["payload_limit_bytes"] = json!(1024);
+        let mut plan = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        let input = || config_composition::PollInput {
+            active_program: Path::new("squeue"),
+            accounting_program: Path::new("sacct"),
+            history_start: "2026-10-10T00:00:00",
+            history_end: "2026-10-11T00:00:00",
+            observed_at: 10,
+        };
+        let webhook = plan.common.webhooks.pop().unwrap();
+        assert!(plan
+            .poll_public_with(input(), &mut reconciler, &mut store, |_, _, _| panic!(
+                "missing resource queried"
+            ))
+            .is_err());
+        plan.common.webhooks.push(webhook);
+        let huge = "1".repeat(2000);
+        let result =
+            plan.poll_public_with(input(), &mut reconciler, &mut store, |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    String::new()
+                } else {
+                    format!("research-cluster|{huge}|alice|s|actual|COMPLETED|0:0")
+                })
+            });
+        assert!(matches!(result, Err(crate::smtp_poll::Error::Limit)));
+        assert!(reconciler.latest.is_empty() && reconciler.emitted.is_empty());
+        assert!(store
+            .due_deliveries("research-cluster", 10, 10)
+            .unwrap()
+            .is_empty());
+    }
+
     #[test]
     fn composed_poll_freezes_once_and_denies_unenrolled_delivery_before_resolution() {
         use crate::{

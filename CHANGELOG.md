@@ -7,9 +7,13 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private mixed poll composition admits complete prepared HTTPS resources and
+  bounded public payloads, then atomically freezes selected webhook/SMTP work;
+  rollback leaves the caller unchanged and restart preserves both provider frames.
+
 - Private mixed-provider storage preparation now commits frozen public webhook
   frames and SMTP messages/profile bindings with one checkpoint transaction; late
-  failure rolls back both providers, including schema migration. Runtime wiring remains pending.
+  failure rolls back both providers, including schema migration. Supervised runtime dispatch remains pending.
 
 - Private transactional public webhook UUID-v4 mapping, frozen allowlisted JSON and
   sealed endpoint-revision bindings with atomic opt-in schema-5 migration, payload
