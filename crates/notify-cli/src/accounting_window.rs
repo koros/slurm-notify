@@ -1,5 +1,5 @@
 //! Private UTC accounting-window planner; limits are caller-supplied.
-use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
+use time::OffsetDateTime;
 
 #[derive(Clone, Copy)]
 pub(super) struct Policy {
@@ -52,33 +52,7 @@ fn timestamp(seconds: i64) -> Result<String, Error> {
 }
 
 pub(super) fn parse_timestamp(value: &str) -> Result<i64, Error> {
-    if !super::scheduler::valid_timestamp(value) {
-        return Err(Error::InvalidTime);
-    }
-    let number = |start: usize, end: usize| {
-        value[start..end]
-            .parse::<u32>()
-            .map_err(|_| Error::InvalidTime)
-    };
-    let date = Date::from_calendar_date(
-        number(0, 4)? as i32,
-        Month::try_from(number(5, 7)? as u8).map_err(|_| Error::InvalidTime)?,
-        number(8, 10)? as u8,
-    )
-    .map_err(|_| Error::InvalidTime)?;
-    let time = Time::from_hms(
-        number(11, 13)? as u8,
-        number(14, 16)? as u8,
-        number(17, 19)? as u8,
-    )
-    .map_err(|_| Error::InvalidTime)?;
-    let seconds = PrimitiveDateTime::new(date, time)
-        .assume_utc()
-        .unix_timestamp();
-    if seconds < 0 {
-        return Err(Error::InvalidTime);
-    }
-    Ok(seconds)
+    crate::state_timestamp::parse(value).map_err(|_| Error::InvalidTime)
 }
 
 pub(super) fn plan(now: i64, checkpoint: Option<&str>, policy: Policy) -> Result<Window, Error> {

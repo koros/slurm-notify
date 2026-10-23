@@ -1,0 +1,6 @@
+Historical state: cluster=research-cluster
+Process health: unknown
+Checkpoint: age_seconds=unknown stale=true
+Queue sample: queued=0 due=0 retrying=0 failed=0 delivered=0 sampled=0 truncated=false
+Capacity sample: jobs=0 events=0 jobs_over_limit=false events_over_limit=false
+Retention sample: cleanup_eligible=0 completion_unproven=0

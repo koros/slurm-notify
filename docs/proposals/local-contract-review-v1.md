@@ -58,14 +58,15 @@ SIGINT/SIGTERM binding now exist privately. Combined OS resource/signal lifecycl
 and active-callback recovery are tested. See [ADR 0057](../adr/0057-private-combined-os-foreground-lifecycle.md)
 and the readiness evidence. Python draft checks are supplementary review tooling.
 The installed protected parser now serves webhook-only configuration validation
-with structural webhook/SMTP schemas and exact output baselines. Status and
+with structural webhook/SMTP schemas and exact output baselines. Offline historical
+status is installed without provider resource resolution. Live status and
 public events still need installed acceptance.
 
 | Activation gap | Concrete decision or implementation needed |
 | --- | --- |
 | First finite CLI | Help/version approved and implemented; later finite commands require config/output review |
-| Config validation/status | Decide exact public output and error mapping; support both webhook-only and mixed configs without relying on the mixed runtime's SMTP requirement |
-| Status while monitoring | Current inspection requires exclusive ownership and closed rollback-journal state; decide contention UX or implement a separately tested live inspection path |
+| Config validation/status | Installed validation/status have exact output/error baselines; status does not resolve provider resources and works for webhook/mixed metadata |
+| Status while monitoring | Installed historical status requires exclusive ownership and closed rollback-journal state; it reports busy without reading active state. Live inspection remains separate |
 | Signal exit policy | Draft proposes 130/143; the bridge now retains the first delivered handler reason (first atomic winner for concurrent handlers). Bind and test installed exits before activation |
 | Continuous foreground run | Continuous owned sessions now renew finite poll batches with shared clock/wait guards, retained health and ownership, plus cancellation/failure/restart acceptance; OS-backed installed orchestration remains pending |
 | Resource lifetime/deadlines | Environment lookup caps accepted bytes after OS allocation; NSS lookup is synchronous. Review deadline/failure behavior before claiming bounded installed startup |

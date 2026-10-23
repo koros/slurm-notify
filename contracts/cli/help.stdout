@@ -1,5 +1,6 @@
 Usage: slurm-notify --help | --version
        slurm-notify config validate --config <absolute-path>
+       slurm-notify status --config <absolute-path>
 
 Options:
   --help     Show this help
@@ -8,5 +9,6 @@ Options:
 
 Commands:
   config validate  Validate configuration and local resources
+  status           Inspect existing historical state
 
 Monitoring commands are not available in this build.

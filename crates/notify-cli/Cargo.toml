@@ -22,9 +22,12 @@ ring = "=0.17.14"
 lettre = { version = "=0.11.22", default-features = false, features = ["builder"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 
+# Existing read-only SQLite inspection and strict checkpoint timestamps.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks"] }
+time = "=0.3.55"
+
 [dev-dependencies]
 # Prototype-only bundled SQLite.
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # Private blocking HTTP prototype; no async runtime or response decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 httpdate = "=1.0.3"
@@ -35,7 +38,6 @@ email-encoding = "=0.4.1"
 idna_adapter = "=1.1.0"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
-time = "=0.3.55"
 # Explicit formatting dependency version for reproducible private TLS fixtures.
 powerfmt = { version = "=0.2.1", default-features = false }
 

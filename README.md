@@ -13,7 +13,8 @@ access or changes to batch scripts.
 
 **Current status: tested private engine; installed monitoring is unavailable.**
 The executable supports `--help`, `--version`, and
-`config validate --config <absolute-path>`. Empty or invalid
+`config validate --config <absolute-path>`, and `status --config <absolute-path>`.
+Status inspects existing historical state without resolving provider secrets. Empty or invalid
 invocations exit 2; unapproved SMTP profiles exit 3. Monitoring commands remain unavailable. No supported
 monitoring release is available yet. See the [installed configuration contract](contracts/config/README.md)
 for file permissions, resource requirements and exact SMTP permission checks.
@@ -25,7 +26,7 @@ for file permissions, resource requirements and exact SMTP permission checks.
 - Supervised HTTPS webhook and verified required-STARTTLS SMTP transports.
 - Protected config/trust snapshots, bounded Rust validation, explicit environment
   resources and effective-user lookup.
-- Owned foreground sessions, finite scheduling, SIGINT/SIGTERM cancellation and
+- Owned foreground sessions, continuous scheduling, SIGINT/SIGTERM cancellation and
   process tests for shutdown, partial delivery and restart recovery.
 - Linux/macOS CI, pre-commit/pre-push checks and a 90% minimum Rust coverage gate.
 
@@ -56,15 +57,18 @@ CI artifacts contain the finite development CLI.
 
 ## Remaining work
 
-The local MVP still needs installed CLI/configuration bindings, public webhook
-payload persistence, continuous foreground scheduling, setup/test/doctor/status
-flows, and permitted cluster/provider acceptance. The intended MVP includes generic
+The local MVP still needs public webhook payload persistence, installed continuous
+monitoring and delivery, setup/test/doctor flows, and permitted cluster/provider
+acceptance. Configuration validation and offline historical status are installed;
+continuous scheduling and owned-session recovery are tested internally. The intended MVP includes generic
 webhook and SMTP delivery. Slack/Teams scope remains to be settled. Log analysis
 and remote SSH monitoring are later phases.
 
 The [current plan](docs/architecture/implementation-plan.md) records the next work.
-The [contract review package](docs/proposals/local-contract-review-v1.md) contains
-proposed interfaces; its examples are not supported configuration or payloads.
+The [contract review package](docs/proposals/local-contract-review-v1.md) records
+adopted MVP interfaces and remaining acceptance. Configuration examples are synthetic
+and require real protected resources and exact SMTP permissions; public event emission
+remains unimplemented.
 The [original design](SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md),
 [implementation history](docs/architecture/implementation-history.md) and
 [ADRs](docs/adr/README.md) preserve design decisions and past evidence.

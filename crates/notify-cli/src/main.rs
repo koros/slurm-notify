@@ -16,13 +16,18 @@ mod foreground_signals;
 mod foreground_wait;
 mod installed_config;
 mod installed_smtp;
+mod installed_status;
 #[cfg(test)]
 mod mixed_config_composition;
 mod rendering_fingerprint;
 mod routing_validation;
 mod smtp_address;
+mod state_timestamp;
 #[cfg(test)]
 mod status_composition;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod status_store;
+mod storage_health;
 
 #[cfg(test)]
 mod config_composition;
@@ -79,7 +84,6 @@ mod webhook;
 #[cfg(test)]
 mod transport;
 
-#[cfg(test)]
 mod state_path;
 
 #[cfg(test)]
@@ -163,6 +167,36 @@ fn main() -> std::process::ExitCode {
         eprintln!("Usage: slurm-notify --help | --version");
         return std::process::ExitCode::from(2);
     }
+    if let Some(path) = status_path(&args) {
+        return match crate::installed_status::inspect(&path) {
+            Ok(output) => {
+                print!("{output}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => {
+                let (code, message) = match error {
+                    crate::installed_status::Error::Config => (2, "Configuration invalid or required resource unavailable."),
+                    crate::installed_status::Error::Missing => (1, "Existing state is missing or incomplete; no state was created."),
+                    crate::installed_status::Error::Busy => (1, "State is busy; stop the owner before inspecting historical state."),
+                    crate::installed_status::Error::State => (1, "State is unsafe, unreadable, or requires recovery; no repair was attempted."),
+                    crate::installed_status::Error::Version => (1, "State schema is unsupported; no migration was attempted."),
+                    crate::installed_status::Error::Database => (1, "State inspection failed; no repair was attempted."),
+                };
+                eprintln!("{message}");
+                std::process::ExitCode::from(code)
+            }
+        };
+    }
+    if args.len() == 2
+        && args.iter().any(|arg| arg == "--help")
+        && args.iter().any(|arg| arg == "status")
+    {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/status-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
     if let Some(path) = config_path(&args) {
         return match crate::installed_config::validate(&path) {
             Ok(output) => {
@@ -214,6 +248,36 @@ fn config_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
         }
     }
     if words.len() == 2 && words[0] == "config" && words[1] == "validate" {
+        path
+    } else {
+        None
+    }
+}
+
+fn status_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
+    if args.len() != 3 {
+        return None;
+    }
+    let mut path = None;
+    let mut command = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            if path.is_some() {
+                return None;
+            }
+            let value = args.next()?;
+            value.to_str()?;
+            let candidate = std::path::PathBuf::from(value);
+            if !candidate.is_absolute() {
+                return None;
+            }
+            path = Some(candidate);
+        } else if command.replace(arg).is_some() {
+            return None;
+        }
+    }
+    if command.is_some_and(|arg| arg == "status") {
         path
     } else {
         None

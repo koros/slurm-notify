@@ -13,6 +13,7 @@ mod unix {
         InvalidPath,
         UnsafePermissions,
         Io,
+        Missing,
         AlreadyOwned,
         UnsupportedState,
     }
@@ -39,7 +40,13 @@ mod unix {
             )
         };
         if fd < 0 {
-            return Err(Error::Io);
+            return Err(
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+                    Error::Missing
+                } else {
+                    Error::Io
+                },
+            );
         }
         // SAFETY: successful openat returns a new uniquely owned descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
@@ -57,6 +64,7 @@ mod unix {
     }
 
     impl Guard {
+        #[cfg(test)]
         pub(crate) fn acquire(path: &Path) -> Result<Self, Error> {
             Self::acquire_mode(path, true)
         }

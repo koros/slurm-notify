@@ -223,7 +223,7 @@ mod tests {
         let cycles = Cycles::new(1).unwrap();
         assert!(matches!(
             plan.inspect(&cycles, 10, Duration::from_millis(50)),
-            Err(InspectionError::State(crate::state_path::Error::Io))
+            Err(InspectionError::State(crate::state_path::Error::Missing))
         ));
         assert!(!state.exists());
         let owner = Store::open_private(state, Duration::from_millis(50)).unwrap();
@@ -242,7 +242,7 @@ mod tests {
         std::fs::remove_file(state.join(".owner.lock")).unwrap();
         assert!(matches!(
             inspect_fixture(&plan),
-            Err(InspectionError::State(crate::state_path::Error::Io))
+            Err(InspectionError::State(crate::state_path::Error::Missing))
         ));
         assert!(!state.join(".owner.lock").exists());
     }

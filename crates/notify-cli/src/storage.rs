@@ -130,28 +130,7 @@ pub(super) struct RetentionCandidate {
     status: String,
 }
 
-// Counts describe a bounded sample; truncation explicitly prevents exact totals.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct StorageHealth {
-    jobs_sampled: usize,
-    events_sampled: usize,
-    pub(super) jobs_over_capacity: bool,
-    pub(super) events_over_capacity: bool,
-    destinations_sampled: usize,
-    destinations_truncated: bool,
-    pending: usize,
-    due: usize,
-    delivered: usize,
-    failed: usize,
-    cleanup_eligible: usize,
-    completion_unproven: usize,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum HealthError {
-    InvalidInput,
-    Database,
-}
+pub(super) use crate::storage_health::{HealthError, StorageHealth};
 
 impl Store {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -178,24 +157,15 @@ impl Store {
         directory: &Path,
         lock_timeout: Duration,
     ) -> Result<Self, StorageError> {
-        let owner =
-            super::state_path::Guard::inspect(directory).map_err(StorageError::StatePath)?;
-        let db = Connection::open_with_flags(
-            &owner.database,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )?;
-        db.busy_timeout(lock_timeout)?;
-        db.pragma_update(None, "query_only", true)?;
-        db.pragma_update(None, "temp_store", "MEMORY")?;
-        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 4 {
-            return Err(StorageError::UnsupportedVersion);
-        }
+        let status =
+            crate::status_store::open(directory, lock_timeout).map_err(|error| match error {
+                crate::status_store::Error::State(error) => StorageError::StatePath(error),
+                crate::status_store::Error::Version => StorageError::UnsupportedVersion,
+                crate::status_store::Error::Database(error) => StorageError::Database(error),
+            })?;
         Ok(Self {
-            db,
-            _owner: Some(owner),
+            db: status.db,
+            _owner: Some(status._owner),
         })
     }
 
@@ -302,129 +272,15 @@ impl Store {
         sample_limit: usize,
         include_checkpoint: bool,
     ) -> Result<(StorageHealth, Option<String>), HealthError> {
-        let (capacity, event_capacity) = capacities;
-        if cluster.is_empty()
-            || now < 0
-            || retain_seconds <= 0
-            || capacity == 0
-            || event_capacity == 0
-            || sample_limit == 0
-        {
-            return Err(HealthError::InvalidInput);
-        }
-        let capacity_probe = i64::try_from(capacity)
-            .ok()
-            .and_then(|n| n.checked_add(1))
-            .ok_or(HealthError::InvalidInput)?;
-        let event_probe = i64::try_from(event_capacity)
-            .ok()
-            .and_then(|n| n.checked_add(1))
-            .ok_or(HealthError::InvalidInput)?;
-        let sample_probe = i64::try_from(sample_limit)
-            .ok()
-            .and_then(|n| n.checked_add(1))
-            .ok_or(HealthError::InvalidInput)?;
-        let cutoff = now.checked_sub(retain_seconds).unwrap_or(-1);
-        let report = (|| -> Result<(StorageHealth, Option<String>), rusqlite::Error> {
-            let tx = self.db.transaction()?;
-            let jobs: usize = tx.query_row(
-                "SELECT count(*) FROM (SELECT 1 FROM jobs WHERE cluster=?1 LIMIT ?2)",
-                params![cluster, capacity_probe],
-                |r| {
-                    let count: i64 = r.get(0)?;
-                    usize::try_from(count)
-                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, count))
-                },
-            )?;
-            let events: usize = tx.query_row(
-                "SELECT count(*) FROM (SELECT 1 FROM events WHERE cluster=?1 LIMIT ?2)",
-                params![cluster, event_probe],
-                |r| {
-                    let count: i64 = r.get(0)?;
-                    usize::try_from(count)
-                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, count))
-                },
-            )?;
-            let mut health = StorageHealth {
-                jobs_sampled: jobs,
-                events_sampled: events,
-                jobs_over_capacity: jobs > capacity,
-                events_over_capacity: events > event_capacity,
-                destinations_sampled: 0,
-                destinations_truncated: false,
-                pending: 0,
-                due: 0,
-                delivered: 0,
-                failed: 0,
-                cleanup_eligible: 0,
-                completion_unproven: 0,
-            };
-            let mut statement = tx.prepare(
-                "SELECT o.status,o.next_attempt_at,a.attempted_at,a.outcome
-                FROM events e JOIN outbox o ON o.event_id=e.event_id
-                LEFT JOIN delivery_attempts a ON a.event_id=o.event_id AND a.destination=o.destination
-                    AND a.attempt_number=(SELECT MAX(last.attempt_number) FROM delivery_attempts last
-                        WHERE last.event_id=o.event_id AND last.destination=o.destination)
-                WHERE e.cluster=?1 ORDER BY o.event_id,o.destination LIMIT ?2")?;
-            let rows = statement.query_map(params![cluster, sample_probe], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<i64>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                ))
-            })?;
-            for row in rows {
-                let (status, due_at, attempted_at, outcome) = row?;
-                if health.destinations_sampled == sample_limit {
-                    health.destinations_truncated = true;
-                    break;
-                }
-                health.destinations_sampled += 1;
-                match status.as_str() {
-                    "pending" => {
-                        health.pending += 1;
-                        if due_at <= now {
-                            health.due += 1;
-                        }
-                    }
-                    "delivered" | "failed" => {
-                        if status == "delivered" {
-                            health.delivered += 1;
-                        } else {
-                            health.failed += 1;
-                        }
-                        match (attempted_at, outcome.as_deref()) {
-                            (Some(time), Some("success" | "terminal_failure")) => {
-                                if time < cutoff {
-                                    health.cleanup_eligible += 1;
-                                }
-                            }
-                            _ => health.completion_unproven += 1,
-                        }
-                    }
-                    _ => return Err(rusqlite::Error::InvalidQuery),
-                }
-            }
-            drop(statement);
-            let checkpoint = if include_checkpoint {
-                tx
-                .query_row(
-                    "SELECT length(history_through),CASE WHEN length(history_through)=19 THEN history_through ELSE '' END FROM checkpoints WHERE cluster=?1",
-                    [cluster],
-                    |row| {
-                        if row.get::<_, i64>(0)? != 19 { return Err(rusqlite::Error::InvalidQuery); }
-                        row.get(1)
-                    },
-                )
-                .optional()?
-            } else {
-                None
-            };
-            tx.commit()?;
-            Ok((health, checkpoint))
-        })();
-        report.map_err(|_| HealthError::Database)
+        crate::storage_health::snapshot(
+            &mut self.db,
+            cluster,
+            now,
+            retain_seconds,
+            capacities,
+            sample_limit,
+            include_checkpoint,
+        )
     }
 
     // Preserve events/jobs/checkpoints: they are the restart deduplication ledger.

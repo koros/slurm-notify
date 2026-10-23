@@ -1,0 +1,5 @@
+Usage: slurm-notify status --config <absolute-path>
+
+Inspect existing historical state without resolving provider resources.
+Requires closed rollback-journal state and exclusive ownership.
+Does not prove that a monitoring process is running.

@@ -40,8 +40,14 @@ mod smtp_revision;
 mod smtp_revision_delivery;
 #[path = "../../crates/notify-cli/src/smtp_routes.rs"]
 mod smtp_routes;
+#[path = "../../crates/notify-cli/src/state_timestamp.rs"]
+mod state_timestamp;
+#[path = "../../crates/notify-cli/src/status_store.rs"]
+mod status_store;
 #[path = "../../crates/notify-cli/src/storage.rs"]
 mod storage;
+#[path = "../../crates/notify-cli/src/storage_health.rs"]
+mod storage_health;
 #[path = "../../crates/notify-cli/src/transport.rs"]
 mod transport;
 #[path = "../../crates/notify-cli/src/trust_snapshot.rs"]

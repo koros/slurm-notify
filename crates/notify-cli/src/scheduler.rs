@@ -169,45 +169,7 @@ pub(super) enum PollError {
 // Deliberately accepts only fixed-width UTC calendar timestamps, not Slurm's
 // relative date language. Lexical ordering is safe after calendar validation.
 pub(super) fn valid_timestamp(value: &str) -> bool {
-    let b = value.as_bytes();
-    if b.len() != 19
-        || b[4] != b'-'
-        || b[7] != b'-'
-        || b[10] != b'T'
-        || b[13] != b':'
-        || b[16] != b':'
-    {
-        return false;
-    }
-    if b.iter()
-        .enumerate()
-        .any(|(i, c)| ![4, 7, 10, 13, 16].contains(&i) && !c.is_ascii_digit())
-    {
-        return false;
-    }
-    let number = |start: usize, end: usize| value[start..end].parse::<u32>().unwrap();
-    let year = number(0, 4);
-    let month = number(5, 7);
-    let day = number(8, 10);
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if leap {
-                29
-            } else {
-                28
-            }
-        }
-        _ => return false,
-    };
-    year > 0
-        && day > 0
-        && day <= days
-        && number(11, 13) < 24
-        && number(14, 16) < 60
-        && number(17, 19) < 60
+    crate::state_timestamp::valid(value)
 }
 
 pub(super) struct PollRequest<'a> {

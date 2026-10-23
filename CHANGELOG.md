@@ -7,6 +7,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed metadata-only historical `status --config <absolute-path>` with sampled
+  queue/checkpoint output, explicit busy/missing/unsafe/schema diagnostics, cooperative
+  SQL timeout and binary acceptance proving read-only, existing-only inspection.
+
 - Installed SMTP/mixed configuration validation with protected DER trust loading,
   current profile/rendering fingerprints, exact permission checks before credentials,
   static exit-3 denial diagnostics and no-connect/no-state binary acceptance.

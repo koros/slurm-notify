@@ -10,21 +10,22 @@ preserves past increments without treating their next steps as current instructi
 The target is a local foreground MVP with generic HTTPS webhook and required
 STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
 setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
-help/version and webhook/SMTP configuration validation are installed. MIT licensing, refreshed guidance,
+help/version, webhook/SMTP configuration validation and historical status are installed. MIT licensing, refreshed guidance,
 90% coverage and accurate badges are complete.
 
 Continuous scheduling and first-signal reason retention are now implemented
 privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
 Continuous scheduling now retains one owned session across poll-batch renewal
-([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Next bind finite
-status, OS-backed orchestration and monitoring commands.
+([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Historical status is
+installed ([ADR 0062](../adr/0062-installed-historical-status.md)); next complete
+public event persistence and bind OS-backed orchestration and monitoring commands.
 
 ## Next product milestones
 
 1. Completed: the approved [help/version slice](../proposals/finite-cli-activation-v1.md)
    has exact output/exit snapshots and installed-binary acceptance.
-2. Settle config/status semantics and baselines; connect existing protected Rust
-   preparation and OS resources to installed commands, with no hidden sending.
+2. Completed: installed webhook/SMTP configuration validation and offline historical
+   status, with deliberate schemas/output baselines and no hidden sending.
 3. Complete public event persistence: opaque IDs, frozen webhook bytes, immutable
    routes and source timestamp/null semantics. Assess the UUID source/dependencies.
 4. Map retained signal reasons and bind OS-backed continuous orchestration; complete

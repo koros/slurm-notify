@@ -40,7 +40,8 @@ Until that workflow exists, SMTP enrollment is a development acceptance limitati
 The examples' numeric values are not defaults or polling-policy recommendations.
 OS environment lookup allocates before accepted-byte checks and has no promised
 hard startup deadline. Validation cannot prove TLS handshake/relay acceptance or
-human receipt. Monitor/start/status/test/doctor/init commands remain unavailable.
+human receipt. Historical `status` inspects existing state without resolving provider
+resources. Monitor/start/test/doctor/init commands remain unavailable.
 
 Compatibility: this unreleased 0.0.0 increment replaces the explicit unsupported-SMTP
 exit-2 diagnostic with supported validation and exact-permission exit 3. Global and

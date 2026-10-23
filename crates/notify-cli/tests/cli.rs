@@ -253,7 +253,7 @@ fn config_grammar_and_help_require_no_resources() {
             "config", "validate", "--config", "/private", "--config", "/private",
         ],
         vec!["config", "validate", "--config", "/private", "--help"],
-        vec!["status", "--config", "/private"],
+        vec!["start", "--config", "/private"],
         vec!["config", "validate", "--unknown", "/private"],
     ] {
         let args: Vec<_> = args.iter().map(OsStr::new).collect();
@@ -401,4 +401,241 @@ fn installed_smtp_validation_approves_exact_pairs_without_state_or_network() {
     assert!(!directory.join("absent-state").exists());
     assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_status_is_existing_only_read_only_private_and_bounded() {
+    use std::os::{fd::AsRawFd, unix::fs::PermissionsExt};
+    let root = std::env::temp_dir().join(format!("slurm-notify-status-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.join("config.json");
+    let state = root.join("state");
+    let database = state.join("state.sqlite3");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../contracts/config/local-mixed-v1.example.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(database);
+    let write_config = |source: &serde_json::Value| {
+        std::fs::write(&path, serde_json::to_vec(source).unwrap()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    write_config(&source);
+    let invoke = || {
+        command()
+            .args([
+                OsStr::new("status"),
+                OsStr::new("--config"),
+                path.as_os_str(),
+            ])
+            .current_dir(&root)
+            .output()
+            .unwrap()
+    };
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-missing.stderr"),
+    );
+    assert!(!state.exists());
+    std::fs::create_dir(&state).unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let lock_path = state.join(".owner.lock");
+    std::fs::write(&lock_path, b"").unwrap();
+    std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let db = rusqlite::Connection::open(&database).unwrap();
+    for migration in [
+        include_str!("../../notify-storage/migrations/0001.sql"),
+        include_str!("../../notify-storage/migrations/0002.sql"),
+        include_str!("../../notify-storage/migrations/0003.sql"),
+        include_str!("../../notify-storage/migrations/0004.sql"),
+    ] {
+        db.execute_batch(migration).unwrap();
+    }
+    drop(db);
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let before = std::fs::read(&database).unwrap();
+    expect(
+        invoke(),
+        0,
+        include_bytes!("../../../contracts/cli/status-empty.stdout"),
+        b"",
+    );
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+    assert_eq!(std::fs::read_dir(&state).unwrap().count(), 2);
+    let owner = std::fs::File::open(&lock_path).unwrap();
+    assert_eq!(
+        unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0
+    );
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-busy.stderr"),
+    );
+    drop(owner);
+    expect(
+        invoke(),
+        0,
+        include_bytes!("../../../contracts/cli/status-empty.stdout"),
+        b"",
+    );
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch("INSERT INTO jobs VALUES ('research-cluster','1','s','actual','COMPLETED',1);
+        INSERT INTO events VALUES ('private-job-id','research-cluster','1','s','actual','JOB_COMPLETED',1);
+        INSERT INTO outbox VALUES ('private-job-id','private-destination','pending',1);
+        INSERT INTO delivery_attempts VALUES ('private-job-id','private-destination',1,1,'transient_failure');").unwrap();
+    drop(db);
+    let before = std::fs::read(&database).unwrap();
+    let output = invoke();
+    assert!(output.status.success());
+    let text = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(
+        text.contains("queued=1 due=1 retrying=1 failed=0 delivered=0 sampled=1 truncated=false")
+    );
+    assert!(!text.contains("private-job") && !text.contains("private-destination"));
+    assert!(output.stderr.is_empty());
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(
+        "INSERT INTO outbox VALUES ('private-job-id','second-private','failed',1);
+        INSERT INTO checkpoints VALUES ('research-cluster','1970-01-01T00:00:00');",
+    )
+    .unwrap();
+    drop(db);
+    let report = invoke();
+    assert!(report.status.success());
+    let text = String::from_utf8(report.stdout).unwrap();
+    assert!(text.contains("failed=1") && text.contains("completion_unproven=1"));
+    let now = time::OffsetDateTime::now_utc();
+    let checkpoint = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    );
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute("UPDATE checkpoints SET history_through=?1", [checkpoint])
+        .unwrap();
+    drop(db);
+    let report = invoke();
+    assert!(report.status.success());
+    assert!(String::from_utf8(report.stdout)
+        .unwrap()
+        .contains("stale=false"));
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute(
+        "UPDATE checkpoints SET history_through='1970-01-01T00:00:00'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    source["maintenance"]["health_sample_limit"] = serde_json::json!(1);
+    write_config(&source);
+    let output = invoke();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("stale=true") && text.contains("truncated=true"));
+    assert!(!text.contains("age_seconds=unknown"));
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute(
+        "UPDATE checkpoints SET history_through='9999-01-01T00:00:00'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-failed.stderr"),
+    );
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.pragma_update(None, "user_version", 99).unwrap();
+    drop(db);
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-version.stderr"),
+    );
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o644)).unwrap();
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-unsafe.stderr"),
+    );
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(state.join("state.sqlite3-wal"), b"private-sidecar").unwrap();
+    std::fs::set_permissions(
+        state.join("state.sqlite3-wal"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-unsafe.stderr"),
+    );
+    assert_eq!(
+        std::fs::read(state.join("state.sqlite3-wal")).unwrap(),
+        b"private-sidecar"
+    );
+    std::fs::remove_file(state.join("state.sqlite3-wal")).unwrap();
+    std::fs::remove_file(&database).unwrap();
+    let target = root.join("private-target");
+    std::fs::write(&target, b"private target bytes").unwrap();
+    std::os::unix::fs::symlink(&target, &database).unwrap();
+    expect(
+        invoke(),
+        1,
+        b"",
+        include_bytes!("../../../contracts/cli/status-unsafe.stderr"),
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"private target bytes");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn status_grammar_and_help_do_not_resolve_resources() {
+    for args in [["status", "--help"], ["--help", "status"]] {
+        let args: Vec<_> = args.iter().map(OsStr::new).collect();
+        expect(
+            run(&args),
+            0,
+            include_bytes!("../../../contracts/cli/status-help.stdout"),
+            b"",
+        );
+    }
+    for args in [
+        vec!["status"],
+        vec!["status", "--config", "relative"],
+        vec!["status", "--config", "/private", "--config", "/private"],
+        vec!["status", "--config", "/private", "extra"],
+        vec!["status", "--unknown", "/private"],
+        vec!["status", "--config", "/private", "--help"],
+    ] {
+        let args: Vec<_> = args.iter().map(OsStr::new).collect();
+        expect(run(&args), 2, b"", INVALID);
+    }
+    expect(
+        run(&[
+            OsStr::new("--config"),
+            OsStr::new("/slurm-notify-missing/config"),
+            OsStr::new("status"),
+        ]),
+        2,
+        b"",
+        include_bytes!("../../../contracts/cli/config-invalid.stderr"),
+    );
 }
