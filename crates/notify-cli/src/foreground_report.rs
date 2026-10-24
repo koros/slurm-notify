@@ -69,6 +69,16 @@ impl Report {
             Err(_) => Self::classify(result),
         }
     }
+    pub(super) fn cancelled(&self) -> bool {
+        self.outcome == Outcome::Cancelled
+    }
+    pub(super) fn exit_code(&self) -> u8 {
+        if self.outcome == Outcome::Exhausted {
+            0
+        } else {
+            1
+        }
+    }
     pub(super) fn render(&self) -> String {
         let token = match &self.outcome {
             Outcome::Cancelled => "cancelled",
@@ -193,6 +203,15 @@ impl StartupReport {
                 Error::Ownership => StartupOutcome::Ownership,
                 Error::Closed | Error::Cycle | Error::Status => StartupOutcome::InvalidPhase,
             },
+        }
+    }
+    pub(super) fn cancelled(&self) -> bool {
+        self.outcome == StartupOutcome::Cancelled
+    }
+    pub(super) fn exit_code(&self) -> u8 {
+        match self.outcome {
+            StartupOutcome::Limit | StartupOutcome::Preparation => 2,
+            _ => 1,
         }
     }
     pub(super) fn render(&self) -> String {

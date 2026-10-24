@@ -251,12 +251,15 @@ fn signal_lifecycle(path: &Path) {
         },
     );
     assert!(signal.cancelled().unwrap());
+    let code = summary.exit_code(binding.reason());
     drop(binding);
     // Verify bridge ownership/worker cleanup before emitting the bounded report.
     let fresh = crate::foreground_wait::Signal::new();
     drop(crate::foreground_signals::bind(&fresh).unwrap());
     assert!(!fresh.cancelled().unwrap());
     print!("{}", summary.render());
+    std::io::stdout().flush().unwrap();
+    std::process::exit(i32::from(code));
 }
 
 fn blocked_tick(
@@ -478,11 +481,16 @@ pub(super) fn acceptance() {
         );
         let before = crate::status_boundary::files(&state);
         if matches!(mode, "--foreground-os-int" | "--foreground-os-term") {
-            running.finish_signal(
+            running.finish_signal_code(
                 if mode == "--foreground-os-int" {
                     libc::SIGINT
                 } else {
                     libc::SIGTERM
+                },
+                if mode == "--foreground-os-int" {
+                    130
+                } else {
+                    143
                 },
                 expected,
             );

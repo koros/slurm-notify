@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 409 private Rust tests plus nine installed CLI acceptance tests
+The latest implementation milestone passed 410 private Rust tests plus nine installed CLI acceptance tests
 and six provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.14% (25,264/26,007); the gate is 90%.
+Python tests. Rust line coverage was 97.15% (25,321/26,064); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Private capability | Evidence | Remaining installed gap |
@@ -40,7 +40,7 @@ These are recorded local results, not a claim that hosted checks currently pass.
 | Identity, controls and resources | [Identity mapping](../../crates/notify-cli/src/observation_mapping.rs), [controls](../../crates/notify-cli/src/runtime_mapping.rs), [SMTP resolution](../../crates/notify-cli/src/provider_resolution.rs), [webhook resolution](../../crates/notify-cli/src/webhook_resolution.rs) | Local continuous orchestration now binds environment, effective UID and bounded scheduler processes; installed helper selection and bounded account-lookup duration remain pending |
 | Owned state and status | [Session](../../crates/notify-cli/src/foreground_session.rs), [status composition](../../crates/notify-cli/src/status_composition.rs), [status process acceptance](../../tests/integration/status_boundary.rs) | Installed historical status/output snapshots exist; inspection requires existing closed rollback-journal state and cooperating exclusive ownership |
 | Mixed routing and durable recovery | [Runtime cycles](../../crates/notify-cli/src/polling_cycle.rs), [route selection](../../crates/notify-cli/src/route_selection.rs), [active process acceptance](../../tests/integration/active_tick_boundary.rs) | Installed resource and exact SMTP permission enrollment; transactional public frames and mixed SMTP preparation/admission are tested; mixed public delivery composition is tested; public runtime-cycle integration is tested; owned-session public ticks and continuous startup/shutdown orchestration are tested; installed monitoring remains pending |
-| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; first-signal retention and continuous scheduler exist; owned continuous poll-budget renewal is tested; installed exit mapping and bindings remain pending |
+| Foreground orchestration | [Unified runtime](../../crates/notify-cli/src/foreground_runtime.rs), [schedule](../../crates/notify-cli/src/foreground_schedule.rs), [shared wait](../../crates/notify-cli/src/foreground_wait.rs), [process acceptance](../../tests/integration/foreground_boundary.rs) | Combined OS lifecycle and cooperative callback recovery are tested; first-signal retention and continuous scheduler exist; owned continuous poll-budget renewal is tested; retained-signal exit mapping is tested with real signals; installed helper/command bindings remain pending |
 | Bounded lifecycle diagnostics | [Reports](../../crates/notify-cli/src/foreground_report.rs), [startup process acceptance](../../tests/integration/startup_boundary.rs) | Reviewed public output and exit policy; private summaries are static ASCII capped at 96 bytes |
 | Provider transport | [Webhook](../../crates/notify-cli/src/webhook.rs), [transport process acceptance](../../tests/integration/transport_boundary.rs) | Public UUID/frozen JSON/endpoint revisions are tested internally; stored-frame supervised adapter has controlled child acceptance; mixed delivery composition has partial-completion/restart acceptance; public runtime-cycle integration is tested; owned-session public ticks and continuous orchestration are tested; installed monitoring and authorized real-provider acceptance remain pending |
 

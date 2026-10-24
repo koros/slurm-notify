@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private foreground summary exit mapping now returns 130/143 only for cancelled
+  runs with retained SIGINT/SIGTERM reasons. Startup input/resource failures retain
+  exit 2 and runtime/ownership failures retain exit 1 despite late signals. Real
+  signal process acceptance verifies exact exit codes, cleanup and durable state.
+
 - Private local continuous orchestration now binds effective-UID identity, explicit
   environment references, bounded direct scheduler execution and wall-clock samples
   to public owned ticks. Absolute scheduler paths and explicit helper commands are

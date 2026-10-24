@@ -36,9 +36,10 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    Continuous startup/shutdown orchestration now uses OS monotonic/interruptible
    waits and correctly bounded summaries for unbounded tick counts. Local orchestration now binds effective UID, explicit environment references,
    absolute scheduler programs, bounded subprocesses and caller-owned provider helpers.
-   Next define installed helper selection and bind signal/exit semantics for monitoring.
-4. Map retained signal reasons and bind OS-backed continuous orchestration; complete
-   webhook-only composition and status contention behavior, then activate reviewed
+   Retained signal/exit mapping now has exact SIGINT/SIGTERM process acceptance.
+   Next define installed helper selection and activate monitoring.
+4. Complete installed orchestration/helper binding and
+   webhook-only composition and status contention acceptance, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
    platform/Slurm baseline. Complete security reporting, installation/upgrade,

@@ -167,11 +167,26 @@ impl Running {
         );
         self.collect(true, expected);
     }
+    pub(super) fn finish_signal_code(&mut self, number: libc::c_int, code: i32, expected: &[u8]) {
+        assert!(matches!(number, libc::SIGINT | libc::SIGTERM));
+        // SAFETY: target is the owned READY child PID and a valid signal.
+        assert_eq!(
+            unsafe { libc::kill(self.child.id().try_into().unwrap(), number) },
+            0
+        );
+        self.collect_status(false, expected, Some(code));
+    }
     fn collect(&mut self, success: bool, expected: &[u8]) {
+        self.collect_status(success, expected, None);
+    }
+    fn collect_status(&mut self, success: bool, expected: &[u8], code: Option<i32>) {
         let until = Instant::now() + Duration::from_secs(2);
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
                 assert_eq!(status.success(), success);
+                if let Some(code) = code {
+                    assert_eq!(status.code(), Some(code));
+                }
                 break;
             }
             assert!(Instant::now() < until, "status child did not exit");

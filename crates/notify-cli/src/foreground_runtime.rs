@@ -28,6 +28,23 @@ pub(super) enum Summary {
     Shutdown(Report),
 }
 impl Summary {
+    // Read the retained reason while the signal binding is still owned. A late
+    // signal cannot turn a completed failure into a successful cancellation.
+    pub(super) fn exit_code(&self, reason: Option<crate::foreground_signals::Reason>) -> u8 {
+        let (cancelled, code) = match self {
+            Self::Startup(report) => (report.cancelled(), report.exit_code()),
+            Self::Shutdown(report) => (report.cancelled(), report.exit_code()),
+        };
+        if cancelled {
+            match reason {
+                Some(crate::foreground_signals::Reason::Interrupt) => 130,
+                Some(crate::foreground_signals::Reason::Terminate) => 143,
+                None => code,
+            }
+        } else {
+            code
+        }
+    }
     pub(super) fn render(&self) -> String {
         match self {
             Self::Startup(report) => report.render(),
@@ -159,6 +176,53 @@ where
 mod tests {
     #[allow(unused_imports)] // Custom process harness omits unit test bodies.
     use super::*;
+    #[test]
+    fn exit_mapping_uses_retained_signals_only_for_cancellation() {
+        use crate::{
+            foreground_schedule::{Error as ScheduleError, Exit},
+            foreground_signals::Reason,
+        };
+        for (signal, expected) in [
+            (None, 1),
+            (Some(Reason::Interrupt), 130),
+            (Some(Reason::Terminate), 143),
+        ] {
+            let report = Summary::Shutdown(Report::classify_continuous(&Ok(Exit::Cancelled {
+                ticks: 1025,
+            })));
+            assert_eq!(report.exit_code(signal), expected);
+        }
+        for (error, expected) in [
+            (Error::Cancelled, 1),
+            (Error::InvalidLimit, 2),
+            (Error::Preparation, 2),
+            (Error::Ownership, 1),
+            (Error::Cycle, 1),
+        ] {
+            let report = Summary::Startup(StartupReport::classify(error));
+            assert_eq!(report.exit_code(None), expected);
+        }
+        assert_eq!(
+            Summary::Startup(StartupReport::classify(Error::Cancelled))
+                .exit_code(Some(Reason::Interrupt)),
+            130
+        );
+        assert_eq!(
+            Summary::Startup(StartupReport::classify(Error::Preparation))
+                .exit_code(Some(Reason::Terminate)),
+            2
+        );
+        assert_eq!(
+            Summary::Shutdown(Report::classify(&Err(ScheduleError::Wait)))
+                .exit_code(Some(Reason::Interrupt)),
+            1
+        );
+        assert_eq!(
+            Summary::Shutdown(Report::classify(&Ok(Exit::Exhausted { ticks: 1 })))
+                .exit_code(Some(Reason::Terminate)),
+            0
+        );
+    }
     #[test]
     fn local_adapter_requires_absolute_programs_and_preserves_startup_precedence() {
         for (cancel, batch, active, accounting, expected) in [
