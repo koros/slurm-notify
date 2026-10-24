@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private provider helper selection now captures the current executable and builds
+  fixed versioned webhook/required-STARTTLS commands without PATH/environment helper
+  discovery. Exact grammar and malformed-stdin process acceptance are covered;
+  installed helper handlers remain pending.
+
 - Private foreground summary exit mapping now returns 130/143 only for cancelled
   runs with retained SIGINT/SIGTERM reasons. Startup input/resource failures retain
   exit 2 and runtime/ownership failures retain exit 1 despite late signals. Real

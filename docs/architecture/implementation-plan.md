@@ -37,7 +37,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    waits and correctly bounded summaries for unbounded tick counts. Local orchestration now binds effective UID, explicit environment references,
    absolute scheduler programs, bounded subprocesses and caller-owned provider helpers.
    Retained signal/exit mapping now has exact SIGINT/SIGTERM process acceptance.
-   Next define installed helper selection and activate monitoring.
+   Private same-executable helper selection now has exact grammar and process
+   acceptance ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
+   Next activate installed bounded helper handlers, then monitoring.
 4. Complete installed orchestration/helper binding and
    webhook-only composition and status contention acceptance, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

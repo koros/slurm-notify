@@ -163,7 +163,41 @@ use rusqlite::OptionalExtension;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[path = "../../crates/notify-cli/src/provider_helpers.rs"]
+mod provider_helpers;
+
 fn main() {
+    let helper_args: Vec<_> = std::env::args_os().skip(1).collect();
+    if helper_args
+        .first()
+        .is_some_and(|arg| arg == "--internal-provider-v1")
+    {
+        let ok = match provider_helpers::mode(&helper_args) {
+            Some(provider_helpers::Kind::Webhook) => transport::serve(
+                std::io::stdin(),
+                std::io::stdout(),
+                20 + 4096 + 4096 + 128 + 16384 + 5,
+                |fields| {
+                    if fields.len() != 5
+                        || std::str::from_utf8(&fields[0])
+                            .ok()
+                            .and_then(|url| webhook::endpoint_url(url).ok())
+                            .is_none_or(|url| url.scheme() != "https")
+                    {
+                        return Err(transport::Error::InvalidInput);
+                    }
+                    transport::send_fields(fields, false)
+                },
+            )
+            .is_ok(),
+            Some(provider_helpers::Kind::Smtp) => {
+                smtp_bound_transport::serve(std::io::stdin(), std::io::stdout()).is_ok()
+            }
+            None => false,
+        };
+        std::process::exit(if ok { 0 } else { 2 });
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if os_startup_boundary::child()
         || startup_boundary::child()
@@ -382,6 +416,24 @@ fn acceptance() {
         transport::supervise(&mut child, vec![255; 4], Duration::from_secs(2), 4096, 64).is_err()
     );
     status_boundary::acceptance();
+    let helpers = provider_helpers::Selection::current().unwrap();
+    for kind in [
+        provider_helpers::Kind::Webhook,
+        provider_helpers::Kind::Smtp,
+    ] {
+        // Malformed stdin must exit without connecting; the selected image handles
+        // its exact private grammar instead of recursing into the parent harness.
+        assert!(matches!(
+            transport::supervise(
+                &mut helpers.command(kind),
+                Vec::new(),
+                Duration::from_secs(2),
+                64,
+                64
+            ),
+            Err(transport::Error::ChildExit | transport::Error::InvalidResult)
+        ));
+    }
     foreground_boundary::acceptance();
     active_tick_boundary::acceptance();
     startup_boundary::acceptance();
