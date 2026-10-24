@@ -11,11 +11,11 @@ Slurm Notify is an MIT-licensed Rust project for user-space Slurm job notificati
 It aims to discover the current user's jobs and send lifecycle alerts without root
 access or changes to batch scripts.
 
-**Current status: prototype foreground monitoring is installed for SMTP/mixed configs.**
+**Current status: prototype foreground monitoring accepts webhook, SMTP and mixed configs.**
 The executable supports `--help`, `--version`,
 `config validate --config <absolute-path>`, `status --config <absolute-path>`, and
-`start --foreground --config <absolute-path>` on Linux/macOS. Start currently requires
-at least one SMTP provider; webhook-only monitoring remains unavailable. Validate
+`start --foreground --config <absolute-path>` on Linux/macOS. Webhook-only runs have persistence/restart acceptance; successful installed HTTPS
+delivery acceptance remains outstanding. Validate
 site polling/execution policy before starting on a real cluster. No supported
 monitoring release is available yet. See the [CLI contract](contracts/cli/README.md)
 and [configuration contract](contracts/config/README.md) for exact behavior.
@@ -63,7 +63,7 @@ CI artifacts contain the development prototype CLI.
 
 ## Remaining work
 
-The local MVP still needs webhook-only foreground composition, successful installed
+The local MVP still needs successful installed HTTPS
 webhook helper acceptance, setup/test/doctor flows and authorized cluster/provider
 acceptance. Installed SMTP/mixed foreground runs now have synthetic scheduler,
 verified-STARTTLS submission, signal and durable restart acceptance. The intended MVP includes generic

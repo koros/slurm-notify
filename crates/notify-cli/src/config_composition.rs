@@ -37,7 +37,6 @@ pub(super) struct PollInput<'a> {
 impl Plan {
     // Public webhook transactions use actual prepared HTTPS resource revisions.
     // Mixed SMTP composition must opt in separately; never silently drop its routes.
-    #[cfg(test)]
     pub(super) fn poll_public_with(
         &self,
         input: PollInput<'_>,

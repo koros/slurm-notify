@@ -15,6 +15,7 @@ pub(super) enum Error {
     Snapshot(crate::config_snapshot::Error),
     Validation(config_validate::Error),
     Shape,
+    #[cfg(test)]
     NoSmtp,
     Rendering,
     Profile,
@@ -495,6 +496,19 @@ impl Plan {
             usize,
         ) -> Result<String, crate::scheduler::QueryError>,
     ) -> Result<Vec<crate::lifecycle::Event>, crate::smtp_poll::Error> {
+        if public && self.smtp.is_empty() {
+            return self
+                .common
+                .poll_public_with(input, reconciler, store, query)
+                .map_err(|error| match error {
+                    crate::scheduler::DurablePollError::Poll(error) => {
+                        crate::smtp_poll::Error::Poll(error)
+                    }
+                    crate::scheduler::DurablePollError::Storage(error) => {
+                        crate::smtp_poll::Error::Storage(error)
+                    }
+                });
+        }
         let mut names: Vec<_> = self
             .common
             .webhooks
@@ -591,19 +605,23 @@ pub(super) fn prepare(
         });
         entries.push(p);
     }
-    if routes.is_empty() {
-        return Err(Error::NoSmtp);
-    }
     let delivery = object(get(root, "delivery").map_err(shape)?).map_err(shape)?;
     let integer = |p, key| match get(p, key).map_err(shape)? {
         crate::config_decode::Value::Integer(n) => Ok(*n),
         _ => Err(Error::Shape),
     };
-    let max_messages = usize::try_from(integer(delivery, "prepared_smtp_message_limit")?)
-        .map_err(|_| Error::Shape)?;
+    let max_messages = if routes.is_empty() {
+        0
+    } else {
+        usize::try_from(integer(delivery, "prepared_smtp_message_limit")?)
+            .map_err(|_| Error::Shape)?
+    };
     // Validate all rendering metadata before protected trust reads or injected lookups.
-    let rendering =
-        smtp_routes::Plan::new(&names, &routes, max_messages).map_err(|_| Error::Rendering)?;
+    let rendering = if routes.is_empty() {
+        None
+    } else {
+        Some(smtp_routes::Plan::new(&names, &routes, max_messages).map_err(|_| Error::Rendering)?)
+    };
     let mut smtp = Vec::new();
     for (route, p) in routes.iter().zip(entries) {
         let roots = list(get(p, "trust_der_files").map_err(shape)?, 1, 32)
@@ -637,9 +655,11 @@ pub(super) fn prepare(
         let trust = trust_snapshot::load(&roots.iter().map(PathBuf::from).collect::<Vec<_>>())
             .map_err(Error::Trust)?;
         let descriptor = profile(trust.fingerprint())?;
-        let _revision =
-            crate::smtp_revision::Descriptor::from_revision_plan(&rendering, route.name)
-                .map_err(|_| Error::Rendering)?;
+        let _revision = crate::smtp_revision::Descriptor::from_revision_plan(
+            rendering.as_ref().ok_or(Error::Rendering)?,
+            route.name,
+        )
+        .map_err(|_| Error::Rendering)?;
         smtp.push(Smtp {
             name: Zeroizing::new(route.name.into()),
             sender: Zeroizing::new(route.metadata.sender.into()),
@@ -656,7 +676,16 @@ pub(super) fn prepare(
         });
     }
     let mut permissions = Vec::new();
-    for value in list(get(delivery, "smtp_permissions").map_err(shape)?, 0, 64).map_err(shape)? {
+    let permission_values = delivery
+        .iter()
+        .find(|(key, _)| key.as_str() == "smtp_permissions")
+        .map(|(_, value)| value);
+    for value in permission_values
+        .map(|value| list(value, 0, 64))
+        .transpose()
+        .map_err(shape)?
+        .unwrap_or_default()
+    {
         let p = object(value).map_err(shape)?;
         let values = [
             "cluster_id",

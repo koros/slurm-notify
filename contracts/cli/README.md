@@ -5,7 +5,7 @@ approval on 2026-10-12. Snapshots are intentional UTF-8 bytes with final newline
 acceptance compares streams and exit codes without regenerating baselines.
 
 Installed user commands are help/version, configuration validation, historical status
-and prototype `start --foreground` for SMTP/mixed configurations. No arguments emit
+and prototype `start --foreground` for webhook, SMTP and mixed configurations. No arguments emit
 `no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
 `invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
 versioned child protocols, not user provider-test commands. There is no service
@@ -90,8 +90,9 @@ monitoring command acceptance remains pending.
 `start --foreground --config <absolute-path>` accepts exactly these words/options in
 any order, with no duplicates or extra values. `start --help` and `--help start` use
 `start-help.stdout` without resource access. Global help intentionally adds start.
-The command is implemented on Linux/macOS and requires at least one SMTP provider;
-webhook-only configuration exits 2 before state creation.
+The command is implemented on Linux/macOS and accepts webhook-only, SMTP-only
+and mixed configurations. Webhook-only runs require no SMTP limits or permissions.
+Missing webhook resources still exit 2 before state creation.
 
 Startup reads one protected snapshot. Slurm programs resolve once from PATH with
 at most 4,096 bytes and 64 absolute directory entries; missing programs exit 2

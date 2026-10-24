@@ -1399,42 +1399,164 @@ fn installed_foreground_keeps_blocked_smtp_frozen_across_signals_and_restart() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn installed_foreground_rejects_webhook_only_before_resources_or_state() {
+fn installed_foreground_webhook_only_persists_and_reopens_without_smtp() {
     use std::{
-        io::Write,
+        io::{BufRead, BufReader, Write},
         os::unix::fs::{OpenOptionsExt, PermissionsExt},
+        process::Stdio,
+        sync::mpsc,
+        time::{Duration, Instant},
     };
+    struct Reap(std::process::Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
     let root =
         std::env::temp_dir().join(format!("slurm-notify-start-webhook-{}", std::process::id()));
     std::fs::create_dir(&root).unwrap();
     let root = root.canonicalize().unwrap();
     std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
     let path = root.join("config.json");
-    let state = root.join("absent-state");
+    let state = root.join("state/state.sqlite3");
     let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
         "../../../docs/proposals/examples/local-webhook-config.json"
     ))
     .unwrap();
-    source["storage"]["path"] = serde_json::json!(state.join("state.sqlite3"));
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .unwrap()
-        .write_all(&serde_json::to_vec(&source).unwrap())
-        .unwrap();
+    source["storage"]["path"] = serde_json::json!(state);
+    source["monitor"]["initial_observation"] = serde_json::json!("emit");
+    let write = |path: &std::path::Path, bytes: &[u8], mode| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    write(&path, &serde_json::to_vec(&source).unwrap(), 0o600);
+    for (name,body) in [("squeue","#!/bin/sh\nexit 0\n"),
+        ("sacct","#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {
+        write(&root.join(name), body.as_bytes(), 0o700);
+    }
     expect(
         command()
             .args(["start", "--foreground", "--config"])
             .arg(&path)
+            .env("PATH", &root)
             .output()
             .unwrap(),
         2,
         b"",
-        b"Foreground monitoring requires at least one SMTP provider in this build.\n",
+        b"Configuration invalid or required resource unavailable.\n",
     );
     assert!(!state.exists());
+    // An owned, closed loopback port gives a controlled connection failure.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!(
+        "https://127.0.0.1:{}/hook",
+        listener.local_addr().unwrap().port()
+    );
+    drop(listener);
+    let mut previous = None;
+    for signal in [libc::SIGINT, libc::SIGTERM] {
+        let mut child = Reap(
+            command()
+                .args(["start", "--foreground", "--config"])
+                .arg(&path)
+                .env("PATH", &root)
+                .env("SLURM_NOTIFY_WEBHOOK_URL", &url)
+                .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stderr = child.0.stderr.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().take(10) {
+                if tx.send(line.unwrap()).is_err() {
+                    break;
+                }
+            }
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "Foreground monitoring started."
+        );
+        // Health follows the first poll and failed attempt; no SMTP credentials exist.
+        let stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let output = std::thread::spawn(move || {
+            let mut line = String::new();
+            BufReader::new(stdout).read_line(&mut line).unwrap();
+            let _ = tx.send(line);
+        });
+        assert!(rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .starts_with("Foreground health:"));
+        // SAFETY: this signal targets the owned child process.
+        assert_eq!(
+            unsafe { libc::kill(child.0.id().try_into().unwrap(), signal) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert_eq!(
+                    status.code(),
+                    Some(if signal == libc::SIGINT { 130 } else { 143 })
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        reader.join().unwrap();
+        output.join().unwrap();
+        let db = rusqlite::Connection::open_with_flags(
+            &state,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let frozen: (String, Vec<u8>) = db
+            .query_row(
+                "SELECT internal_event_id, payload FROM public_event_frames",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        if let Some(old) = &previous {
+            assert_eq!(&frozen, old);
+        }
+        previous = Some(frozen);
+        assert!(
+            db.query_row(
+                "SELECT COUNT(*) FROM delivery_attempts WHERE outcome='transient_failure'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap()
+                >= 1
+        );
+
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM smtp_messages", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
     std::fs::remove_dir_all(root).unwrap();
 }
 

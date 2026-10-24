@@ -9,3 +9,6 @@ gate is 90%; use [product readiness](../architecture/product-readiness.md) and t
 Recent integration evidence: [combined OS foreground lifecycle](0057-private-combined-os-foreground-lifecycle.md),
 [OS runtime resources](0056-private-os-runtime-resource-composition.md) and
 [active-callback signals](0055-private-active-callback-os-signal-acceptance.md).
+
+Installed foreground decisions: [SMTP/mixed activation](0065-installed-smtp-mixed-foreground-command.md)
+and [webhook-only composition](0066-webhook-only-foreground-composition.md).

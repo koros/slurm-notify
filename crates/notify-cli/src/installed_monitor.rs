@@ -56,10 +56,6 @@ pub(super) fn run(path: &Path) -> u8 {
         crate::environment_resolution::lookup,
     ) {
         Ok(plan) => plan,
-        Err(crate::mixed_config_composition::Error::NoSmtp) => {
-            eprintln!("Foreground monitoring requires at least one SMTP provider in this build.");
-            return 2;
-        }
         Err(_) => {
             return finish(Summary::Startup(StartupReport::classify(
                 Error::Preparation,

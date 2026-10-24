@@ -2,8 +2,8 @@
 
 The installed executable supports help/version, configuration validation, historical
 status, private bounded webhook/SMTP child protocols and prototype foreground
-monitoring for SMTP/mixed configurations. Webhook-only foreground monitoring remains
-unavailable. [Product readiness](product-readiness.md) records
+monitoring for webhook, SMTP and mixed configurations. Webhook-only runs have
+controlled failure and persistence/restart acceptance. [Product readiness](product-readiness.md) records
 current evidence and limits; [implementation history](implementation-history.md)
 preserves historical increments.
 
@@ -12,7 +12,7 @@ preserves historical increments.
 The target is a local foreground MVP with generic HTTPS webhook and required
 STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
 setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
-help/version, configuration validation, historical status and SMTP/mixed foreground
+help/version, configuration validation, historical status and webhook/SMTP foreground
 monitoring are installed. MIT licensing, refreshed guidance,
 90% coverage and accurate badges are complete.
 
@@ -41,8 +41,8 @@ composition and OS-backed orchestration now back the installed SMTP/mixed comman
    a temporary final reply. Installed foreground SMTP delivery, signals, blocked
    recovery and durable no-replay restart now have controlled acceptance. Successful
    webhook helper send acceptance remains pending.
-4. Complete webhook-only owned foreground composition and installed webhook send
-   acceptance. Broaden mixed-provider installed failure/recovery evidence and finish
+4. Webhook-only owned foreground composition is implemented. Complete successful
+   installed HTTPS webhook send acceptance. Broaden mixed-provider installed failure/recovery evidence and finish
    remaining ownership/platform acceptance before claiming a supported MVP.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
    platform/Slurm baseline. Complete security reporting, installation/upgrade,

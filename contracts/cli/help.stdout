@@ -14,5 +14,5 @@ Commands:
   status           Inspect existing historical state
   start            Run local foreground monitoring
 
-Foreground monitoring requires an SMTP provider; mixed HTTPS webhook/SMTP routes are accepted.
+Foreground monitoring accepts HTTPS webhook, SMTP and mixed routes.
 Validate site polling/execution policy before monitoring a real cluster.

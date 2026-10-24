@@ -243,16 +243,7 @@ pub(super) fn poll_with(
 #[derive(Debug)]
 pub(super) enum DurablePollError {
     Poll(PollError),
-    Storage(
-        #[cfg_attr(
-            not(test),
-            expect(
-                dead_code,
-                reason = "typed private cause retained without rendering raw diagnostics"
-            )
-        )]
-        super::storage::StorageError,
-    ),
+    Storage(super::storage::StorageError),
 }
 
 #[cfg(test)]

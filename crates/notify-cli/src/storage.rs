@@ -919,7 +919,6 @@ impl Store {
     }
 
     // Explicit webhook-only public path; private/SMTP paths remain unchanged.
-    #[cfg(test)]
     pub(super) fn persist_public_webhooks<'a>(
         &mut self,
         candidate: &super::lifecycle::Reconciler,
@@ -935,7 +934,6 @@ impl Store {
             crate::public_event::random,
         )
     }
-    #[cfg(test)]
     fn persist_public_webhooks_with<'a>(
         &mut self,
         candidate: &super::lifecycle::Reconciler,

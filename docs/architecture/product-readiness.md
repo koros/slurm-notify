@@ -1,6 +1,6 @@
 # Product readiness assessment
 
-Assessment after installed SMTP/mixed foreground activation.
+Assessment after webhook-only foreground composition.
 The private OS/runtime lifecycle and continuous owned sessions are also tested.
 Historical increments remain in the implementation history; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
@@ -31,14 +31,14 @@ the bound supervised SMTP path remains blocked.
 The latest implementation milestone passed 412 private Rust tests plus thirteen installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.14% (25,646/26,402); the gate is 90%.
+Python tests. Rust line coverage was 97.15% (25,672/26,426); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Capability | Current evidence | Remaining gap |
 | --- | --- | --- |
-| Protected resources | Installed validation and SMTP/mixed monitoring reuse protected configuration/trust snapshots and exact SMTP permissions | Webhook-only monitoring and bounded synchronous account lookup |
+| Protected resources | Installed validation and webhook/SMTP monitoring reuse protected configuration/trust snapshots and exact SMTP permissions | Bounded synchronous account lookup |
 | State ownership | Installed status and foreground runs enforce exclusive ownership; signal shutdown releases state | Live status access and installation acceptance |
-| Routing and recovery | Public event transactions, mixed admission, blocked-work preservation and restart recovery are tested | Successful installed webhook submission and webhook-only composition |
+| Routing and recovery | Public event transactions, mixed admission, blocked-work preservation and restart recovery are tested | Successful installed HTTPS webhook submission |
 | Foreground runtime | Installed SMTP/mixed runs cover scheduler processes, cadence, signals, health, bounded cleanup and restart without replaying completed mail | Supported cluster and platform acceptance |
 | Provider transport | Selected same-executable helpers enforce HTTPS or verified STARTTLS; controlled installed SMTP submission succeeds | Authorized real-provider acceptance |
 
@@ -50,9 +50,9 @@ scheduler. Controlled loopback fixtures establish no real-provider acceptance.
 
 | Area | Current gap | Required evidence or decision |
 | --- | --- | --- |
-| Public contracts | Help/version, config validation and status have baselines; SMTP/mixed start and public event persistence are implemented; final compatibility review remains | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
-| Installed runtime | Help/version, config validation and historical status are installed; SMTP/mixed monitoring is installed; webhook-only monitoring remains pending | Complete webhook-only composition and successful installed webhook dispatch; fresh-install acceptance |
-| Resource resolution | Installed validation and SMTP/mixed monitoring bind protected resources and exact permissions | Complete webhook-only resource acceptance and document synchronous lookup limits |
+| Public contracts | Help/version, config validation and status have baselines; webhook/SMTP start and public event persistence are implemented; final compatibility review remains | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
+| Installed runtime | Help/version, config validation and historical status are installed; webhook/SMTP monitoring is installed; successful installed HTTPS webhook submission remains pending | Complete successful installed HTTPS webhook dispatch; fresh-install acceptance |
+| Resource resolution | Installed validation and webhook/SMTP monitoring bind protected resources and exact permissions | Document synchronous lookup limits and finish provider acceptance |
 | Onboarding | Historical status exists; setup wizard, provider test and doctor are pending | Reviewed flows, safe opt-in test delivery, accessible/noninteractive behavior and newcomer acceptance |
 | Scheduler policy | No supported Slurm/site baseline or real-cluster acceptance | Validate command features, accounting lag, job identity and permitted polling/execution at an authorized cluster |
 | Provider scope | Generic webhook/SMTP prototypes exist; Slack/Teams priority remains open | Agree MVP scope, payload compatibility and supported provider setup; test real providers only when authorized |
@@ -71,8 +71,8 @@ validation, historical status and SMTP/mixed foreground activation have delibera
 contract fixtures. [ADR 0065](../adr/0065-installed-smtp-mixed-foreground-command.md)
 records the installed command's behavior and limits.
 
-1. Complete webhook-only foreground composition and successful installed HTTPS
-   helper acceptance, including blocked resources and durable restart.
+1. Complete successful installed HTTPS helper acceptance. Webhook-only foreground
+   composition now covers missing resources, failed dispatch, signals and durable restart.
 2. Complete setup/test/doctor flows and review remaining output and migration
    baselines, including actionable diagnostics for blocked work.
 3. Obtain authorized cluster/provider acceptance and settle platform, Slurm source
