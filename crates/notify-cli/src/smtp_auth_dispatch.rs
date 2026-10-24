@@ -14,6 +14,7 @@ pub(super) fn classify(result: Result<Ack, transport::Error>) -> Report {
     };
     let (outcome, diagnostic) = match ack {
         // Successful authentication is incomplete delivery, so leave the row pending.
+        #[cfg(test)]
         Ack::Authenticated => (None, Diagnostic::SmtpAuthenticated),
         Ack::Credentials => (None, Diagnostic::SmtpCredentials),
         Ack::Unsupported => (None, Diagnostic::SmtpAuthUnsupported),

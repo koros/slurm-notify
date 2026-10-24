@@ -1,5 +1,6 @@
-//! Private bounded shutdown summaries; no installed output or exit-code contract.
+//! Shared foreground exit classification and bounded private fixture summaries.
 use crate::foreground_schedule::{Error, Exit};
+#[cfg(test)]
 pub(super) const MAX_BYTES: usize = 96;
 #[derive(Debug, PartialEq, Eq)]
 enum Reason {
@@ -79,6 +80,7 @@ impl Report {
             1
         }
     }
+    #[cfg(test)]
     pub(super) fn render(&self) -> String {
         let token = match &self.outcome {
             Outcome::Cancelled => "cancelled",
@@ -181,6 +183,7 @@ mod tests {
 #[derive(Debug, PartialEq, Eq)]
 enum StartupOutcome {
     Cancelled,
+    #[cfg(test)]
     Limit,
     Preparation,
     Ownership,
@@ -198,10 +201,13 @@ impl StartupReport {
         Self {
             outcome: match error {
                 Error::Cancelled => StartupOutcome::Cancelled,
+                #[cfg(test)]
                 Error::InvalidLimit => StartupOutcome::Limit,
                 Error::Preparation => StartupOutcome::Preparation,
                 Error::Ownership => StartupOutcome::Ownership,
-                Error::Closed | Error::Cycle | Error::Status => StartupOutcome::InvalidPhase,
+                Error::Closed | Error::Cycle => StartupOutcome::InvalidPhase,
+                #[cfg(test)]
+                Error::Status => StartupOutcome::InvalidPhase,
             },
         }
     }
@@ -210,13 +216,17 @@ impl StartupReport {
     }
     pub(super) fn exit_code(&self) -> u8 {
         match self.outcome {
-            StartupOutcome::Limit | StartupOutcome::Preparation => 2,
+            StartupOutcome::Preparation => 2,
+            #[cfg(test)]
+            StartupOutcome::Limit => 2,
             _ => 1,
         }
     }
+    #[cfg(test)]
     pub(super) fn render(&self) -> String {
         let token = match self.outcome {
             StartupOutcome::Cancelled => "cancelled",
+            #[cfg(test)]
             StartupOutcome::Limit => "failed_limit",
             StartupOutcome::Preparation => "failed_preparation",
             StartupOutcome::Ownership => "failed_ownership",

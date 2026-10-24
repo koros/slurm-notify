@@ -69,6 +69,7 @@ impl Resources {
             timeout: self.timeout,
         })
     }
+    #[cfg(test)]
     pub(super) fn into_frame(
         self,
         event_id: &str,

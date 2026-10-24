@@ -13,6 +13,13 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed prototype `start --foreground --config <absolute-path>` for SMTP/mixed
+  configs, with one protected snapshot/owner, selected provider children, explicit
+  scheduler PATH discovery, configured cadence/deadlines, sampled health, fatal state
+  handling and 130/143 signal exits. Binary acceptance covers verified STARTTLS
+  delivery, blocked work, busy ownership and durable no-replay restart. Webhook-only
+  monitoring remains unsupported in this increment.
+
 - Private local continuous runner now captures and reuses one same-executable
   provider selection for SMTP/webhook children. Controlled bound-SMTP recovery
   acceptance uses the versioned selected commands; startup cancellation/resource

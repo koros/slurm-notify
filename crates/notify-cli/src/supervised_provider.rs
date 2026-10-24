@@ -4,15 +4,18 @@ use super::{delivery::ProviderOutcome, transport};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Diagnostic {
     Acknowledged,
+    #[cfg(test)]
     SmtpReady,
     SmtpRevisionMissing,
     SmtpRevisionInvalid,
+    #[cfg(test)]
     SmtpRevisionDenied,
     SmtpProviderMissing,
     SmtpProviderInvalid,
     SmtpProviderDenied,
     SmtpProviderResolution(super::smtp_provider_delivery::Error),
     SmtpSubmission(super::smtp_submit::Phase, super::smtp_submit::Diagnostic),
+    #[cfg(test)]
     SmtpAuthenticated,
     SmtpCredentials,
     SmtpAuthUnsupported,

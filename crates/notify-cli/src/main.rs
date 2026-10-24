@@ -1,27 +1,29 @@
-//! Finite local CLI; monitoring is not implemented.
+//! Local prototype CLI with finite commands and foreground SMTP/mixed monitoring.
 mod config_reference;
 mod control_validation;
 mod credential_policy;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_report;
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod foreground_runtime;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_schedule;
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod foreground_session;
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod foreground_signals;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_wait;
 mod installed_config;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod installed_monitor;
 mod installed_smtp;
 mod installed_status;
 mod installed_webhook_helper;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod mixed_config_composition;
 mod provider_frame;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod provider_helpers;
 mod provider_outcome;
 mod public_event;
@@ -35,7 +37,7 @@ mod status_composition;
 mod status_store;
 mod storage_health;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod config_composition;
 
 mod config_validate;
@@ -46,58 +48,58 @@ mod config_snapshot;
 
 mod trust_snapshot;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod environment_resolution;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod credential_resolution;
 
 #[cfg(test)]
 mod provider_resolution;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod webhook_resolution;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod runtime_mapping;
 
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod effective_user;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod observation_mapping;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod route_selection;
 
 #[cfg(test)]
 mod smtp_frozen_frame;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod delivery;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod lifecycle;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod scheduler;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_poll;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod storage;
 
 mod webhook;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod transport;
 
 mod state_path;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod accounting_window;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod polling_cycle;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod supervised_provider;
 
 #[cfg(test)]
@@ -117,35 +119,35 @@ mod smtp_auth;
 
 mod smtp_auth_frame;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_auth_dispatch;
 
 mod smtp_message;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_render;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_routes;
 
 mod smtp_bound_transport;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_provider_delivery;
 mod smtp_provider_revision;
 mod smtp_resolved;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_revision;
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_revision_delivery;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_metadata;
 
 mod smtp_submit;
 
 mod smtp_submit_frame;
 
-#[cfg(test)]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_submit_dispatch;
 
 const HELP: &str = include_str!("../../../contracts/cli/help.stdout");
@@ -171,6 +173,25 @@ fn main() -> std::process::ExitCode {
                 2
             },
         );
+    }
+    if args.len() == 2
+        && args.iter().any(|arg| arg == "start")
+        && args.iter().any(|arg| arg == "--help")
+    {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/start-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if let Some(path) = start_path(&args) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        return std::process::ExitCode::from(installed_monitor::run(&path));
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            eprintln!("Foreground monitoring is unavailable on this platform.");
+            return std::process::ExitCode::from(2);
+        }
     }
     if args.len() == 1 && args[0] == "--help" {
         print!("{HELP}");
@@ -239,6 +260,28 @@ fn main() -> std::process::ExitCode {
     }
     eprintln!("Invalid invocation. Use --help for usage.");
     std::process::ExitCode::from(2)
+}
+
+fn start_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
+    if args.len() != 4 {
+        return None;
+    }
+    let mut start = false;
+    let mut foreground = false;
+    let mut path = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "start" && !start {
+            start = true;
+        } else if arg == "--foreground" && !foreground {
+            foreground = true;
+        } else if arg == "--config" && path.is_none() {
+            path = Some(std::path::PathBuf::from(iter.next()?));
+        } else {
+            return None;
+        }
+    }
+    path.filter(|path| start && foreground && path.is_absolute() && path.to_str().is_some())
 }
 
 fn config_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {

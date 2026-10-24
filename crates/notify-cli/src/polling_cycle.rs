@@ -1,10 +1,14 @@
-//! Private caller-driven cycles: no background loop, scheduling default, or CLI.
+//! Shared caller-driven cycle engine; scheduling and resource adapters are explicit.
+#[cfg(test)]
+use super::scheduler::{poll_durable_with, QueryError};
 use super::{
     accounting_window::{self, Policy, Window},
-    scheduler::{poll_durable_with, DurablePollError, PollRequest, QueryError},
+    scheduler::{DurablePollError, PollRequest},
     storage::{StorageError, Store},
 };
-use std::{path::Path, process::Command, time::Duration};
+#[cfg(test)]
+use std::process::Command;
+use std::{path::Path, time::Duration};
 
 pub(super) struct Settings<'a> {
     pub(super) active_program: &'a Path,
@@ -23,8 +27,26 @@ pub(super) struct Settings<'a> {
 #[derive(Debug)]
 pub(super) enum Error {
     InvalidLimit,
-    Storage(StorageError),
-    Window(accounting_window::Error),
+    Storage(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        StorageError,
+    ),
+    Window(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        accounting_window::Error,
+    ),
     Poll(DurablePollError),
     Preparation,
     PreparationLimit,
@@ -77,6 +99,7 @@ pub(super) struct HealthReport {
     pub(super) storage: super::storage::StorageHealth,
 }
 
+#[cfg(test)]
 pub(super) struct StatusPolicy<'a> {
     pub(super) cluster: &'a str,
     pub(super) capacities: (usize, usize),
@@ -143,6 +166,7 @@ pub(super) struct TickReport {
 }
 
 // Separate private fixture hooks: cycle destinations stay authoritative.
+#[cfg(test)]
 pub(super) struct PreparedHooks<'a, Q, P> {
     pub(super) smtp_destinations: &'a [&'a str],
     pub(super) max_messages: usize,
@@ -151,11 +175,13 @@ pub(super) struct PreparedHooks<'a, Q, P> {
 }
 
 // Route inputs are validated after cancellation and before clocks/storage/query.
+#[cfg(test)]
 pub(super) struct Rendering<'a> {
     pub(super) routes: &'a [super::smtp_routes::Route<'a>],
     pub(super) max_messages: usize,
 }
 
+#[cfg(test)]
 pub(super) struct BoundSmtp<'a> {
     pub(super) rendering: Rendering<'a>,
     pub(super) profiles: &'a [super::smtp_provider_revision::Profile<'a>],
@@ -164,6 +190,7 @@ pub(super) struct BoundSmtp<'a> {
 }
 
 // Exact current SMTP destination membership; never fall back on an incomplete map.
+#[cfg(test)]
 fn valid_deadlines(
     routes: &[super::smtp_routes::Route<'_>],
     shared: Duration,
@@ -192,6 +219,7 @@ fn valid_deadlines(
     }
 }
 
+#[cfg(test)]
 pub(super) struct MixedBoundSmtp<'a> {
     pub(super) smtp: BoundSmtp<'a>,
     pub(super) ordinary_destinations: &'a [&'a str],
@@ -270,6 +298,7 @@ impl Cycles {
     }
 
     // Existing infallible fixtures delegate to the same orchestration implementation.
+    #[cfg(test)]
     pub(super) fn tick<Q, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -303,6 +332,7 @@ impl Cycles {
     }
 
     // Serialized caller-driven orchestration. No provider call holds a DB transaction.
+    #[cfg(test)]
     pub(super) fn tick_fallible<Q, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -342,6 +372,7 @@ impl Cycles {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn tick_prepared_fallible<Q, P, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -396,6 +427,7 @@ impl Cycles {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn tick_rendered_fallible<Q, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -449,6 +481,7 @@ impl Cycles {
     }
 
     // SMTP-only private composition; helper selection and resource lookup stay caller-owned.
+    #[cfg(test)]
     pub(super) fn tick_bound_smtp<Q, R, H, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -493,6 +526,7 @@ impl Cycles {
     }
 
     // Explicit mixed routing; durable SMTP artifacts prohibit ordinary dispatch.
+    #[cfg(test)]
     pub(super) fn tick_mixed_bound_smtp<Q, R, H, O, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -530,6 +564,7 @@ impl Cycles {
     }
 
     // Event-specific private routing; selection applies only to newly emitted events.
+    #[cfg(test)]
     pub(super) fn tick_selected_mixed_bound_smtp<'s, Q, R, H, O, C, X, S>(
         &mut self,
         settings: &Settings<'_>,
@@ -569,6 +604,7 @@ impl Cycles {
     }
 
     // Event-specific private routing; selection applies only to newly emitted events.
+    #[cfg(test)]
     pub(super) fn tick_selected_mixed_bound_smtp_deadlines<'s, Q, R, H, O, C, X, S>(
         &mut self,
         settings: &Settings<'_>,
@@ -709,6 +745,7 @@ impl Cycles {
         )
     }
 
+    #[cfg(test)]
     fn tick_using<V, S, C, X>(
         &mut self,
         settings: &Settings<'_>,
@@ -946,6 +983,7 @@ impl Cycles {
     }
 
     // One read transaction supplies checkpoint and bounded health, even under pressure.
+    #[cfg(test)]
     pub(super) fn status(
         &self,
         policy: StatusPolicy<'_>,
@@ -1019,6 +1057,7 @@ impl Cycles {
         Ok(HealthReport { poll, storage })
     }
 
+    #[cfg(test)]
     fn step(
         &mut self,
         settings: &Settings<'_>,
@@ -1046,6 +1085,7 @@ impl Cycles {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn step_prepared<Q, P>(
         &mut self,
         settings: &Settings<'_>,

@@ -1,4 +1,4 @@
-//! Private webhook-only draft composition; no installed runtime or ambient lookup.
+//! Shared webhook resource composition; owner supplies runtime and lookup adapters.
 use crate::{
     config_validate::{self, get, list, object, text},
     observation_mapping, route_selection, runtime_mapping, webhook_resolution,
@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    #[cfg(test)]
     Validation(config_validate::Error),
     UnsupportedProvider,
     Shape,
@@ -36,6 +37,7 @@ pub(super) struct PollInput<'a> {
 impl Plan {
     // Public webhook transactions use actual prepared HTTPS resource revisions.
     // Mixed SMTP composition must opt in separately; never silently drop its routes.
+    #[cfg(test)]
     pub(super) fn poll_public_with(
         &self,
         input: PollInput<'_>,
@@ -117,6 +119,7 @@ impl Plan {
         *reconciler = candidate;
         Ok(events)
     }
+    #[cfg(test)]
     pub(super) fn poll_with(
         &self,
         input: PollInput<'_>,
@@ -147,6 +150,7 @@ impl Plan {
         )
     }
 }
+#[cfg(test)]
 pub(super) fn prepare(
     bytes: &[u8],
     identity: impl FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,

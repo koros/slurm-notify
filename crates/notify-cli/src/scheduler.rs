@@ -1,4 +1,4 @@
-//! Private test-only direct-process scheduler boundary; no polling defaults.
+//! Shared bounded direct-process scheduler boundary; no polling defaults.
 use std::io::{self, Read};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -243,9 +243,19 @@ pub(super) fn poll_with(
 #[derive(Debug)]
 pub(super) enum DurablePollError {
     Poll(PollError),
-    Storage(super::storage::StorageError),
+    Storage(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        super::storage::StorageError,
+    ),
 }
 
+#[cfg(test)]
 pub(super) fn poll_durable_with(
     request: &PollRequest<'_>,
     reconciler: &mut super::lifecycle::Reconciler,

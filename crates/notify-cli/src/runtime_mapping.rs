@@ -1,4 +1,4 @@
-//! Private typed operational controls; no parser, defaults or installed contract.
+//! Shared operational controls mapped from explicit validated configuration.
 use crate::{accounting_window, delivery, polling_cycle};
 use std::time::Duration;
 

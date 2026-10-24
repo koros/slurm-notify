@@ -11,13 +11,31 @@ const MIGRATION: &str = include_str!("../../notify-storage/migrations/0001.sql")
 
 #[derive(Debug)]
 pub(super) enum StorageError {
-    Database(rusqlite::Error),
+    Database(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        rusqlite::Error,
+    ),
     UnsupportedVersion,
     Conflict,
     InvalidInput,
     Random,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    StatePath(super::state_path::Error),
+    StatePath(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        super::state_path::Error,
+    ),
 }
 
 impl From<rusqlite::Error> for StorageError {
@@ -62,6 +80,13 @@ fn event_id(event: &super::lifecycle::Event) -> String {
 pub(super) struct DueDelivery {
     pub(super) event_id: String,
     pub(super) destination: String,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "retain parsed ledger identity alongside frozen delivery work"
+        )
+    )]
     pub(super) event: super::lifecycle::Event,
     pub(super) attempt_number: i64,
 }
@@ -231,6 +256,7 @@ impl Store {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(test)]
     pub(super) fn open_status(
         directory: &Path,
         lock_timeout: Duration,
@@ -248,6 +274,7 @@ impl Store {
     }
 
     // Caller owns a private test directory. Secure production creation remains pending.
+    #[cfg(test)]
     pub(super) fn open(path: &Path, lock_timeout: Duration) -> Result<Self, StorageError> {
         Self::initialize(Connection::open(path)?, lock_timeout)
     }
@@ -297,6 +324,7 @@ impl Store {
 
     // Constant-size report; read transaction keeps all samples consistent.
     // LIMIT bounds inspected rows, not SQLite wall time or underlying scan work.
+    #[cfg(test)]
     pub(super) fn health(
         &mut self,
         cluster: &str,
@@ -331,6 +359,7 @@ impl Store {
         )
         .map(|(health, _)| health)
     }
+    #[cfg(test)]
     pub(super) fn health_snapshot(
         &mut self,
         cluster: &str,
@@ -616,6 +645,7 @@ impl Store {
 
     // Separate committed preparation before first network attempt. Existing
     // snapshots are immutable; identical repeated preparation is idempotent.
+    #[cfg(test)]
     pub(super) fn freeze_smtp(
         &mut self,
         event_id: &str,
@@ -647,6 +677,7 @@ impl Store {
     }
 
     // Explicit preparation of new snapshots only; never infer legacy provenance.
+    #[cfg(test)]
     pub(super) fn freeze_smtp_revision(
         &mut self,
         event_id: &str,
@@ -826,6 +857,7 @@ impl Store {
         }))
     }
 
+    #[cfg(test)]
     pub(super) fn persist_reconciler(
         &mut self,
         candidate: &super::lifecycle::Reconciler,
@@ -855,6 +887,7 @@ impl Store {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn persist_routed_reconciler<'a>(
         &mut self,
         candidate: &super::lifecycle::Reconciler,
@@ -886,6 +919,7 @@ impl Store {
     }
 
     // Explicit webhook-only public path; private/SMTP paths remain unchanged.
+    #[cfg(test)]
     pub(super) fn persist_public_webhooks<'a>(
         &mut self,
         candidate: &super::lifecycle::Reconciler,
@@ -901,6 +935,7 @@ impl Store {
             crate::public_event::random,
         )
     }
+    #[cfg(test)]
     fn persist_public_webhooks_with<'a>(
         &mut self,
         candidate: &super::lifecycle::Reconciler,
@@ -997,6 +1032,7 @@ impl Store {
 
     // Rendering occurs before this call; all eligible new pairs commit together.
     // Historical events retain their routes and never consume new preparations.
+    #[cfg(test)]
     pub(super) fn persist_prepared_reconciler(
         &mut self,
         preparation: PollPreparation<'_>,
@@ -1014,6 +1050,7 @@ impl Store {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn persist_prepared_revisions<'a>(
         &mut self,
         preparation: PollPreparation<'a>,
@@ -1032,6 +1069,7 @@ impl Store {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn persist_prepared_profiles<'a>(
         &mut self,
         preparation: PollPreparation<'a>,
@@ -1259,6 +1297,7 @@ impl Store {
         )
     }
 
+    #[cfg(test)]
     fn persist_candidate(
         &mut self,
         preparation: PollPreparation<'_>,
@@ -1272,6 +1311,7 @@ impl Store {
             destinations.to_vec()
         })
     }
+    #[cfg(test)]
     fn persist_selected<'a>(
         &mut self,
         preparation: PollPreparation<'_>,
@@ -1354,6 +1394,7 @@ impl Store {
 
     // A read transaction gives jobs/events/checkpoint one consistent snapshot.
     // LIMIT bounds restored rows; an overflow fails rather than discarding history.
+    #[cfg(test)]
     pub(super) fn restore(
         &mut self,
         cluster: &str,
@@ -1478,6 +1519,7 @@ impl Store {
         )
     }
 
+    #[cfg(test)]
     fn record_poll_with_smtp<'a>(
         &mut self,
         jobs: &[Job<'_>],
@@ -2113,6 +2155,7 @@ pub(super) mod tests {
             destinations,
         }
     }
+    #[cfg(test)]
     fn open(directory: &Directory) -> Store {
         Store::open(&directory.path(), Duration::from_millis(50)).unwrap()
     }

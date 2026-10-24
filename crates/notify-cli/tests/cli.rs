@@ -1093,3 +1093,539 @@ fn installed_smtp_helpers_replay_identical_frozen_message_after_temporary_final_
     let received = server.join().unwrap();
     assert_eq!(received, vec![data.to_vec(), data.to_vec()]);
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_foreground_grammar_and_help_are_explicit_and_resource_free() {
+    let help = include_bytes!("../../../contracts/cli/start-help.stdout");
+    for args in [["start", "--help"], ["--help", "start"]] {
+        expect(command().args(args).output().unwrap(), 0, help, b"");
+    }
+    for args in [
+        vec!["start"],
+        vec!["start", "--foreground"],
+        vec!["start", "--config", "/private"],
+        vec!["start", "--foreground", "--config", "relative"],
+        vec!["start", "--foreground", "--foreground", "/private"],
+        vec!["start", "--foreground", "--config", "/private", "extra"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    for args in [
+        vec![
+            "start",
+            "--foreground",
+            "--config",
+            "/nonexistent-private-start-config",
+        ],
+        vec![
+            "--config",
+            "/nonexistent-private-start-config",
+            "--foreground",
+            "start",
+        ],
+    ] {
+        expect(
+            command().args(args).output().unwrap(),
+            2,
+            b"",
+            include_bytes!("../../../contracts/cli/config-invalid.stderr"),
+        );
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_foreground_keeps_blocked_smtp_frozen_across_signals_and_restart() {
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+        process::Stdio,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    struct Reap(std::process::Child);
+    impl std::ops::Deref for Reap {
+        type Target = std::process::Child;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl std::ops::DerefMut for Reap {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = std::env::temp_dir().join(format!("slurm-notify-start-cli-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.join("config.json");
+    let trust = root.join("trust.der");
+    let state = root.join("state");
+    let cert = rcgen::generate_simple_self_signed(vec!["smtp.example.invalid".into()]).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&trust)
+        .unwrap()
+        .write_all(cert.cert.der())
+        .unwrap();
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["providers"]
+        .as_object_mut()
+        .unwrap()
+        .remove("primary");
+    source["providers"]["research_email"]["trust_der_files"] = serde_json::json!([trust]);
+    source["routes"] =
+        serde_json::json!([{"events":["JOB_COMPLETED"],"send_to":["research_email"]}]);
+    source["storage"]["path"] = serde_json::json!(state.join("state.sqlite3"));
+    source["monitor"]["initial_observation"] = serde_json::json!("emit");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&config)
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source).unwrap())
+        .unwrap();
+    for (name,body) in [("squeue","#!/bin/sh\nexit 0\n"),
+        ("sacct","#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o700).open(root.join(name)).unwrap().write_all(body.as_bytes()).unwrap();
+    }
+    // Missing scheduler resources fail before state creation.
+    expect(
+        command()
+            .args(["start", "--foreground", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"Required Slurm executables unavailable in absolute PATH directories.\n",
+    );
+    assert!(!state.exists());
+    let mut previous = None;
+    for signal in [libc::SIGINT, libc::SIGTERM] {
+        let child = command()
+            .args(["start", "--foreground", "--config"])
+            .arg(&config)
+            .env("PATH", &root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut child = Reap(child);
+        let stderr = child.stderr.take().unwrap();
+        let (send, receive) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr.take(4096));
+            loop {
+                let mut line = Vec::new();
+                if reader.read_until(b'\n', &mut line).unwrap() == 0 {
+                    break;
+                }
+                if send.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(5)).unwrap(),
+            b"Foreground monitoring started.\n"
+        );
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(5)).unwrap(),
+            b"Foreground delivery blocked; work remains pending.\n"
+        );
+        let busy = command()
+            .args(["status", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        expect(
+            busy,
+            1,
+            b"",
+            include_bytes!("../../../contracts/cli/status-busy.stderr"),
+        );
+        expect(
+            command()
+                .args(["start", "--foreground", "--config"])
+                .arg(&config)
+                .env("PATH", &root)
+                .output()
+                .unwrap(),
+            1,
+            b"",
+            b"Foreground monitoring could not acquire or initialize safe state.\n",
+        );
+        // SAFETY: signal is a valid constant and PID belongs to this test's child.
+        assert_eq!(
+            unsafe { libc::kill(child.id().try_into().unwrap(), signal) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                panic!("foreground shutdown exceeded fixture deadline");
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(
+            status.code(),
+            Some(if signal == libc::SIGINT { 130 } else { 143 })
+        );
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(5)).unwrap(),
+            if signal == libc::SIGINT {
+                b"Foreground monitoring stopped by SIGINT.\n".as_slice()
+            } else {
+                b"Foreground monitoring stopped by SIGTERM.\n"
+            }
+        );
+        reader.join().unwrap();
+        let mut stdout = Vec::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .take(4096)
+            .read_to_end(&mut stdout)
+            .unwrap();
+        assert!(stdout.is_empty());
+        let db = rusqlite::Connection::open_with_flags(
+            state.join("state.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let frozen:(String,Vec<u8>,i64,i64)=db.query_row("SELECT m.event_id,m.data,(SELECT COUNT(*) FROM outbox),(SELECT COUNT(*) FROM delivery_attempts) FROM smtp_messages m",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        assert_eq!((frozen.2, frozen.3), (1, 0));
+        if let Some(previous) = &previous {
+            assert_eq!(&frozen, previous);
+        }
+        previous = Some(frozen);
+    }
+    // A malformed checkpoint is fatal rather than an endless retry loop.
+    let db = rusqlite::Connection::open(state.join("state.sqlite3")).unwrap();
+    db.execute("UPDATE checkpoints SET history_through='corrupt'", [])
+        .unwrap();
+    drop(db);
+    let output = command()
+        .args(["start", "--foreground", "--config"])
+        .arg(&config)
+        .env("PATH", &root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        b"Foreground monitoring started.\nForeground monitoring stopped after a runtime or state failure.\n"
+    );
+    // An unmatched event still advances the checkpoint and emits labelled sampled health.
+    source["storage"]["path"] = serde_json::json!(root.join("healthy-state/state.sqlite3"));
+    source["routes"] = serde_json::json!([{"events":["JOB_FAILED"],"send_to":["research_email"]}]);
+    std::fs::write(&config, serde_json::to_vec(&source).unwrap()).unwrap();
+    let mut healthy = Reap(
+        command()
+            .args(["start", "--foreground", "--config"])
+            .arg(&config)
+            .env("PATH", &root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let stdout = healthy.stdout.take().unwrap();
+    let (send, receive) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut line = Vec::new();
+        BufReader::new(stdout.take(1024))
+            .read_until(b'\n', &mut line)
+            .unwrap();
+        let _ = send.send(line);
+    });
+    assert_eq!(receive.recv_timeout(Duration::from_secs(5)).unwrap(),b"Foreground health: stale=false pending_sampled=0 failed_sampled=0 sample_truncated=false\n");
+    // SAFETY: PID belongs to the live owned fixture process.
+    assert_eq!(
+        unsafe { libc::kill(healthy.id().try_into().unwrap(), libc::SIGTERM) },
+        0
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = healthy.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "healthy foreground shutdown timed out"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert_eq!(status.code(), Some(143));
+    reader.join().unwrap();
+    let mut stderr = Vec::new();
+    healthy
+        .stderr
+        .take()
+        .unwrap()
+        .take(4096)
+        .read_to_end(&mut stderr)
+        .unwrap();
+    assert_eq!(
+        stderr,
+        b"Foreground monitoring started.\nForeground monitoring stopped by SIGTERM.\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_foreground_rejects_webhook_only_before_resources_or_state() {
+    use std::{
+        io::Write,
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
+    let root =
+        std::env::temp_dir().join(format!("slurm-notify-start-webhook-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.join("config.json");
+    let state = root.join("absent-state");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-webhook-config.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(state.join("state.sqlite3"));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source).unwrap())
+        .unwrap();
+    expect(
+        command()
+            .args(["start", "--foreground", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"Foreground monitoring requires at least one SMTP provider in this build.\n",
+    );
+    assert!(!state.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "support/smtp_relay.rs"]
+mod smtp_relay;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_foreground_delivers_through_selected_helper_and_does_not_replay_after_restart() {
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+        process::Stdio,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    struct Reap(std::process::Child);
+    impl std::ops::Deref for Reap {
+        type Target = std::process::Child;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl std::ops::DerefMut for Reap {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = std::env::temp_dir().join(format!("slurm-notify-start-send-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.join("config.json");
+    let trust = root.join("trust.der");
+    let state = root.join("state/state.sqlite3");
+    let (cert, port, server) = smtp_relay::start();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&trust)
+        .unwrap()
+        .write_all(&cert)
+        .unwrap();
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["providers"]["research_email"]["trust_der_files"] = serde_json::json!([trust]);
+    source["providers"]["research_email"]["relay"] = serde_json::json!("127.0.0.1");
+    source["providers"]["research_email"]["port"] = serde_json::json!(port);
+    source["providers"]["research_email"]["server_name"] =
+        serde_json::json!("smtp.fixture.invalid");
+    source["providers"]["research_email"]["authentication"]["identity"] =
+        serde_json::json!("fixture-user");
+    source["providers"]["research_email"]["sender"] = serde_json::json!("s@fixture.invalid");
+    source["providers"]["research_email"]["recipient"] = serde_json::json!("r@fixture.invalid");
+    source["routes"] =
+        serde_json::json!([{"events":["JOB_COMPLETED"],"send_to":["research_email"]}]);
+    source["storage"]["path"] = serde_json::json!(state);
+    source["monitor"]["initial_observation"] = serde_json::json!("emit");
+    let trust_hash = smtp_provider_revision::trust_fingerprint(&[&cert]).unwrap();
+    let trust_ref = config_reference::reference(b"trust\0", &[trust.to_str().unwrap()]);
+    let credentials_ref = config_reference::reference(
+        b"credentials\0",
+        &["SLURM_NOTIFY_SMTP_USERNAME", "SLURM_NOTIFY_SMTP_PASSWORD"],
+    );
+    let descriptor = smtp_provider_revision::Descriptor::new(&smtp_provider_revision::Profile {
+        destination: "research_email",
+        relay: "127.0.0.1",
+        port,
+        tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+        server_name: "smtp.fixture.invalid",
+        trust_reference: &trust_ref,
+        trust_fingerprint: &trust_hash,
+        authentication_identity: "fixture-user",
+        credential_reference: &credentials_ref,
+    })
+    .unwrap();
+    let rendering = rendering_fingerprint::encode(&[
+        ("destination", "research_email"),
+        ("sender", "s@fixture.invalid"),
+        ("recipient", "r@fixture.invalid"),
+        ("namespace", "research_email"),
+        ("disclosure", "hidden"),
+        ("renderer", "allowlist-v1"),
+        ("identity", "sha256-event-route-revision-v2"),
+        ("domain", "fixture.invalid"),
+    ])
+    .unwrap();
+    let digest = ring::digest::digest(&ring::digest::SHA256, &rendering);
+    let revision: String = digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    source["delivery"]["smtp_permissions"][0]["rendering_revision"] = serde_json::json!(revision);
+    source["delivery"]["smtp_permissions"][0]["provider_revision"] =
+        serde_json::json!(descriptor.token());
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&config)
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source).unwrap())
+        .unwrap();
+    for (name,body) in [("squeue","#!/bin/sh\nexit 0\n"),("sacct","#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o700).open(root.join(name)).unwrap().write_all(body.as_bytes()).unwrap();
+    }
+    let mut frozen = None;
+    for attempt in 0..2 {
+        let mut child = Reap(
+            command()
+                .args(["start", "--foreground", "--config"])
+                .arg(&config)
+                .env("PATH", &root)
+                .env(
+                    "SLURM_NOTIFY_WEBHOOK_URL",
+                    "https://fixture.invalid/private-hook-token",
+                )
+                .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+                .env("SLURM_NOTIFY_SMTP_USERNAME", "fixture-user")
+                .env("SLURM_NOTIFY_SMTP_PASSWORD", "fixture-password")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdout = child.stdout.take().unwrap();
+        let (send, receive) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut line = Vec::new();
+            BufReader::new(stdout.take(1024))
+                .read_until(b'\n', &mut line)
+                .unwrap();
+            let _ = send.send(line);
+        });
+        assert_eq!(receive.recv_timeout(Duration::from_secs(10)).unwrap(),b"Foreground health: stale=false pending_sampled=0 failed_sampled=0 sample_truncated=false\n");
+        // SAFETY: PID belongs to this test's running fixture child.
+        assert_eq!(
+            unsafe { libc::kill(child.id().try_into().unwrap(), libc::SIGTERM) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "foreground send shutdown timed out"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(status.code(), Some(143));
+        reader.join().unwrap();
+        let mut stderr = Vec::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .take(4096)
+            .read_to_end(&mut stderr)
+            .unwrap();
+        assert_eq!(
+            stderr,
+            b"Foreground monitoring started.\nForeground monitoring stopped by SIGTERM.\n"
+        );
+        let db = rusqlite::Connection::open_with_flags(
+            &state,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let result:(Vec<u8>,String,i64)=db.query_row("SELECT m.data,o.status,(SELECT COUNT(*) FROM delivery_attempts) FROM smtp_messages m JOIN outbox o ON m.event_id=o.event_id AND m.destination=o.destination",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(result.1, "delivered");
+        assert_eq!(result.2, 1);
+        if attempt == 0 {
+            frozen = Some(result.0);
+        } else {
+            assert_eq!(Some(result.0), frozen);
+        }
+    }
+    assert_eq!(Some(server.join().unwrap()), frozen);
+    std::fs::remove_dir_all(root).unwrap();
+}

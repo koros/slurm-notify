@@ -1,4 +1,5 @@
 //! Private rendering permission guard; transport/provider profiles remain caller fixtures.
+#[cfg(test)]
 use super::{
     delivery::{self, BatchFailure, BatchReport, ProviderOutcome, RetryPolicy},
     smtp_revision::Descriptor,
@@ -13,6 +14,7 @@ pub(super) struct Permission<'a> {
 }
 
 // An immutable explicit allowlist; an empty list denies all revisions.
+#[cfg(test)]
 pub(super) struct Permissions<'a> {
     entries: &'a [Permission<'a>],
 }
@@ -20,33 +22,39 @@ pub(super) struct Permissions<'a> {
 pub(super) enum Error {
     Policy,
 }
-impl<'a> Permissions<'a> {
-    pub(super) fn new(entries: &'a [Permission<'a>]) -> Result<Self, Error> {
-        if entries.len() > 64 {
+pub(super) fn validate(entries: &[Permission<'_>]) -> Result<(), Error> {
+    if entries.len() > 64 {
+        return Err(Error::Policy);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for entry in entries {
+        if entry.cluster.is_empty()
+            || entry.cluster.len() > 4096
+            || entry.destination.is_empty()
+            || entry.destination.len() > 64
+            || !entry
+                .destination
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+            || entry.revision.len() != 64
+            || !entry
+                .revision
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !seen.insert((entry.cluster, entry.destination, entry.revision))
+        {
             return Err(Error::Policy);
         }
-        let mut seen = std::collections::HashSet::new();
-        for entry in entries {
-            if entry.cluster.is_empty()
-                || entry.cluster.len() > 4096
-                || entry.destination.is_empty()
-                || entry.destination.len() > 64
-                || !entry
-                    .destination
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-                || entry.revision.len() != 64
-                || !entry
-                    .revision
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                || !seen.insert((entry.cluster, entry.destination, entry.revision))
-            {
-                return Err(Error::Policy);
-            }
-        }
+    }
+    Ok(())
+}
+#[cfg(test)]
+impl<'a> Permissions<'a> {
+    pub(super) fn new(entries: &'a [Permission<'a>]) -> Result<Self, Error> {
+        validate(entries)?;
         Ok(Self { entries })
     }
+    #[cfg(test)]
     fn permits(&self, cluster: &str, destination: &str, revision: &str) -> bool {
         self.entries.iter().any(|entry| {
             entry.cluster == cluster
@@ -56,6 +64,7 @@ impl<'a> Permissions<'a> {
     }
 }
 
+#[cfg(test)]
 pub(super) struct Hooks<'a, S, C, X> {
     pub(super) permissions: &'a Permissions<'a>,
     pub(super) send: S,
@@ -63,6 +72,7 @@ pub(super) struct Hooks<'a, S, C, X> {
     pub(super) cancelled: X,
 }
 
+#[cfg(test)]
 pub(super) fn deliver_due<S, C, X>(
     store: &mut Store,
     cluster: &str,

@@ -7,13 +7,10 @@ use super::{
     smtp_submit,
     smtp_submit_frame::{self, Ack},
 };
-#[cfg(test)]
 use super::{
     smtp_submit_dispatch, storage::FrozenMessage, supervised_provider::Diagnostic, transport,
 };
-#[cfg(not(test))]
-use crate::provider_frame as transport;
-#[cfg(test)]
+
 use std::process::Command;
 use std::{
     io::{Read, Write},
@@ -23,13 +20,11 @@ use std::{
 };
 use zeroize::Zeroizing;
 const BOUNDS: [usize; 8] = [4096, 64, 65664, 194, 254, 254, 16384, 5];
-#[cfg(test)]
 pub(super) const INPUT_LIMIT: usize = 32 + 4096 + 64 + 65664 + 194 + 254 + 254 + 16384 + 5;
 fn invalid() -> transport::Error {
     transport::Error::InvalidInput
 }
 
-#[cfg(test)]
 pub(super) fn encode(
     resolved: Resolved,
     message: &FrozenMessage,
@@ -213,7 +208,6 @@ fn auth_ack(error: smtp_auth::Error) -> smtp_auth_frame::Ack {
         },
     }
 }
-#[cfg(test)]
 pub(super) fn dispatch(
     command: &mut Command,
     resolved: Resolved,

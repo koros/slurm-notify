@@ -23,13 +23,11 @@ impl<'a> Permissions<'a> {
         }
         let mut seen = std::collections::HashSet::new();
         for entry in entries {
-            super::smtp_revision_delivery::Permissions::new(&[
-                super::smtp_revision_delivery::Permission {
-                    cluster: entry.cluster,
-                    destination: entry.destination,
-                    revision: entry.rendering,
-                },
-            ])
+            super::smtp_revision_delivery::validate(&[super::smtp_revision_delivery::Permission {
+                cluster: entry.cluster,
+                destination: entry.destination,
+                revision: entry.rendering,
+            }])
             .map_err(|_| Error::Policy)?;
             if entry.provider.len() != 64
                 || !entry
@@ -68,6 +66,7 @@ pub(super) struct Hooks<'a, R, S, C, X> {
     pub(super) clock: C,
     pub(super) cancelled: X,
 }
+#[cfg(test)]
 pub(super) fn deliver_due<R, S, C, X>(
     store: &mut Store,
     cluster: &str,
@@ -146,11 +145,13 @@ fn authorize(
     Ok((rendering, frozen, resolved))
 }
 
+#[cfg(test)]
 pub(super) struct MixedHooks<'a, R, S, O, C, X> {
     pub(super) smtp: Hooks<'a, R, S, C, X>,
     pub(super) ordinary_destinations: &'a [&'a str],
     pub(super) ordinary_send: O,
 }
+#[cfg(test)]
 pub(super) fn deliver_due_mixed<R, S, O, C, X>(
     store: &mut Store,
     cluster: &str,

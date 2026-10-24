@@ -5,25 +5,19 @@ use std::io::{Read, Write};
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
     InvalidInput,
-    #[cfg(all(test, not(any(target_os = "linux", target_os = "macos"))))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     UnsupportedPlatform,
-    #[cfg(test)]
     Spawn,
-    #[cfg(test)]
     Timeout,
     Io,
-    #[cfg(test)]
     OutputLimit,
-    #[cfg(test)]
     ChildExit,
     InvalidResult,
-    #[cfg(test)]
     Cleanup,
 }
 
 // Length prefixes permit arbitrary payload bytes without delimiters or escaping.
 // No Debug representation of the frame, endpoint, or authorization is provided.
-#[cfg(test)]
 pub(super) fn frame(fields: &[&[u8]], limit: usize) -> Result<Vec<u8>, Error> {
     let length = fields
         .iter()
@@ -42,7 +36,6 @@ pub(super) fn frame(fields: &[&[u8]], limit: usize) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-#[cfg(test)]
 pub(super) fn parse_result(bytes: &[u8]) -> Result<ProviderOutcome, Error> {
     match bytes {
         b"OK\n" => Ok(ProviderOutcome::Delivered),

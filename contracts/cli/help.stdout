@@ -1,14 +1,18 @@
 Usage: slurm-notify --help | --version
        slurm-notify config validate --config <absolute-path>
        slurm-notify status --config <absolute-path>
+       slurm-notify start --foreground --config <absolute-path>
 
 Options:
   --help     Show this help
   --version  Show the package version
   --config   Explicit absolute configuration path
+  --foreground  Run monitoring in the foreground
 
 Commands:
   config validate  Validate configuration and local resources
   status           Inspect existing historical state
+  start            Run local foreground monitoring
 
-Monitoring commands are not available in this build.
+Foreground monitoring requires an SMTP provider; mixed HTTPS webhook/SMTP routes are accepted.
+Validate site polling/execution policy before monitoring a real cluster.

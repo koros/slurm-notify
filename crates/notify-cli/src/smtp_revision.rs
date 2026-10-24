@@ -23,6 +23,7 @@ pub(super) enum Error {
 }
 
 impl Descriptor {
+    #[cfg(test)]
     pub(super) fn from_plan(plan: &Plan<'_>, name: &str) -> Result<Self, Error> {
         Self::with_identity(plan, name, smtp_metadata::VERSION)
     }

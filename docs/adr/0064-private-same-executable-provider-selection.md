@@ -4,8 +4,8 @@ Date: 2026-10-24
 
 Status: selector/process acceptance and installed webhook/SMTP handlers implemented.
 Installed rejection, missing-STARTTLS/no-AUTH and verified SMTP helper submission/
-replay acceptance pass. Installed monitoring/store restart and successful webhook
-helper send acceptance remain pending.
+replay acceptance pass. Installed SMTP/mixed monitoring and store restart are accepted in ADR 0065;
+successful installed webhook helper send acceptance remains pending.
 
 ## Decision
 
@@ -46,4 +46,4 @@ requires supervised failure without a provider request or recursive parent start
 Bound-SMTP recovery acceptance now uses the selected versioned command for normal
 child dispatch and restart retry; explicit lost-result fault fixtures remain separate.
 Local-run startup tests preserve cancellation/budget/resource error precedence.
-Installed monitoring command activation remains pending.
+Installed SMTP/mixed monitoring activation is recorded in [ADR 0065](0065-installed-smtp-mixed-foreground-command.md).

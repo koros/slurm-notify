@@ -1,4 +1,4 @@
-//! Private mixed-draft composition; no installed behavior or permission enrollment.
+//! Shared mixed configuration composition; exact permissions guard credential lookup.
 use crate::{
     config_composition,
     config_validate::{self, get, list, object, text},
@@ -29,6 +29,7 @@ struct Smtp {
     namespace: Zeroizing<String>,
     visibility: JobVisibility,
     descriptor: Descriptor,
+    #[cfg(test)]
     rendering: crate::smtp_revision::Descriptor,
     trust: trust_snapshot::Trust,
     username: Zeroizing<String>,
@@ -64,6 +65,24 @@ impl Smtp {
     }
 }
 impl Plan {
+    pub(super) fn prune_revisions(
+        &self,
+        store: &mut crate::storage::Store,
+    ) -> Result<(), crate::storage::StorageError> {
+        let limit = self.common.controls.revision_cleanup_limit;
+        if limit == 0 {
+            return Ok(());
+        }
+        let removed =
+            store.prune_smtp_provider_revisions(self.common.observation.cluster(), limit)?;
+        if removed < limit {
+            store.prune_smtp_revisions(self.common.observation.cluster(), limit - removed)?;
+        }
+        Ok(())
+    }
+    pub(super) fn query_timeout(&self) -> Duration {
+        self.common.controls.query_timeout
+    }
     pub(super) fn poll_interval(&self) -> Duration {
         self.common.controls.poll
     }
@@ -77,6 +96,7 @@ impl Plan {
             .map_err(|_| crate::storage::StorageError::InvalidInput)?;
         crate::storage::Store::open_private(parent, lock_timeout)
     }
+    #[cfg(test)]
     pub(super) fn status(
         &self,
         cycles: &crate::polling_cycle::Cycles,
@@ -109,6 +129,7 @@ impl Plan {
             })
             .collect()
     }
+    #[cfg(test)]
     pub(super) fn revisions(&self) -> Vec<(&str, &str, &str)> {
         self.smtp
             .iter()
@@ -146,6 +167,7 @@ impl Plan {
             .map(|s| s.timeout)
             .ok_or(Error::Profile)
     }
+    #[cfg(test)]
     pub(super) fn deliver_public_with<L, S, W, C, X>(
         &self,
         store: &mut crate::storage::Store,
@@ -332,6 +354,7 @@ impl Plan {
         ))
     }
     // Each SMTP destination retains its configured transport deadline.
+    #[cfg(test)]
     pub(super) fn tick_with<Q, L, H, O, C, X>(
         &self,
         programs: (&std::path::Path, &std::path::Path),
@@ -433,6 +456,7 @@ impl Plan {
             |event| self.common.routes.destinations(&event.state),
         ))
     }
+    #[cfg(test)]
     pub(super) fn poll_with(
         &self,
         input: config_composition::PollInput<'_>,
@@ -613,8 +637,9 @@ pub(super) fn prepare(
         let trust = trust_snapshot::load(&roots.iter().map(PathBuf::from).collect::<Vec<_>>())
             .map_err(Error::Trust)?;
         let descriptor = profile(trust.fingerprint())?;
-        let revision = crate::smtp_revision::Descriptor::from_revision_plan(&rendering, route.name)
-            .map_err(|_| Error::Rendering)?;
+        let _revision =
+            crate::smtp_revision::Descriptor::from_revision_plan(&rendering, route.name)
+                .map_err(|_| Error::Rendering)?;
         smtp.push(Smtp {
             name: Zeroizing::new(route.name.into()),
             sender: Zeroizing::new(route.metadata.sender.into()),
@@ -622,7 +647,8 @@ pub(super) fn prepare(
             namespace: Zeroizing::new(route.metadata.namespace.into()),
             visibility: route.visibility,
             descriptor,
-            rendering: revision,
+            #[cfg(test)]
+            rendering: _revision,
             trust,
             username: Zeroizing::new(username.into()),
             password: Zeroizing::new(password.into()),
@@ -663,7 +689,7 @@ pub(super) fn prepare(
     Ok(plan)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
     use crate::{lifecycle::Reconciler, storage::Store};
@@ -798,6 +824,34 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn public_revision_cleanup_is_disabled_at_zero_and_shares_one_bounded_budget() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        v["maintenance"]["smtp_revision_cleanup_limit"] = json!(0);
+        let disabled = prepare_fixture(&v);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let db = rusqlite::Connection::open(d.path()).unwrap();
+        let smtp = &disabled.smtp[0];
+        db.execute("INSERT INTO smtp_provider_revisions VALUES ('research-cluster','research_email',?1,?2)",rusqlite::params![smtp.descriptor.token(),smtp.descriptor.canonical()]).unwrap();
+        db.execute(
+            "INSERT INTO smtp_render_revisions VALUES ('research-cluster','research_email',?1,?2)",
+            rusqlite::params![smtp.rendering.token(), smtp.rendering.canonical()],
+        )
+        .unwrap();
+        let count = || {
+            db.query_row("SELECT (SELECT COUNT(*) FROM smtp_provider_revisions)+(SELECT COUNT(*) FROM smtp_render_revisions)",[],|row|row.get::<_,i64>(0)).unwrap()
+        };
+        disabled.prune_revisions(&mut store).unwrap();
+        assert_eq!(count(), 2);
+        v["maintenance"]["smtp_revision_cleanup_limit"] = json!(1);
+        let enabled = prepare_fixture(&v);
+        enabled.prune_revisions(&mut store).unwrap();
+        assert_eq!(count(), 1);
+        enabled.prune_revisions(&mut store).unwrap();
+        assert_eq!(count(), 0);
+    }
+
     #[test]
     fn local_os_adapter_uses_effective_identity_environment_and_synthetic_scheduler_children() {
         let d = crate::storage::tests::Directory::new();

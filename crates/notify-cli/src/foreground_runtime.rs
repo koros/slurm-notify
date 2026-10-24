@@ -1,23 +1,29 @@
-//! Private protected startup-to-shutdown orchestration; no installed entry point.
+//! Shared typed foreground outcomes and private orchestration fixtures.
+use crate::foreground_report::{Report, StartupReport};
+#[cfg(test)]
 use crate::{
-    foreground_report::{Report, StartupReport},
     foreground_session::{Error, Session},
     foreground_wait::Signal,
     polling_cycle::TickReport,
 };
+#[cfg(test)]
 use std::{path::Path, time::Duration};
+#[cfg(test)]
 use zeroize::Zeroizing;
+#[cfg(test)]
 pub(super) struct Request<'a> {
     pub(super) path: &'a Path,
     pub(super) poll_limit: usize,
     pub(super) tick_limit: usize,
     pub(super) lock_timeout: Duration,
 }
+#[cfg(test)]
 pub(super) struct ContinuousRequest<'a> {
     pub(super) path: &'a Path,
     pub(super) poll_batch: usize,
     pub(super) lock_timeout: Duration,
 }
+#[cfg(test)]
 pub(super) struct Hooks<I, L, T> {
     pub(super) identity: I,
     pub(super) lookup: L,
@@ -45,6 +51,7 @@ impl Summary {
             code
         }
     }
+    #[cfg(test)]
     pub(super) fn render(&self) -> String {
         match self {
             Self::Startup(report) => report.render(),
@@ -52,6 +59,7 @@ impl Summary {
         }
     }
 }
+#[cfg(test)]
 pub(super) fn run<I, L, T>(request: Request<'_>, signal: &Signal, hooks: Hooks<I, L, T>) -> Summary
 where
     I: FnOnce(usize) -> Result<Zeroizing<Vec<u8>>, ()>,
@@ -88,6 +96,7 @@ where
 
 // Uses the same startup order, owned session, OS monotonic clock and interruptible
 // wait as finite orchestration. Provider helper/identity/resource adapters remain explicit.
+#[cfg(test)]
 pub(super) fn run_continuous<I, L, T>(
     request: ContinuousRequest<'_>,
     signal: &Signal,
@@ -127,6 +136,7 @@ where
 
 // The selected executable is retained for the complete owned run; no per-send
 // executable discovery or caller-provided helper-path override is used here.
+#[cfg(test)]
 pub(super) fn run_selected_local_continuous(
     request: ContinuousRequest<'_>,
     signal: &Signal,
@@ -157,6 +167,7 @@ pub(super) fn run_selected_local_continuous(
 
 // Explicit scheduler programs and caller-owned trusted helper commands. This binds
 // existing OS adapters without adding installed flags, PATH search or helper discovery.
+#[cfg(test)]
 pub(super) fn run_local_continuous<S, W>(
     request: ContinuousRequest<'_>,
     signal: &Signal,

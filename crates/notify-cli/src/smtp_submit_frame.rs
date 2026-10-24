@@ -7,7 +7,7 @@ use super::{
 #[cfg(test)]
 use super::{smtp_auth::Credentials, smtp_message, transport};
 #[cfg(not(test))]
-use crate::provider_frame as transport;
+use crate::transport;
 #[cfg(test)]
 use std::io::Read;
 #[cfg(test)]
@@ -172,7 +172,6 @@ pub(super) fn encode_ack(ack: Ack) -> Result<Vec<u8>, transport::Error> {
     }
     Ok(token(ack))
 }
-#[cfg(test)]
 pub(super) fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
     canonical()
         .into_iter()

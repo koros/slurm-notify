@@ -64,7 +64,6 @@ mod unix {
     }
 
     impl Guard {
-        #[cfg(test)]
         pub(crate) fn acquire(path: &Path) -> Result<Self, Error> {
             Self::acquire_mode(path, true)
         }

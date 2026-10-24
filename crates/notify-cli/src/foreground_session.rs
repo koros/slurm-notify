@@ -1,16 +1,20 @@
-//! Private owned foreground session; caller-driven ticks, no installed loop.
+//! Owned foreground session shared by the command and private acceptance fixtures.
 use crate::{mixed_config_composition, polling_cycle, storage};
-use std::{path::Path, time::Duration};
+#[cfg(test)]
+use std::path::Path;
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    #[cfg(test)]
     InvalidLimit,
     Cancelled,
     Preparation,
     Ownership,
     Closed,
     Cycle,
+    #[cfg(test)]
     Status,
 }
 struct Active {
@@ -23,6 +27,7 @@ pub(super) struct Session {
     active: Option<Active>,
 }
 impl Session {
+    #[cfg(test)]
     pub(super) fn start_reported(
         path: &Path,
         poll_limit: usize,
@@ -34,6 +39,7 @@ impl Session {
         Self::start(path, poll_limit, lock_timeout, identity, lookup, cancelled)
             .map_err(crate::foreground_report::StartupReport::classify)
     }
+    #[cfg(test)]
     pub(super) fn start(
         path: &Path,
         poll_limit: usize,
@@ -48,6 +54,14 @@ impl Session {
         let cycles = polling_cycle::Cycles::new(poll_limit).map_err(|_| Error::InvalidLimit)?;
         let plan = mixed_config_composition::prepare_path(path, identity, lookup)
             .map_err(|_| Error::Preparation)?;
+        Self::start_prepared(plan, cycles, lock_timeout, cancelled)
+    }
+    pub(super) fn start_prepared(
+        plan: mixed_config_composition::Plan,
+        cycles: polling_cycle::Cycles,
+        lock_timeout: Duration,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> Result<Self, Error> {
         if cancelled() {
             return Err(Error::Cancelled);
         }
@@ -65,6 +79,7 @@ impl Session {
             }),
         })
     }
+    #[cfg(test)]
     pub(super) fn run_interruptible<T>(
         &mut self,
         limit: usize,
@@ -108,6 +123,7 @@ impl Session {
         )
     }
     // Every scheduling exit closes ownership; stage reports remain caller-observed.
+    #[cfg(test)]
     pub(super) fn run_reported<T, M, W, X>(
         &mut self,
         limit: usize,
@@ -121,6 +137,7 @@ impl Session {
     {
         crate::foreground_report::Report::classify(&self.run_with(limit, hooks))
     }
+    #[cfg(test)]
     pub(super) fn run_with<T, M, W, X>(
         &mut self,
         limit: usize,
@@ -207,9 +224,17 @@ impl Session {
         result
     }
 
+    pub(super) fn prune_revisions(&mut self) -> Result<(), Error> {
+        let active = self.active.as_mut().ok_or(Error::Closed)?;
+        active
+            .plan
+            .prune_revisions(&mut active.store)
+            .map_err(|_| Error::Cycle)
+    }
     pub(super) fn stop(&mut self) {
         self.active.take();
     }
+    #[cfg(test)]
     pub(super) fn status(&mut self, now: i64) -> Result<polling_cycle::HealthReport, Error> {
         let active = self.active.as_mut().ok_or(Error::Closed)?;
         active
@@ -217,6 +242,7 @@ impl Session {
             .status(&active.cycles, &mut active.store, now)
             .map_err(|_| Error::Status)
     }
+    #[cfg(test)]
     pub(super) fn tick_interruptible<Q, L, H, O, C>(
         &mut self,
         programs: (&std::path::Path, &std::path::Path),
@@ -281,6 +307,7 @@ impl Session {
         }
         result
     }
+    #[cfg(test)]
     pub(super) fn tick_with<Q, L, H, O, C, X>(
         &mut self,
         programs: (&std::path::Path, &std::path::Path),

@@ -58,7 +58,7 @@ frozen SMTP messages and rendering/provider bindings in one poll transaction. On
 webhook destinations receive public frame route rows; SMTP retains its existing
 message and profile bindings. Mixed poll composition now verifies complete prepared HTTPS bindings before querying
 and admits selected payloads against provider limits before commit. Caller state
-advances only after commit. Supervised runtime cycles still need wiring.
+advances only after commit. Supervised runtime cycles share the owned foreground session.
 The stored-frame adapter checks HTTPS, current endpoint revision and payload limits
 again before constructing an owned secret-stdin request. Controlled children prove
 exact public UUID/bytes, completion-based retry and restart; changed resources block
@@ -69,7 +69,7 @@ consume no attempt and are resumable after configuration/permission repair. Publ
 checkpoint planning, health, cancellation and maintenance. Cancellation after query
 completion preserves the atomic poll while stopping before delivery. Owned continuous sessions now retain the prepared plan and single state owner
 across public poll-budget renewal. Controlled child acceptance verifies retry and
-cancellation recovery after configuration removal. OS-backed installed send/restart
-acceptance remains pending. At-least-once replay can still duplicate a provider-accepted request
+cancellation recovery after configuration removal. Installed SMTP/mixed runs have controlled SMTP submission and store-restart
+acceptance; successful installed webhook submission remains outstanding. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.

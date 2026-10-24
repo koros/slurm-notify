@@ -63,7 +63,16 @@ pub(super) use crate::provider_outcome::{unix_time, ProviderOutcome};
 #[derive(Debug)]
 pub(super) enum WorkerError {
     InvalidPolicy,
-    Storage(StorageError),
+    Storage(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "typed private cause retained without rendering raw diagnostics"
+            )
+        )]
+        StorageError,
+    ),
     InvalidTime,
     DispatchBlocked(super::supervised_provider::Diagnostic),
     Cancelled,
@@ -90,6 +99,13 @@ pub(super) struct BatchFailure {
     pub(super) kind: FailureKind,
     pub(super) diagnostic: Option<super::supervised_provider::Diagnostic>,
     pub(super) acceptance_uncertain: bool,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "typed private cause retained without rendering raw diagnostics"
+        )
+    )]
     cause: WorkerError,
 }
 
@@ -107,6 +123,7 @@ impl std::fmt::Debug for BatchFailure {
 // Provider sends occur outside SQLite transactions. Stop on storage failure so
 // an accepted but unrecorded send is visible, and can be retried with the same ID.
 // The future real provider must enforce its own transport timeout.
+#[cfg(test)]
 fn deliver_due(
     store: &mut Store,
     cluster: &str,
@@ -118,6 +135,7 @@ fn deliver_due(
     deliver_due_with_clock(store, cluster, now, limit, policy, send, || Some(now))
 }
 
+#[cfg(test)]
 pub(super) fn deliver_due_with_clock(
     store: &mut Store,
     cluster: &str,
@@ -138,6 +156,7 @@ pub(super) fn deliver_due_with_clock(
     )
 }
 
+#[cfg(test)]
 pub(super) fn deliver_due_fallible(
     store: &mut Store,
     cluster: &str,
@@ -151,6 +170,7 @@ pub(super) fn deliver_due_fallible(
         .map_err(|failure| failure.cause)
 }
 
+#[cfg(test)]
 pub(super) fn deliver_due_detailed(
     store: &mut Store,
     cluster: &str,
@@ -174,12 +194,14 @@ pub(super) fn deliver_due_detailed(
     )
 }
 
+#[cfg(test)]
 pub(super) struct DeliveryHooks<S, C, X> {
     pub(super) send: S,
     pub(super) clock: C,
     pub(super) cancelled: X,
 }
 
+#[cfg(test)]
 pub(super) fn deliver_due_controlled<S, C, X>(
     store: &mut Store,
     cluster: &str,

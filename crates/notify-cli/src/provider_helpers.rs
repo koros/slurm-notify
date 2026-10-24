@@ -1,5 +1,7 @@
 //! Private same-executable provider selection; no PATH or environment override.
-use std::{ffi::OsString, path::PathBuf, process::Command};
+#[cfg(test)]
+use std::ffi::OsString;
+use std::{path::PathBuf, process::Command};
 const FLAG: &str = "--internal-provider-v1";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -35,6 +37,7 @@ impl Selection {
         command
     }
 }
+#[cfg(test)]
 pub(super) fn mode(args: &[OsString]) -> Option<Kind> {
     if args.len() != 2 || args[0] != FLAG {
         return None;

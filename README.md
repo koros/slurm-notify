@@ -11,13 +11,14 @@ Slurm Notify is an MIT-licensed Rust project for user-space Slurm job notificati
 It aims to discover the current user's jobs and send lifecycle alerts without root
 access or changes to batch scripts.
 
-**Current status: tested private engine; installed monitoring is unavailable.**
-The executable supports `--help`, `--version`, and
-`config validate --config <absolute-path>`, and `status --config <absolute-path>`.
-Status inspects existing historical state without resolving provider secrets. Empty or invalid
-invocations exit 2; unapproved SMTP profiles exit 3. Monitoring commands remain unavailable. No supported
-monitoring release is available yet. See the [installed configuration contract](contracts/config/README.md)
-for file permissions, resource requirements and exact SMTP permission checks.
+**Current status: prototype foreground monitoring is installed for SMTP/mixed configs.**
+The executable supports `--help`, `--version`,
+`config validate --config <absolute-path>`, `status --config <absolute-path>`, and
+`start --foreground --config <absolute-path>` on Linux/macOS. Start currently requires
+at least one SMTP provider; webhook-only monitoring remains unavailable. Validate
+site polling/execution policy before starting on a real cluster. No supported
+monitoring release is available yet. See the [CLI contract](contracts/cli/README.md)
+and [configuration contract](contracts/config/README.md) for exact behavior.
 
 ## Implemented
 
@@ -25,7 +26,7 @@ for file permissions, resource requirements and exact SMTP permission checks.
 - Durable SQLite checkpoints/outbox, deduplication, retries and frozen SMTP work.
 - Transactional public webhook UUIDs, frozen payloads and endpoint revision bindings
   with guarded mixed-provider delivery, runtime cycles and owned continuous sessions
-  in the private engine; installed sending remains pending.
+  in the shared engine; installed SMTP submission/restart has controlled TLS acceptance.
 - Supervised HTTPS webhook and verified required-STARTTLS SMTP transports.
 - Protected config/trust snapshots, bounded Rust validation, explicit environment
   resources and effective-user lookup.
@@ -58,21 +59,22 @@ sh scripts/check-coverage.sh
 ```
 
 See [contributing](CONTRIBUTING.md) and [CI/coverage details](docs/operations/ci-and-coverage.md).
-CI artifacts contain the finite development CLI.
+CI artifacts contain the development prototype CLI.
 
 ## Remaining work
 
-The local MVP still needs installed continuous monitoring and delivery, setup/test/doctor flows, and permitted cluster/provider
-acceptance. Configuration validation and offline historical status are installed;
-continuous scheduling and owned-session recovery are tested internally. The intended MVP includes generic
+The local MVP still needs webhook-only foreground composition, successful installed
+webhook helper acceptance, setup/test/doctor flows and authorized cluster/provider
+acceptance. Installed SMTP/mixed foreground runs now have synthetic scheduler,
+verified-STARTTLS submission, signal and durable restart acceptance. The intended MVP includes generic
 webhook and SMTP delivery. Slack/Teams scope remains to be settled. Log analysis
 and remote SSH monitoring are later phases.
 
 The [current plan](docs/architecture/implementation-plan.md) records the next work.
 The [contract review package](docs/proposals/local-contract-review-v1.md) records
 adopted MVP interfaces and remaining acceptance. Configuration examples are synthetic
-and require real protected resources and exact SMTP permissions; public event emission
-remains unimplemented.
+and require protected resources and exact SMTP permissions. Real-provider acceptance
+remains outstanding.
 The [original design](SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md),
 [implementation history](docs/architecture/implementation-history.md) and
 [ADRs](docs/adr/README.md) preserve design decisions and past evidence.

@@ -34,11 +34,9 @@ impl Credentials {
         plain.extend_from_slice(password.as_bytes());
         Ok(Self { plain })
     }
-    #[cfg(test)]
     pub(super) fn into_plain(self) -> Zeroizing<Vec<u8>> {
         self.plain
     }
-    #[cfg(test)]
     pub(super) fn matches_identity(&self, identity: &str) -> bool {
         let identity_end = 1 + identity.len();
         self.plain.get(1..identity_end) == Some(identity.as_bytes())

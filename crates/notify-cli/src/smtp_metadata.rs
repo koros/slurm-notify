@@ -22,6 +22,7 @@ pub(super) fn timestamp(observed_at: i64) -> Result<u64, Error> {
     Ok(observed_at as u64)
 }
 
+#[cfg(test)]
 pub(super) fn select(
     event: &Event,
     route: &str,

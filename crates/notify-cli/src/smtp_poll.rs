@@ -1,10 +1,13 @@
 //! Private synchronous fixture preparation; no production renderer or poll defaults.
+use super::scheduler;
+#[cfg(test)]
 use super::{
     lifecycle::{Event, Reconciler},
-    scheduler::{self, PollRequest, QueryError},
+    scheduler::{PollRequest, QueryError},
     smtp_message::Prepared,
     storage::{PollPreparation, SmtpPreparation, Store},
 };
+#[cfg(test)]
 use std::{process::Command, time::Duration};
 
 pub(super) struct Settings<'a> {
@@ -39,6 +42,7 @@ pub(super) fn valid_settings(settings: &Settings<'_>) -> bool {
             .any(|name| !routes.contains(name) || !smtp.insert(*name)))
 }
 
+#[cfg(test)]
 pub(super) fn poll_with(
     request: &PollRequest<'_>,
     reconciler: &mut Reconciler,
@@ -63,11 +67,13 @@ pub(super) fn poll_with(
     )
 }
 
+#[cfg(test)]
 pub(super) struct RevisionSettings<'a> {
     pub(super) settings: Settings<'a>,
     pub(super) revisions: &'a [super::smtp_revision::Descriptor],
 }
 
+#[cfg(test)]
 pub(super) fn poll_with_revisions(
     request: &PollRequest<'_>,
     reconciler: &mut Reconciler,
@@ -92,16 +98,19 @@ pub(super) fn poll_with_revisions(
     )
 }
 
+#[cfg(test)]
 pub(super) struct ProfileSettings<'a> {
     pub(super) settings: Settings<'a>,
     pub(super) revisions: &'a [super::smtp_revision::Descriptor],
     pub(super) providers: &'a [super::smtp_provider_revision::Descriptor],
 }
+#[cfg(test)]
 struct PreparationSettings<'a> {
     settings: &'a Settings<'a>,
     revisions: Option<&'a [super::smtp_revision::Descriptor]>,
     providers: Option<&'a [super::smtp_provider_revision::Descriptor]>,
 }
+#[cfg(test)]
 pub(super) fn poll_with_profiles(
     request: &PollRequest<'_>,
     reconciler: &mut Reconciler,
@@ -126,6 +135,7 @@ pub(super) fn poll_with_profiles(
     )
 }
 
+#[cfg(test)]
 fn poll_prepared(
     request: &PollRequest<'_>,
     reconciler: &mut Reconciler,

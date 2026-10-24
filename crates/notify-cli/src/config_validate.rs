@@ -21,7 +21,7 @@ pub(super) enum Error {
 // The tree retains zeroizing metadata; no Debug/Clone or public config contract.
 pub(super) struct Draft {
     pub(super) value: Value,
-    #[cfg(test)]
+    #[cfg(any(test, target_os = "linux", target_os = "macos"))]
     pub(super) controls: crate::runtime_mapping::Plan,
 }
 pub(super) fn object(value: &Value) -> Result<&Object, Error> {
@@ -372,11 +372,11 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
         revision_cleanup: n(maintenance, "smtp_revision_cleanup_limit")?,
     };
     control_validation::validate(input).map_err(|_| Error::Controls)?;
-    #[cfg(test)]
+    #[cfg(any(test, target_os = "linux", target_os = "macos"))]
     let controls = crate::runtime_mapping::map(input).map_err(|_| Error::Controls)?;
     Ok(Draft {
         value,
-        #[cfg(test)]
+        #[cfg(any(test, target_os = "linux", target_os = "macos"))]
         controls,
     })
 }

@@ -1,8 +1,9 @@
 # Current implementation plan
 
 The installed executable supports help/version, configuration validation, historical
-status and private bounded webhook/SMTP child protocols. Installed foreground
-monitoring remains unavailable. [Product readiness](product-readiness.md) records
+status, private bounded webhook/SMTP child protocols and prototype foreground
+monitoring for SMTP/mixed configurations. Webhook-only foreground monitoring remains
+unavailable. [Product readiness](product-readiness.md) records
 current evidence and limits; [implementation history](implementation-history.md)
 preserves historical increments.
 
@@ -11,7 +12,8 @@ preserves historical increments.
 The target is a local foreground MVP with generic HTTPS webhook and required
 STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
 setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
-help/version, webhook/SMTP configuration validation and historical status are installed. MIT licensing, refreshed guidance,
+help/version, configuration validation, historical status and SMTP/mixed foreground
+monitoring are installed. MIT licensing, refreshed guidance,
 90% coverage and accurate badges are complete.
 
 Continuous scheduling and first-signal reason retention are now implemented
@@ -19,8 +21,8 @@ privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason
 Continuous scheduling now retains one owned session across poll-batch renewal
 ([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Historical status is
 installed ([ADR 0062](../adr/0062-installed-historical-status.md)). Public mixed
-composition and OS-backed orchestration are tested privately; installed helper
-binding and monitoring activation remain pending.
+composition and OS-backed orchestration now back the installed SMTP/mixed command
+([ADR 0065](../adr/0065-installed-smtp-mixed-foreground-command.md)).
 
 ## Next product milestones
 
@@ -36,11 +38,12 @@ binding and monitoring activation remain pending.
    Local continuous orchestration now retains one same-executable helper selection;
    controlled bound-SMTP recovery tests dispatch through its versioned commands.
    Installed SMTP helpers have verified STARTTLS/AUTH and identical-byte replay after
-   a temporary final reply. Successful webhook helper send and installed monitoring/
-   durable-store restart acceptance remain pending.
-4. Activate installed monitoring orchestration and complete
-   webhook-only composition and status contention acceptance, then activate reviewed
-   webhook/SMTP flows with ownership, privacy and restart acceptance.
+   a temporary final reply. Installed foreground SMTP delivery, signals, blocked
+   recovery and durable no-replay restart now have controlled acceptance. Successful
+   webhook helper send acceptance remains pending.
+4. Complete webhook-only owned foreground composition and installed webhook send
+   acceptance. Broaden mixed-provider installed failure/recovery evidence and finish
+   remaining ownership/platform acceptance before claiming a supported MVP.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
    platform/Slurm baseline. Complete security reporting, installation/upgrade,
    dependency notices and explicitly authorized release acceptance.

@@ -1,16 +1,15 @@
-# Approved finite CLI baseline
+# Installed CLI contracts
 
-Maintainer approval recorded on 2026-10-12 for the exact
-[help/version slice](../../docs/proposals/finite-cli-activation-v1.md).
-Only a single `--help` or `--version` is accepted (exit 0, empty stderr).
-No arguments produce `no-arguments.stderr` (exit 2, empty stdout).
-All other sequences produce `invalid-invocation.stderr` (exit 2, empty stdout),
-including non-Unicode arguments. Files contain exact UTF-8 bytes and final newlines.
-Version uses Cargo package version; intentional package version changes must update
-its snapshot with a compatibility/version decision. No aliases or monitoring commands
-are approved. Config, state, environment resources and providers are not loaded.
-Installed-binary acceptance compares bytes, streams and exits without regenerating
-these snapshots. Broader draft contracts remain unapproved.
+The local MVP contracts were adopted on 2026-10-13, following exact help/version
+approval on 2026-10-12. Snapshots are intentional UTF-8 bytes with final newlines;
+acceptance compares streams and exit codes without regenerating baselines.
+
+Installed user commands are help/version, configuration validation, historical status
+and prototype `start --foreground` for SMTP/mixed configurations. No arguments emit
+`no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
+`invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
+versioned child protocols, not user provider-test commands. There is no service
+installation, setup, test or doctor command in this build.
 
 ## Configuration-validation addition (2026-10-13)
 
@@ -20,7 +19,7 @@ relative or non-Unicode paths fail before file access with the invocation diagno
 `config validate --help` (help before/between words also accepted) loads no resources.
 Global help now lists this command. Webhook validation succeeds with schema/cluster/
 count output; invalid config/resources or unsupported SMTP scope exit 2 with the
-corresponding static stderr snapshot and empty stdout. No monitoring command is active.
+corresponding static stderr snapshot and empty stdout. This finite command performs no monitoring.
 
 ## SMTP-validation addition (2026-10-13)
 
@@ -85,3 +84,30 @@ Installed helper acceptance also verifies STARTTLS/AUTH and a temporary final DA
 refusal followed by relay acceptance from a fresh helper process using identical
 frozen bytes. This is helper replay, not installed monitor/store restart acceptance;
 monitoring command acceptance remains pending.
+
+## Foreground activation (2026-10-24)
+
+`start --foreground --config <absolute-path>` accepts exactly these words/options in
+any order, with no duplicates or extra values. `start --help` and `--help start` use
+`start-help.stdout` without resource access. Global help intentionally adds start.
+The command is implemented on Linux/macOS and requires at least one SMTP provider;
+webhook-only configuration exits 2 before state creation.
+
+Startup reads one protected snapshot. Slurm programs resolve once from PATH with
+at most 4,096 bytes and 64 absolute directory entries; missing programs exit 2
+before state creation. Configured query timeout also bounds SQLite busy waits.
+Configured poll cadence remains completion-relative, including blocked delivery.
+An internal renewable poll batch retains one owner and does not limit run duration.
+
+Diagnostics are static and omit private resources. Successful start emits
+`Foreground monitoring started.` to stderr. Shutdown emits
+`Foreground monitoring stopped by SIGINT.` / `... SIGTERM.` with exit 130/143.
+Corrupt state/runtime failures stop with exit 1. Missing config/resources exit 2.
+Denied delivery stays pending with no consumed attempt; it reports a blocked line
+and waits configured cadence. `config validate` retains its finite exit-3 policy.
+
+Health uses stdout with labelled sampled pending/failed counts, stale status and
+truncation; it makes no exact-total claim. See [ADR 0065](../../docs/adr/0065-installed-smtp-mixed-foreground-command.md)
+for lifecycle, error, cleanup and compatibility details. Installed accepted SMTP
+submission and no-replay restart have controlled TLS acceptance; no real-cluster/
+provider or supported-release claim follows.

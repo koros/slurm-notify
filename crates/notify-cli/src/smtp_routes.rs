@@ -37,8 +37,11 @@ pub(super) enum Error {
     Policy,
     Provider(super::smtp_provider_revision::Error),
     Metadata(smtp_render::Error),
+    #[cfg(test)]
     Route,
+    #[cfg(test)]
     Render(smtp_render::Error),
+    #[cfg(test)]
     Selection(smtp_metadata::Error),
 }
 
@@ -262,6 +265,7 @@ impl<'a, 'b> ProviderPlan<'a, 'b> {
             providers,
         })
     }
+    #[cfg(test)]
     pub(super) fn poll_with(
         &self,
         request: &PollRequest<'_>,
@@ -342,6 +346,7 @@ impl<'a> Plan<'a> {
         self.routes.iter().find(|route| route.name == name)
     }
 
+    #[cfg(test)]
     pub(super) fn prepare(
         &self,
         event: &Event,
@@ -364,6 +369,7 @@ impl<'a> Plan<'a> {
         .map_err(Error::Render)
     }
 
+    #[cfg(test)]
     pub(super) fn poll_revision_with(
         &self,
         request: &PollRequest<'_>,
@@ -432,6 +438,7 @@ impl<'a> Plan<'a> {
         .map_err(|_| ())
     }
 
+    #[cfg(test)]
     pub(super) fn poll_with(
         &self,
         request: &PollRequest<'_>,

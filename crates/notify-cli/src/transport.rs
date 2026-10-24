@@ -6,8 +6,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub(super) use crate::provider_frame::{frame, parse_result, serve, Error};
+#[cfg(test)]
+pub(super) use crate::provider_frame::serve;
+pub(super) use crate::provider_frame::{frame, parse_result, Error};
 
+#[cfg(test)]
 pub(super) fn send_fields(
     fields: Vec<Vec<u8>>,
     blocked_resolver_fixture: bool,

@@ -207,6 +207,7 @@ pub(super) struct Reconciler {
 }
 
 impl Reconciler {
+    #[cfg(test)]
     pub(super) fn with_capacity(capacity: usize) -> Self {
         Self::with_capacities(capacity, capacity)
     }

@@ -26,6 +26,7 @@ pub(super) struct Hooks<T, M, W, X> {
     pub(super) wait: W,
     pub(super) cancelled: X,
 }
+#[cfg(test)]
 pub(super) fn run<T, M, W, X>(
     interval: Duration,
     limit: usize,

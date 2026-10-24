@@ -5,7 +5,6 @@ use crate::{
 };
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Error {
-    #[cfg(test)]
     Policy,
     Profile,
     Trust,
@@ -46,11 +45,9 @@ impl Resolved {
             credentials,
         })
     }
-    #[cfg(test)]
     pub(super) fn provider(&self) -> &Descriptor {
         &self.provider
     }
-    #[cfg(test)]
     pub(super) fn from_owned(
         bound: &Descriptor,
         profile: &Profile<'_>,
