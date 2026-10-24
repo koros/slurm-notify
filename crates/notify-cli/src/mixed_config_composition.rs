@@ -23,6 +23,21 @@ pub(super) enum Error {
     Common(config_composition::Error),
     Credentials(crate::credential_resolution::Error),
 }
+pub(super) const SMTP_TEST_BODY: &str = "Synthetic Slurm Notify test.\nNo scheduler data.\n";
+pub(super) enum SyntheticError {
+    Config,
+    Permission,
+}
+pub(super) enum SyntheticRequest {
+    Webhook {
+        request: crate::webhook_resolution::PublicRequest,
+        preview: String,
+    },
+    Smtp {
+        frame: Zeroizing<Vec<u8>>,
+        timeout: Duration,
+    },
+}
 struct Smtp {
     name: Zeroizing<String>,
     sender: Zeroizing<String>,
@@ -30,7 +45,6 @@ struct Smtp {
     namespace: Zeroizing<String>,
     visibility: JobVisibility,
     descriptor: Descriptor,
-    #[cfg(test)]
     rendering: crate::smtp_revision::Descriptor,
     trust: trust_snapshot::Trust,
     username: Zeroizing<String>,
@@ -66,6 +80,60 @@ impl Smtp {
     }
 }
 impl Plan {
+    pub(super) fn synthetic_test(
+        &self,
+        alias: &str,
+        id: &str,
+        now: u64,
+    ) -> Result<SyntheticRequest, SyntheticError> {
+        use SyntheticError as Error;
+        use SyntheticRequest as Request;
+        if let Some(webhook) = self
+            .common
+            .webhooks
+            .iter()
+            .find(|webhook| webhook.alias.as_str() == alias)
+        {
+            let payload=serde_json::to_vec(&serde_json::json!({"schema_version":"1.0","event_id":id,"event_type":"TEST","message":"Synthetic Slurm Notify test; no scheduler data."})).map_err(|_|Error::Config)?;
+            return Ok(Request::Webhook {
+                request: webhook
+                    .resources
+                    .synthetic_request(id, &payload)
+                    .map_err(|_| Error::Config)?,
+                preview: String::from_utf8(payload).map_err(|_| Error::Config)?,
+            });
+        }
+        let smtp = self
+            .smtp
+            .iter()
+            .find(|smtp| smtp.name.as_str() == alias)
+            .ok_or(Error::Config)?;
+        if !self.permissions.iter().any(|permission| {
+            permission[0].as_str() == self.common.observation.cluster()
+                && permission[1].as_str() == alias
+                && permission[2].as_str() == smtp.rendering.token()
+                && permission[3].as_str() == smtp.descriptor.token()
+        }) {
+            return Err(Error::Permission);
+        }
+        let resolved = self
+            .resolve(&smtp.descriptor, crate::environment_resolution::lookup)
+            .map_err(|_| Error::Config)?;
+        let message = crate::smtp_message::prepare(
+            &smtp.sender,
+            &smtp.recipient,
+            id,
+            "Slurm Notify test",
+            SMTP_TEST_BODY,
+            now,
+        )
+        .map_err(|_| Error::Config)?;
+        Ok(Request::Smtp {
+            frame: crate::smtp_bound_transport::encode_prepared(resolved, &message, smtp.timeout)
+                .map_err(|_| Error::Config)?,
+            timeout: smtp.timeout,
+        })
+    }
     pub(super) fn prune_revisions(
         &self,
         store: &mut crate::storage::Store,
@@ -667,7 +735,6 @@ pub(super) fn prepare(
             namespace: Zeroizing::new(route.metadata.namespace.into()),
             visibility: route.visibility,
             descriptor,
-            #[cfg(test)]
             rendering: _revision,
             trust,
             username: Zeroizing::new(username.into()),

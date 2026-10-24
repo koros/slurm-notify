@@ -58,6 +58,19 @@ impl Resources {
     pub(super) fn public_revision(&self) -> Option<&str> {
         self.public_https.then_some(self.revision.as_str())
     }
+    pub(super) fn synthetic_request(
+        &self,
+        id: &str,
+        payload: &[u8],
+    ) -> Result<PublicRequest, Error> {
+        if !crate::public_event::valid_id(id) || !self.accepts_public_payload(payload) {
+            return Err(Error::Request);
+        }
+        Ok(PublicRequest {
+            frame: self.frame(id, payload)?,
+            timeout: self.timeout,
+        })
+    }
     pub(super) fn prepare_public(
         &self,
         store: &crate::storage::Store,

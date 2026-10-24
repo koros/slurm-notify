@@ -8,6 +8,11 @@ use std::{
 };
 type Requests = Vec<(String, Vec<u8>)>;
 pub(super) fn start() -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
+    start_statuses(vec!["503 Service Unavailable", "204 No Content"])
+}
+pub(super) fn start_statuses(
+    statuses: Vec<&'static str>,
+) -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
     let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let root = cert.cert.der().to_vec();
     let config = Arc::new(
@@ -26,7 +31,7 @@ pub(super) fn start() -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
     listener.set_nonblocking(true).unwrap();
     let task = thread::spawn(move || {
         let mut received = Vec::new();
-        for status in ["503 Service Unavailable", "204 No Content"] {
+        for status in statuses {
             let deadline = Instant::now() + Duration::from_secs(15);
             let socket = loop {
                 match listener.accept() {

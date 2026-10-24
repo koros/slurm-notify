@@ -17,6 +17,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Add explicit one-shot webhook/SMTP provider tests with synthetic previews, exact
+  SMTP permission guards and supervised verified TLS. No scheduler, durable state
+  or automatic retry is used. Controlled installed acceptance covers both transports.
+
 - Add read-only `doctor` resource checks and bounded Slurm version probes, with
   static diagnostics, shared time/output budgets and no state/provider activity.
 

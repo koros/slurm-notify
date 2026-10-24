@@ -30,6 +30,24 @@ pub(super) fn encode(
     message: &FrozenMessage,
     timeout: Duration,
 ) -> Result<Zeroizing<Vec<u8>>, transport::Error> {
+    let (sender, recipient) = message.envelope();
+    encode_parts(resolved, sender, recipient, message.data(), timeout)
+}
+pub(super) fn encode_prepared(
+    resolved: Resolved,
+    message: &Prepared,
+    timeout: Duration,
+) -> Result<Zeroizing<Vec<u8>>, transport::Error> {
+    let (sender, recipient) = message.envelope();
+    encode_parts(resolved, &sender, &recipient, message.data(), timeout)
+}
+fn encode_parts(
+    resolved: Resolved,
+    sender: &str,
+    recipient: &str,
+    data: &[u8],
+    timeout: Duration,
+) -> Result<Zeroizing<Vec<u8>>, transport::Error> {
     let millis = timeout.as_millis();
     if !(1..=30000).contains(&millis)
         || timeout != Duration::from_millis(millis as u64)
@@ -42,7 +60,6 @@ pub(super) fn encode(
     let roots = transport::frame(&refs, 65664)?;
     let credentials = credentials.into_plain();
     let millis = millis.to_string();
-    let (sender, recipient) = message.envelope();
     transport::frame(
         &[
             provider.canonical(),
@@ -51,7 +68,7 @@ pub(super) fn encode(
             &credentials,
             sender.as_bytes(),
             recipient.as_bytes(),
-            message.data(),
+            data,
             millis.as_bytes(),
         ],
         INPUT_LIMIT,

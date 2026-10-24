@@ -152,6 +152,8 @@ mod smtp_submit_dispatch;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod installed_doctor;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod installed_provider_test;
 const HELP: &str = include_str!("../../../contracts/cli/help.stdout");
 const CONFIG_HELP: &str = include_str!("../../../contracts/cli/config-help.stdout");
 
@@ -236,6 +238,37 @@ fn main() -> std::process::ExitCode {
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             eprintln!("Doctor is unavailable on this platform.");
+            return std::process::ExitCode::from(2);
+        }
+    }
+    if args.len() == 2
+        && args.iter().any(|arg| arg == "test")
+        && args.iter().any(|arg| arg == "--help")
+    {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/test-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if let Some((path, alias)) = test_target(&args) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        return match installed_provider_test::run(&path, &alias) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                let(code,message)=match error {
+                installed_provider_test::Error::Config=>(2,"Configuration invalid or required resource unavailable."),
+                installed_provider_test::Error::Permission=>(3,"SMTP delivery permission is not approved for the current profile."),
+                installed_provider_test::Error::Transport=>(1,"Synthetic test was not acknowledged; acceptance may be unknown. No automatic retry was made."),
+            };
+                eprintln!("{message}");
+                std::process::ExitCode::from(code)
+            }
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (path, alias);
+            eprintln!("Provider testing is unavailable on this platform.");
             return std::process::ExitCode::from(2);
         }
     }
@@ -392,4 +425,42 @@ fn finite_path(args: &[std::ffi::OsString], name: &str) -> Option<std::path::Pat
     } else {
         None
     }
+}
+
+fn test_target(args: &[std::ffi::OsString]) -> Option<(std::path::PathBuf, String)> {
+    if args.len() != 4 {
+        return None;
+    }
+    let mut words = Vec::new();
+    let mut path = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            if path.is_some() {
+                return None;
+            }
+            let value = args.next()?;
+            value.to_str()?;
+            let value = std::path::PathBuf::from(value);
+            if !value.is_absolute() {
+                return None;
+            }
+            path = Some(value);
+        } else {
+            words.push(arg);
+        }
+    }
+    if words.len() != 2 || words[0] != "test" {
+        return None;
+    }
+    let alias = words[1].to_str()?;
+    if alias.is_empty()
+        || alias.len() > 64
+        || !alias
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+    {
+        return None;
+    }
+    Some((path?, alias.into()))
 }

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explicit synthetic webhook test v1 (not a monitoring event)",
+  "type": "object",
+  "required": ["schema_version", "event_id", "event_type", "message"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "event_id": {"type": "string", "pattern": "^evt_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"},
+    "event_type": {"const": "TEST"},
+    "message": {"const": "Synthetic Slurm Notify test; no scheduler data."}
+  }
+}

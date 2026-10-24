@@ -73,3 +73,6 @@ cancellation recovery after configuration removal. Installed SMTP/mixed runs hav
 acceptance; successful installed webhook submission remains outstanding. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
 Cluster/platform/source-data acceptance and setup/permission UX remain pending.
+
+Explicit `test` uses [test-v1.schema.json](test-v1.schema.json), a separate labelled
+synthetic payload with no cluster/job data. It is not a durable monitoring event.

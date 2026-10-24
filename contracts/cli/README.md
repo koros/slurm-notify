@@ -9,7 +9,8 @@ and prototype `start --foreground` for webhook, SMTP and mixed configurations. N
 `no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
 `invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
 versioned child protocols, not user provider-test commands. There is no service
-installation, setup or provider-test command in this build.
+installation or setup command in this build. Doctor and explicit provider tests
+are installed as described below.
 
 ## Configuration-validation addition (2026-10-13)
 
@@ -123,3 +124,15 @@ remains separate. Outputs are static and exclude raw probe text. Missing config 
 programs exit 2, SMTP permission denial 3, unsuccessful/empty/over-budget probes 1;
 success exits 0 with `doctor-success.stdout`. Shared timeout/output budgets and
 scope are recorded in [ADR 0068](../../docs/adr/0068-installed-read-only-doctor.md).
+
+## Explicit provider test
+
+`test <provider-name> --config <absolute-path>` authorizes exactly one synthetic
+request to the selected alias, regardless of route event selection. Configuration
+options may surround the command/alias pair. Preview goes to stdout before sending;
+webhook preview includes the exact JSON, SMTP preview includes its test subject/body.
+No scheduler, state creation, enrollment or automatic retry occurs. SMTP exact-pair
+permission is checked before credentials. Missing resources/alias exit 2, denied
+SMTP permission 3, unacknowledged transport 1 and acknowledged acceptance 0 with
+`test-success.stdout`. Failure may leave acceptance unknown; it never establishes
+human receipt. `test-help.stdout` is resource-free. See [ADR 0069](../../docs/adr/0069-explicit-one-shot-provider-tests.md).

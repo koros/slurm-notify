@@ -2018,3 +2018,211 @@ fn doctor_checks_resources_and_bounded_probes_without_state_or_provider_activity
     assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn explicit_provider_tests_send_once_without_scheduler_or_state() {
+    use std::{
+        io::Write,
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
+    for args in [["test", "--help"], ["--help", "test"]] {
+        expect(
+            command().args(args).output().unwrap(),
+            0,
+            include_bytes!("../../../contracts/cli/test-help.stdout"),
+            b"",
+        );
+    }
+    for args in [
+        vec!["test"],
+        vec!["test", "primary", "--config", "relative"],
+        vec!["test", "bad!", "--config", "/absent"],
+        vec!["test", "primary", "extra", "--config", "/absent"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    let root =
+        std::env::temp_dir().join(format!("slurm-notify-provider-test-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.join("config.json");
+    let trust = root.join("trust.der");
+    let state = root.join("state/state.sqlite3");
+    let write = |path: &std::path::Path, bytes: &[u8]| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    for status in ["503 Service Unavailable", "204 No Content"] {
+        let (der, port, server) = https_relay::start_statuses(vec![status]);
+        write(&trust, &der);
+        let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../docs/proposals/examples/local-webhook-config.json"
+        ))
+        .unwrap();
+        source["storage"]["path"] = serde_json::json!(state);
+        source["providers"]["primary"]["trust_der_files"] = serde_json::json!([trust]);
+        write(&config, &serde_json::to_vec(&source).unwrap());
+        let run = |alias: &str| {
+            command()
+                .args(["test", alias, "--config"])
+                .arg(&config)
+                .env(
+                    "SLURM_NOTIFY_WEBHOOK_URL",
+                    format!("https://127.0.0.1:{port}/hook"),
+                )
+                .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+                .output()
+                .unwrap()
+        };
+        expect(
+            run("missing"),
+            2,
+            b"",
+            b"Configuration invalid or required resource unavailable.\n",
+        );
+        let result = run("primary");
+        assert_eq!(
+            result.status.code(),
+            Some(if status.starts_with("204") { 0 } else { 1 })
+        );
+        let text = String::from_utf8(result.stdout).unwrap();
+        let preview = text
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("Synthetic test: provider=primary type=webhook payload=")
+            .unwrap();
+        let preview: serde_json::Value = serde_json::from_str(preview).unwrap();
+        assert_eq!(preview["event_type"], "TEST");
+        assert_eq!(preview.as_object().unwrap().len(), 4);
+        assert_eq!(preview["schema_version"], "1.0");
+        assert_eq!(
+            preview["message"],
+            "Synthetic Slurm Notify test; no scheduler data."
+        );
+        assert_eq!(preview["event_id"].as_str().unwrap().len(), 36);
+        assert!(preview.get("job").is_none());
+        if status.starts_with("204") {
+            assert!(text.ends_with(
+                std::str::from_utf8(include_bytes!("../../../contracts/cli/test-success.stdout"))
+                    .unwrap()
+            ));
+            assert!(result.stderr.is_empty());
+        } else {
+            assert_eq!(result.stderr,b"Synthetic test was not acknowledged; acceptance may be unknown. No automatic retry was made.\n");
+        }
+        let received = server.join().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&received[0].1).unwrap(),
+            preview
+        );
+        assert!(!state.exists());
+    }
+    let (der, port, server) = smtp_relay::start();
+    write(&trust, &der);
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["providers"]
+        .as_object_mut()
+        .unwrap()
+        .remove("primary");
+    source["routes"] = serde_json::json!([]);
+    source["storage"]["path"] = serde_json::json!(state);
+    let provider = &mut source["providers"]["research_email"];
+    provider["trust_der_files"] = serde_json::json!([trust]);
+    provider["relay"] = serde_json::json!("127.0.0.1");
+    provider["port"] = serde_json::json!(port);
+    provider["server_name"] = serde_json::json!("smtp.fixture.invalid");
+    provider["authentication"]["identity"] = serde_json::json!("fixture-user");
+    provider["sender"] = serde_json::json!("s@fixture.invalid");
+    provider["recipient"] = serde_json::json!("r@fixture.invalid");
+    let trust_ref = config_reference::reference(b"trust\0", &[trust.to_str().unwrap()]);
+    let creds_ref = config_reference::reference(
+        b"credentials\0",
+        &["SLURM_NOTIFY_SMTP_USERNAME", "SLURM_NOTIFY_SMTP_PASSWORD"],
+    );
+    let hash = smtp_provider_revision::trust_fingerprint(&[&der]).unwrap();
+    let descriptor = smtp_provider_revision::Descriptor::new(&smtp_provider_revision::Profile {
+        destination: "research_email",
+        relay: "127.0.0.1",
+        port,
+        tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+        server_name: "smtp.fixture.invalid",
+        trust_reference: &trust_ref,
+        trust_fingerprint: &hash,
+        authentication_identity: "fixture-user",
+        credential_reference: &creds_ref,
+    })
+    .unwrap();
+    let rendering = rendering_fingerprint::encode(&[
+        ("destination", "research_email"),
+        ("sender", "s@fixture.invalid"),
+        ("recipient", "r@fixture.invalid"),
+        ("namespace", "research_email"),
+        ("disclosure", "hidden"),
+        ("renderer", "allowlist-v1"),
+        ("identity", "sha256-event-route-revision-v2"),
+        ("domain", "fixture.invalid"),
+    ])
+    .unwrap();
+    let rendering: String = ring::digest::digest(&ring::digest::SHA256, &rendering)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    source["delivery"]["smtp_permissions"] = serde_json::json!([]);
+    write(&config, &serde_json::to_vec(&source).unwrap());
+    expect(
+        command()
+            .args(["test", "research_email", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap(),
+        3,
+        b"",
+        b"SMTP delivery permission is not approved for the current profile.\n",
+    );
+    source["delivery"]["smtp_permissions"] = serde_json::json!([{"cluster_id":"research-cluster","destination":"research_email","rendering_revision":rendering,"provider_revision":descriptor.token()}]);
+    write(&config, &serde_json::to_vec(&source).unwrap());
+    expect(
+        command()
+            .args(["test", "research_email", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"Configuration invalid or required resource unavailable.\n",
+    );
+    let output = command()
+        .args(["--config"])
+        .arg(&config)
+        .args(["test", "research_email"])
+        .env("SLURM_NOTIFY_SMTP_USERNAME", "fixture-user")
+        .env("SLURM_NOTIFY_SMTP_PASSWORD", "fixture-password")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Synthetic Slurm Notify test."));
+    assert!(!text.contains("fixture-password"));
+    let body = server.join().unwrap();
+    assert!(body
+        .windows(b"Synthetic Slurm Notify test.".len())
+        .any(|bytes| bytes == b"Synthetic Slurm Notify test."));
+    assert!(!state.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

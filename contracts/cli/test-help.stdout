@@ -1,0 +1,6 @@
+Usage: slurm-notify test <provider-name> --config <absolute-path>
+
+Send one labelled synthetic test to the selected configured provider.
+Shows synthetic content first; creates no state and runs no scheduler query.
+SMTP requires the exact current profile permission. No automatic retries.
+Acceptance by the provider does not establish human receipt.

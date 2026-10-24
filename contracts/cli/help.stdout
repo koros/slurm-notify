@@ -2,6 +2,7 @@ Usage: slurm-notify --help | --version
        slurm-notify config validate --config <absolute-path>
        slurm-notify status --config <absolute-path>
        slurm-notify doctor --config <absolute-path>
+       slurm-notify test <provider-name> --config <absolute-path>
        slurm-notify start --foreground --config <absolute-path>
 
 Options:
@@ -14,6 +15,7 @@ Commands:
   config validate  Validate configuration and local resources
   status           Inspect existing historical state
   doctor           Check local resources and bounded Slurm probes
+  test             Send one synthetic alert to a selected provider
   start            Run local foreground monitoring
 
 Foreground monitoring accepts HTTPS webhook, SMTP and mixed routes.
