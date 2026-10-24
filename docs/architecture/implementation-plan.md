@@ -39,10 +39,9 @@ composition and OS-backed orchestration now back the installed SMTP/mixed comman
    controlled bound-SMTP recovery tests dispatch through its versioned commands.
    Installed SMTP helpers have verified STARTTLS/AUTH and identical-byte replay after
    a temporary final reply. Installed foreground SMTP delivery, signals, blocked
-   recovery and durable no-replay restart now have controlled acceptance. Successful
-   webhook helper send acceptance remains pending.
-4. Webhook-only owned foreground composition is implemented. Complete successful
-   installed HTTPS webhook send acceptance. Broaden mixed-provider installed failure/recovery evidence and finish
+   recovery and durable no-replay restart now have controlled acceptance. Installed HTTPS helpers now have verified TLS retry/submission/restart acceptance.
+4. Webhook-only foreground composition and installed HTTPS retry/delivery acceptance
+   are implemented. Broaden mixed-provider installed failure/recovery evidence and finish
    remaining ownership/platform acceptance before claiming a supported MVP.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
    platform/Slurm baseline. Complete security reporting, installation/upgrade,

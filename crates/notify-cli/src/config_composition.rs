@@ -230,7 +230,7 @@ pub(super) fn prepare_draft(
             .map(text)
             .transpose()
             .map_err(shape)?;
-        let resources = webhook_resolution::resolve(
+        let mut resources = webhook_resolution::resolve(
             text(get(p, "url_env").map_err(shape)?).map_err(shape)?,
             auth,
             Duration::from_secs(integer("request_timeout_seconds")?),
@@ -238,6 +238,15 @@ pub(super) fn prepare_draft(
             &mut lookup,
         )
         .map_err(Error::Resource)?;
+        if let Ok(roots) = get(p, "trust_der_files") {
+            let paths = list(roots, 1, 32)
+                .map_err(shape)?
+                .iter()
+                .map(|value| text(value).map(std::path::PathBuf::from))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(shape)?;
+            resources = resources.with_trust(&paths).map_err(Error::Resource)?;
+        }
         webhooks.push(Webhook {
             alias: Zeroizing::new(alias.to_string()),
             resources,

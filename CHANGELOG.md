@@ -12,11 +12,16 @@ the design handoff; no release has been published.
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Add optional protected DER webhook trust, preserving verified bundled roots when
+  absent and binding custom trust fingerprints to frozen endpoint revisions.
+  Installed HTTPS acceptance proves temporary refusal, identical-byte restart
+  replay, successful acknowledgment and no replay after completion.
+
 - Allow webhook-only foreground monitoring through the existing public transaction
   path, without SMTP settings or permissions. Installed acceptance covers missing
   resources, failed dispatch, signal shutdown and frozen event preservation on restart.
-  Help baselines now advertise webhook-only configurations; verified successful HTTPS
-  dispatch remains a separate acceptance gap.
+  Help baselines now advertise webhook-only configurations.
 
 
 - Installed prototype `start --foreground --config <absolute-path>` for SMTP/mixed

@@ -742,6 +742,22 @@ fn installed_webhook_helper_rejects_malformed_private_input_without_output_or_st
     ]);
     trailing.push(0);
     rejected.push(trailing);
+    for roots in [
+        vec![],
+        vec![0],
+        vec![0, 0, 0, 5, 1],
+        vec![0; 4 * 33],
+        vec![0, 0, 0, 1, 0],
+    ] {
+        rejected.push(frame(&[
+            b"https://fixture.invalid/private-token",
+            b"",
+            id,
+            payload,
+            b"1000",
+            &roots,
+        ]));
+    }
     for input in rejected {
         let mut child = command()
             .args(["--internal-provider-v1", "webhook"])
@@ -1749,5 +1765,146 @@ fn installed_foreground_delivers_through_selected_helper_and_does_not_replay_aft
         }
     }
     assert_eq!(Some(server.join().unwrap()), frozen);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "support/https_relay.rs"]
+mod https_relay;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+        process::Stdio,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    struct Reap(std::process::Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = std::env::temp_dir().join(format!("slurm-notify-https-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (der, port, server) = https_relay::start();
+    let write = |path: &std::path::Path, bytes: &[u8], mode| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    let trust = root.join("trust.der");
+    write(&trust, &der, 0o600);
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-webhook-config.json"
+    ))
+    .unwrap();
+    let state = root.join("state/state.sqlite3");
+    let config = root.join("config.json");
+    source["storage"]["path"] = serde_json::json!(state);
+    source["providers"]["primary"]["trust_der_files"] = serde_json::json!([trust]);
+    source["monitor"]["initial_observation"] = serde_json::json!("emit");
+    source["delivery"]["initial_backoff_seconds"] = serde_json::json!(1);
+    source["delivery"]["jitter_seconds"] = serde_json::json!(0);
+    write(&config, &serde_json::to_vec(&source).unwrap(), 0o600);
+    for (name,body) in [("squeue","#!/bin/sh\nexit 0\n"),("sacct","#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {write(&root.join(name),body.as_bytes(),0o700);}
+    expect(command().args(["config","validate","--config"]).arg(&config).env("SLURM_NOTIFY_WEBHOOK_URL",format!("https://127.0.0.1:{port}/hook")).env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION","Bearer fixture").output().unwrap(),0,b"Configuration valid: schema_version=1 cluster=research-cluster destinations=1 smtp_permissions=not_applicable\n",b"");
+    let mut frozen = None;
+    for run in 0..3 {
+        let mut child = Reap(
+            command()
+                .args(["start", "--foreground", "--config"])
+                .arg(&config)
+                .env("PATH", &root)
+                .env(
+                    "SLURM_NOTIFY_WEBHOOK_URL",
+                    format!("https://127.0.0.1:{port}/hook"),
+                )
+                .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut line = String::new();
+            BufReader::new(stdout).read_line(&mut line).unwrap();
+            let _ = tx.send(line);
+        });
+        assert!(rx
+            .recv_timeout(Duration::from_secs(6))
+            .unwrap()
+            .starts_with("Foreground health:"));
+        // SAFETY: PID belongs to the owned child.
+        assert_eq!(
+            unsafe { libc::kill(child.0.id().try_into().unwrap(), libc::SIGTERM) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(143));
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        reader.join().unwrap();
+        let db = rusqlite::Connection::open_with_flags(
+            &state,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let frame: (String, Vec<u8>) = db
+            .query_row(
+                "SELECT public_id,payload FROM public_event_frames",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        if let Some(previous) = &frozen {
+            assert_eq!(&frame, previous);
+        }
+        frozen = Some(frame);
+        let counts: (String, i64) = db
+            .query_row(
+                "SELECT status,(SELECT COUNT(*) FROM delivery_attempts) FROM outbox",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            counts,
+            if run == 0 {
+                ("pending".into(), 1)
+            } else {
+                ("delivered".into(), 2)
+            }
+        );
+        if run == 0 {
+            std::thread::sleep(Duration::from_millis(1100));
+        }
+    }
+    let received = server.join().unwrap();
+    let (id, body) = frozen.unwrap();
+    assert_eq!(received.len(), 2);
+    for (headers, payload) in received {
+        assert_eq!(payload, body);
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains(&format!("idempotency-key: {id}\r\n")));
+    }
     std::fs::remove_dir_all(root).unwrap();
 }

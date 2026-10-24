@@ -12,3 +12,5 @@ Recent integration evidence: [combined OS foreground lifecycle](0057-private-com
 
 Installed foreground decisions: [SMTP/mixed activation](0065-installed-smtp-mixed-foreground-command.md)
 and [webhook-only composition](0066-webhook-only-foreground-composition.md).
+
+[Explicit webhook trust and installed HTTPS](0067-explicit-webhook-trust-and-installed-https.md) records controlled TLS acceptance.

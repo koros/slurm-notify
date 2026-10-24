@@ -213,11 +213,18 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
                         "request_timeout_seconds",
                         "payload_limit_bytes",
                     ],
-                    &["authorization_env"],
+                    &["authorization_env", "trust_der_files"],
                 )?;
                 env(get(p, "url_env")?)?;
                 if let Ok(auth) = get(p, "authorization_env") {
                     env(auth)?;
+                }
+                if let Ok(roots) = get(p, "trust_der_files") {
+                    let roots = list(roots, 1, 32)?;
+                    strings(roots)?;
+                    for root in roots {
+                        path(root)?;
+                    }
                 }
                 number(get(p, "request_timeout_seconds")?, 1, 30)?;
                 number(get(p, "payload_limit_bytes")?, 1024, 16384)?;

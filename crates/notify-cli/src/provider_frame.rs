@@ -57,10 +57,21 @@ pub(super) fn parse_result(bytes: &[u8]) -> Result<ProviderOutcome, Error> {
 // Decode exactly five fields, enforcing the total byte budget before allocation.
 // Fields: endpoint, authorization (empty means absent), ID, body,
 // socket timeout milliseconds. This remains a private prototype wire format.
+#[cfg(test)]
 pub(super) fn serve(
+    input: impl Read,
+    output: impl Write,
+    limit: usize,
+    send: impl FnOnce(Vec<Vec<u8>>) -> Result<ProviderOutcome, Error>,
+) -> Result<(), Error> {
+    serve_optional(input, output, limit, false, send)
+}
+
+pub(super) fn serve_optional(
     mut input: impl Read,
     mut output: impl Write,
     limit: usize,
+    trust_extension: bool,
     send: impl FnOnce(Vec<Vec<u8>>) -> Result<ProviderOutcome, Error>,
 ) -> Result<(), Error> {
     let mut fields = Vec::with_capacity(5);
@@ -84,7 +95,27 @@ pub(super) fn serve(
     }
     let mut extra = [0; 1];
     if input.read(&mut extra).map_err(|_| Error::Io)? != 0 {
-        return Err(Error::InvalidInput);
+        if !trust_extension {
+            return Err(Error::InvalidInput);
+        }
+        let mut prefix = [0; 4];
+        prefix[0] = extra[0];
+        input
+            .read_exact(&mut prefix[1..])
+            .map_err(|_| Error::InvalidInput)?;
+        let length = u32::from_be_bytes(prefix) as usize;
+        used.checked_add(4)
+            .and_then(|used| used.checked_add(length))
+            .filter(|used| *used <= limit)
+            .ok_or(Error::InvalidInput)?;
+        let mut field = vec![0; length];
+        input
+            .read_exact(&mut field)
+            .map_err(|_| Error::InvalidInput)?;
+        fields.push(field);
+        if input.read(&mut extra).map_err(|_| Error::Io)? != 0 {
+            return Err(Error::InvalidInput);
+        }
     }
     let result = match send(fields)? {
         ProviderOutcome::Delivered => "OK\n".to_owned(),

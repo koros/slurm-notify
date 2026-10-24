@@ -20,6 +20,7 @@ pub(super) struct Resources {
     payload_limit: usize,
     revision: String,
     public_https: bool,
+    trust: Option<crate::trust_snapshot::Trust>,
 }
 // Owned secret-stdin request; constructed only from a checked frozen delivery.
 // No Debug/Clone and no endpoint/header/payload command arguments.
@@ -36,12 +37,21 @@ impl PublicRequest {
             command,
             self.frame,
             self.timeout,
-            20 + 4096 + 4096 + 128 + 16384 + 5,
+            20 + 4096 + 4096 + 128 + 16384 + 5 + 4 + 65664,
             64,
         ))
     }
 }
 impl Resources {
+    pub(super) fn with_trust(mut self, paths: &[std::path::PathBuf]) -> Result<Self, Error> {
+        let trust = crate::trust_snapshot::load(paths).map_err(|_| Error::Policy)?;
+        self.revision = crate::config_reference::reference(
+            b"webhook-trust\0",
+            &[&self.revision, trust.fingerprint()],
+        );
+        self.trust = Some(trust);
+        Ok(self)
+    }
     pub(super) fn accepts_public_payload(&self, payload: &[u8]) -> bool {
         self.public_https && payload.len() <= self.payload_limit
     }
@@ -86,21 +96,28 @@ impl Resources {
             return Err(Error::Request);
         }
         let millis = self.timeout.as_millis().to_string();
-        transport::frame(
-            &[
-                &self.endpoint,
-                self.authorization
-                    .as_deref()
-                    .map(|bytes| bytes.as_slice())
-                    .unwrap_or_default(),
-                event_id.as_bytes(),
-                payload,
-                millis.as_bytes(),
-            ],
-            20 + 4096 + 4096 + 128 + 16384 + 5,
-        )
-        .map(Zeroizing::new)
-        .map_err(|_| Error::Request)
+        let mut fields: Vec<&[u8]> = vec![
+            &self.endpoint,
+            self.authorization
+                .as_deref()
+                .map(|bytes| bytes.as_slice())
+                .unwrap_or_default(),
+            event_id.as_bytes(),
+            payload,
+            millis.as_bytes(),
+        ];
+        let roots = self
+            .trust
+            .as_ref()
+            .map(|trust| transport::frame(&trust.roots(), 65664))
+            .transpose()
+            .map_err(|_| Error::Request)?;
+        if let Some(roots) = &roots {
+            fields.push(roots);
+        }
+        transport::frame(&fields, 20 + 4096 + 4096 + 128 + 16384 + 5 + 4 + 65664)
+            .map(Zeroizing::new)
+            .map_err(|_| Error::Request)
     }
 }
 pub(super) fn resolve(
@@ -158,6 +175,7 @@ pub(super) fn resolve(
         payload_limit,
         revision,
         public_https,
+        trust: None,
     })
 }
 
@@ -165,6 +183,45 @@ pub(super) fn resolve(
 mod tests {
     #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use super::*;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn explicit_trust_is_owned_and_changes_the_bound_revision() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::storage::tests::Directory::new();
+        let path = dir
+            .path()
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .join("webhook-root.der");
+        let first = rcgen::generate_simple_self_signed(vec!["first.invalid".into()]).unwrap();
+        std::fs::write(&path, first.cert.der()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let base = public_resources("https://fixture.invalid/hook", 16384);
+        let base_revision = base.public_revision().unwrap().to_owned();
+        let owned = base.with_trust(std::slice::from_ref(&path)).unwrap();
+        assert_ne!(owned.public_revision().unwrap(), base_revision);
+        let revision = owned.public_revision().unwrap().to_owned();
+        let same = public_resources("https://fixture.invalid/hook", 16384)
+            .with_trust(std::slice::from_ref(&path))
+            .unwrap();
+        assert_eq!(same.public_revision(), Some(revision.as_str()));
+        let second = rcgen::generate_simple_self_signed(vec!["second.invalid".into()]).unwrap();
+        std::fs::write(&path, second.cert.der()).unwrap();
+        let changed = public_resources("https://fixture.invalid/hook", 16384)
+            .with_trust(std::slice::from_ref(&path))
+            .unwrap();
+        assert_ne!(changed.public_revision(), owned.public_revision());
+        std::fs::remove_file(&path).unwrap();
+        let bytes = owned.into_frame("fixture", b"{}").unwrap();
+        assert!(bytes
+            .windows(first.cert.der().len())
+            .any(|bytes| bytes == first.cert.der().as_ref()));
+        assert!(public_resources("https://fixture.invalid/hook", 16384)
+            .with_trust(&[path])
+            .is_err());
+    }
     fn public_resources(url: &str, limit: usize) -> Resources {
         resolve(
             "URL",

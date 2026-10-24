@@ -56,6 +56,7 @@ pub(super) struct Webhook {
     authorization: Option<String>,
     max_payload: usize,
     agent: ureq::Agent,
+    timeout: Duration,
 }
 
 impl Webhook {
@@ -78,6 +79,7 @@ impl Webhook {
             endpoint: url.to_string(),
             authorization,
             max_payload,
+            timeout,
             agent: ureq::AgentBuilder::new()
                 .timeout(timeout)
                 .timeout_connect(timeout)
@@ -87,6 +89,30 @@ impl Webhook {
                 .try_proxy_from_env(false)
                 .build(),
         })
+    }
+
+    pub(super) fn use_roots(&mut self, roots: &[&[u8]]) -> Result<(), Error> {
+        crate::smtp_provider_revision::trust_fingerprint(roots)
+            .map_err(|_| Error::InvalidConfiguration)?;
+        let mut store = rustls::RootCertStore::empty();
+        for root in roots {
+            store
+                .add(rustls::pki_types::CertificateDer::from(root.to_vec()))
+                .map_err(|_| Error::InvalidConfiguration)?;
+        }
+        let tls = rustls::ClientConfig::builder()
+            .with_root_certificates(store)
+            .with_no_client_auth();
+        self.agent = ureq::AgentBuilder::new()
+            .timeout(self.timeout)
+            .timeout_connect(self.timeout)
+            .timeout_read(self.timeout)
+            .timeout_write(self.timeout)
+            .redirects(0)
+            .try_proxy_from_env(false)
+            .tls_config(std::sync::Arc::new(tls))
+            .build();
+        Ok(())
     }
 
     // Private acceptance fixture used only by the custom test child.

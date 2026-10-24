@@ -36,6 +36,15 @@ fn validate_with(
             smtp = true;
             continue;
         }
+        if let Ok(roots) = get(provider, "trust_der_files") {
+            let paths = crate::config_validate::list(roots, 1, 32)
+                .map_err(|_| Error::Invalid)?
+                .iter()
+                .map(|value| text(value).map(std::path::PathBuf::from))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| Error::Invalid)?;
+            crate::trust_snapshot::load(&paths).map_err(|_| Error::Invalid)?;
+        }
         let name = text(get(provider, "url_env").map_err(|_| Error::Invalid)?)
             .map_err(|_| Error::Invalid)?;
         let endpoint = lookup(name)?;

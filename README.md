@@ -14,8 +14,7 @@ access or changes to batch scripts.
 **Current status: prototype foreground monitoring accepts webhook, SMTP and mixed configs.**
 The executable supports `--help`, `--version`,
 `config validate --config <absolute-path>`, `status --config <absolute-path>`, and
-`start --foreground --config <absolute-path>` on Linux/macOS. Webhook-only runs have persistence/restart acceptance; successful installed HTTPS
-delivery acceptance remains outstanding. Validate
+`start --foreground --config <absolute-path>` on Linux/macOS. Webhook-only runs have persistence/restart acceptance; installed HTTPS retry/delivery and restart have controlled TLS acceptance. Validate
 site polling/execution policy before starting on a real cluster. No supported
 monitoring release is available yet. See the [CLI contract](contracts/cli/README.md)
 and [configuration contract](contracts/config/README.md) for exact behavior.
@@ -63,8 +62,7 @@ CI artifacts contain the development prototype CLI.
 
 ## Remaining work
 
-The local MVP still needs successful installed HTTPS
-webhook helper acceptance, setup/test/doctor flows and authorized cluster/provider
+The local MVP still needs setup/test/doctor flows and authorized cluster/provider
 acceptance. Installed SMTP/mixed foreground runs now have synthetic scheduler,
 verified-STARTTLS submission, signal and durable restart acceptance. The intended MVP includes generic
 webhook and SMTP delivery. Slack/Teams scope remains to be settled. Log analysis

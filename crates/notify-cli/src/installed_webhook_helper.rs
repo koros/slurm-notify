@@ -8,10 +8,11 @@ use std::{
     time::Duration,
 };
 pub(super) fn serve(input: impl Read, output: impl Write) -> Result<(), Error> {
-    provider_frame::serve(
+    provider_frame::serve_optional(
         input,
         output,
-        20 + 4096 + 4096 + 128 + 16384 + 5,
+        20 + 4096 + 4096 + 128 + 16384 + 5 + 4 + 65664,
+        true,
         |fields| {
             if fields[0].len() > 4096 || fields[1].len() > 4096 || fields[3].len() > 16384 {
                 return Err(Error::InvalidInput);
@@ -40,13 +41,32 @@ pub(super) fn serve(input: impl Read, output: impl Write) -> Result<(), Error> {
                 return Err(Error::InvalidInput);
             }
             let authorization = text(1)?;
-            let client = webhook::Webhook::new(
+            let mut client = webhook::Webhook::new(
                 endpoint,
                 (!authorization.is_empty()).then(|| authorization.to_owned()),
                 Duration::from_millis(timeout),
                 16384,
             )
             .map_err(|_| Error::InvalidInput)?;
+            if let Some(encoded) = fields.get(5) {
+                let mut remaining = encoded.as_slice();
+                let mut roots = Vec::new();
+                while !remaining.is_empty() {
+                    let prefix: [u8; 4] = remaining
+                        .get(..4)
+                        .ok_or(Error::InvalidInput)?
+                        .try_into()
+                        .map_err(|_| Error::InvalidInput)?;
+                    let length = u32::from_be_bytes(prefix) as usize;
+                    remaining = &remaining[4..];
+                    roots.push(remaining.get(..length).ok_or(Error::InvalidInput)?);
+                    remaining = &remaining[length..];
+                    if roots.len() > 32 {
+                        return Err(Error::InvalidInput);
+                    }
+                }
+                client.use_roots(&roots).map_err(|_| Error::InvalidInput)?;
+            }
             client
                 .send_with_clock(id, &fields[3], provider_outcome::unix_time)
                 .map_err(|_| Error::InvalidInput)

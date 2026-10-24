@@ -162,7 +162,12 @@ def validate(data, manifest):
         kind = provider.get('type')
         if kind == 'webhook':
             object_fields(provider, ['type', 'url_env', 'request_timeout_seconds',
-                                     'payload_limit_bytes'], ['authorization_env'])
+                                     'payload_limit_bytes'], ['authorization_env', 'trust_der_files'])
+            if 'trust_der_files' in provider:
+                roots = members(provider['trust_der_files'], 32)
+                for root in roots:
+                    path(root)
+                distinct(roots)
             env(provider['url_env'])
             if 'authorization_env' in provider:
                 env(provider['authorization_env'])
