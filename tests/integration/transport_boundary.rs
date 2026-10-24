@@ -40,6 +40,8 @@ mod smtp_provider_delivery;
 mod smtp_provider_revision;
 #[path = "../../crates/notify-cli/src/smtp_render.rs"]
 mod smtp_render;
+#[path = "../../crates/notify-cli/src/smtp_resolved.rs"]
+mod smtp_resolved;
 #[path = "../../crates/notify-cli/src/smtp_revision.rs"]
 mod smtp_revision;
 #[path = "../../crates/notify-cli/src/smtp_revision_delivery.rs"]

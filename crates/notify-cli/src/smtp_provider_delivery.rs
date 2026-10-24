@@ -1,20 +1,11 @@
 //! Private pair permission and resolution guard for caller-selected bound transport.
 use super::{
     delivery::{self, BatchFailure, BatchReport, ProviderOutcome, RetryPolicy},
-    smtp_auth::Credentials,
-    smtp_provider_revision::{self, Descriptor, Profile},
+    smtp_provider_revision::Descriptor,
     smtp_revision,
     storage::{DueDelivery, FrozenMessage, Store},
     supervised_provider::Diagnostic,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Error {
-    Policy,
-    Profile,
-    Trust,
-    Credentials,
-}
 
 pub(super) struct Permission<'a> {
     pub(super) cluster: &'a str,
@@ -67,69 +58,7 @@ impl<'a> Permissions<'a> {
     }
 }
 
-// No Debug/Clone: credentials and resolved identities must not enter diagnostics.
-// Constructor validates actual DER trust content and authentication identity;
-// a profile fingerprint alone is insufficient evidence of resolved resources.
-pub(super) struct Resolved {
-    provider: Descriptor,
-    roots: Vec<Vec<u8>>,
-    credentials: Credentials,
-}
-impl Resolved {
-    pub(super) fn new(
-        bound: &Descriptor,
-        profile: &Profile<'_>,
-        roots: &[&[u8]],
-        username: &str,
-        password: &str,
-    ) -> Result<Self, Error> {
-        if !bound.matches(profile).map_err(|_| Error::Profile)?
-            || username != profile.authentication_identity
-        {
-            return Err(Error::Profile);
-        }
-        if smtp_provider_revision::trust_fingerprint(roots).map_err(|_| Error::Trust)?
-            != profile.trust_fingerprint
-        {
-            return Err(Error::Trust);
-        }
-        let credentials =
-            Credentials::new(Some(username), Some(password)).map_err(|_| Error::Credentials)?;
-        Ok(Self {
-            provider: Descriptor::new(profile).map_err(|_| Error::Profile)?,
-            roots: roots.iter().map(|root| root.to_vec()).collect(),
-            credentials,
-        })
-    }
-    pub(super) fn provider(&self) -> &Descriptor {
-        &self.provider
-    }
-    pub(super) fn from_owned(
-        bound: &Descriptor,
-        profile: &Profile<'_>,
-        roots: &[&[u8]],
-        credentials: Credentials,
-    ) -> Result<Self, Error> {
-        if !bound.matches(profile).map_err(|_| Error::Profile)?
-            || !credentials.matches_identity(profile.authentication_identity)
-        {
-            return Err(Error::Profile);
-        }
-        if smtp_provider_revision::trust_fingerprint(roots).map_err(|_| Error::Trust)?
-            != profile.trust_fingerprint
-        {
-            return Err(Error::Trust);
-        }
-        Ok(Self {
-            provider: Descriptor::new(profile).map_err(|_| Error::Profile)?,
-            roots: roots.iter().map(|root| root.to_vec()).collect(),
-            credentials,
-        })
-    }
-    pub(super) fn into_parts(self) -> (Descriptor, Vec<Vec<u8>>, Credentials) {
-        (self.provider, self.roots, self.credentials)
-    }
-}
+pub(super) use crate::smtp_resolved::{Error, Resolved};
 
 pub(super) struct Hooks<'a, R, S, C, X> {
     pub(super) permissions: &'a Permissions<'a>,
@@ -357,6 +286,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::smtp_provider_revision::{self, Profile};
     #[allow(unused_imports)] // Custom acceptance harness compiles helpers without unit tests.
     use crate::{
         lifecycle::Reconciler,

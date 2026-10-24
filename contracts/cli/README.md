@@ -63,5 +63,22 @@ command or provider-test interface; help and supported command baselines are unc
 The handler requires HTTPS, a UUID-v4 public ID matching the JSON payload and
 explicit bounded timeout/field sizes. It does not read config/environment resources
 or open state. The supervising parent must enforce the total wall-clock deadline
-and child cleanup, including DNS/TLS stalls. SMTP helper and installed monitoring
-activation remain pending; malformed-input acceptance is not provider-send acceptance.
+and child cleanup, including DNS/TLS stalls. Installed monitoring activation remains pending; malformed-input acceptance is not
+provider-send acceptance.
+
+## Private bound SMTP child handler
+
+The exact invocation `--internal-provider-v1 smtp-starttls` consumes the existing
+bounded eight-field provider/profile, trust, credentials, envelope, frozen-message
+and timeout frame. It performs no config, environment or state lookup. It validates
+the canonical provider fingerprint, explicit DER trust, credential identity, frozen
+message and timeout before connecting; implicit TLS input is rejected.
+
+The existing canonical SMTP acknowledgment protocol distinguishes input/auth/TLS
+failure, submission phase and acceptance. A successfully written failure acknowledgment
+can exit 0: child process success alone is never delivery evidence. Malformed frames
+produce `SMTP_SUBMIT AUTH INPUT` and a newline with empty stderr. Parent permission
+guards and acknowledgment classification remain mandatory. Parent supervision bounds
+DNS/TLS/socket lifetime and cleans up the child. Installed loopback acceptance proves
+missing STARTTLS produces a sanitized refusal without transmitting AUTH in plaintext.
+Successful installed submission/restart and monitoring command acceptance are pending.

@@ -1,13 +1,18 @@
-//! Private single-recipient message experiment; no user-facing email contract.
+//! Shared bounded single-recipient frozen-message validation and private rendering.
+use lettre::Address;
+#[cfg(test)]
 use lettre::{
     message::{header::ContentType, Mailbox},
-    Address, Message,
+    Message,
 };
+#[cfg(test)]
 use std::time::{Duration, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 pub(super) const ID_DOMAIN: &str = "fixture.invalid";
 
+#[cfg(test)]
 const BODY_LIMIT: usize = 4096;
 const MESSAGE_LIMIT: usize = 16384;
 const WIRE_LIMIT: usize = 16384;
@@ -15,8 +20,11 @@ const WIRE_LIMIT: usize = 16384;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
     Address,
+    #[cfg(test)]
     Header,
+    #[cfg(test)]
     Body,
+    #[cfg(test)]
     Date,
     Encoding,
     Limit,
@@ -52,6 +60,7 @@ impl Prepared {
     pub(super) fn recipient_command(&self) -> String {
         format!("RCPT TO:<{}>\r\n", self.recipient)
     }
+    #[cfg(test)]
     pub(super) fn envelope(&self) -> (String, String) {
         (self.sender.to_string(), self.recipient.to_string())
     }
@@ -64,6 +73,7 @@ pub(super) fn address(value: &str) -> Result<Address, Error> {
     crate::smtp_address::address(value).map_err(|_| Error::Address)
 }
 
+#[cfg(test)]
 pub(super) fn prepare(
     sender: &str,
     recipient: &str,

@@ -1,29 +1,35 @@
-//! Private supervised bound STARTTLS submission; no installed helper or DNS defaults.
+//! Shared bound STARTTLS child codec and private supervised parent adapter.
 use super::{
     smtp_auth, smtp_auth_frame,
     smtp_message::Prepared,
-    smtp_provider_delivery::Resolved,
     smtp_provider_revision::{Descriptor, TlsMode},
-    smtp_submit, smtp_submit_dispatch,
+    smtp_resolved::Resolved,
+    smtp_submit,
     smtp_submit_frame::{self, Ack},
-    storage::FrozenMessage,
-    supervised_provider::Diagnostic,
-    transport,
 };
+#[cfg(test)]
+use super::{
+    smtp_submit_dispatch, storage::FrozenMessage, supervised_provider::Diagnostic, transport,
+};
+#[cfg(not(test))]
+use crate::provider_frame as transport;
+#[cfg(test)]
+use std::process::Command;
 use std::{
     io::{Read, Write},
     net::{TcpStream, ToSocketAddrs},
-    process::Command,
     sync::Arc,
     time::{Duration, Instant},
 };
 use zeroize::Zeroizing;
 const BOUNDS: [usize; 8] = [4096, 64, 65664, 194, 254, 254, 16384, 5];
+#[cfg(test)]
 pub(super) const INPUT_LIMIT: usize = 32 + 4096 + 64 + 65664 + 194 + 254 + 254 + 16384 + 5;
 fn invalid() -> transport::Error {
     transport::Error::InvalidInput
 }
 
+#[cfg(test)]
 pub(super) fn encode(
     resolved: Resolved,
     message: &FrozenMessage,
@@ -207,6 +213,7 @@ fn auth_ack(error: smtp_auth::Error) -> smtp_auth_frame::Ack {
         },
     }
 }
+#[cfg(test)]
 pub(super) fn dispatch(
     command: &mut Command,
     resolved: Resolved,

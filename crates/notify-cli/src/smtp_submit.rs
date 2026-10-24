@@ -1,6 +1,6 @@
-//! Private authenticated single-recipient submission; no installed transport.
+//! Shared authenticated single-recipient submission; parent owns policy/deadlines.
 use super::{
-    delivery::ProviderOutcome,
+    provider_outcome::ProviderOutcome,
     smtp_auth::Authenticated,
     smtp_message::Prepared,
     smtp_reply::{self, Limits},

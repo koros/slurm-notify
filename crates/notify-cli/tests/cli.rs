@@ -765,3 +765,126 @@ fn installed_webhook_helper_rejects_malformed_private_input_without_output_or_st
         assert!(output.stdout.is_empty());
     }
 }
+
+#[test]
+fn installed_smtp_helper_validates_bound_frames_and_never_authenticates_without_starttls() {
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        process::Stdio,
+        time::Duration,
+    };
+    let frame = |fields: &[&[u8]]| {
+        let mut bytes = Vec::new();
+        for field in fields {
+            bytes.extend_from_slice(&(field.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(field);
+        }
+        bytes
+    };
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()]).unwrap();
+    let root = certificate.cert.der();
+    let hash = smtp_provider_revision::trust_fingerprint(&[root.as_ref()]).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let profile = smtp_provider_revision::Profile {
+        destination: "smtp",
+        relay: "127.0.0.1",
+        port: listener.local_addr().unwrap().port(),
+        tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+        server_name: "smtp.fixture.invalid",
+        trust_reference: "fixture-trust",
+        trust_fingerprint: &hash,
+        authentication_identity: "fixture-user",
+        credential_reference: "fixture-secret",
+    };
+    let descriptor = smtp_provider_revision::Descriptor::new(&profile).unwrap();
+    let roots = frame(&[root.as_ref()]);
+    let credentials = b"\0fixture-user\0fixture-password";
+    let data = b"Subject: fixture\r\n\r\nfixture\r\n.\r\n";
+    let fields: [&[u8]; 8] = [
+        descriptor.canonical(),
+        descriptor.token().as_bytes(),
+        &roots,
+        credentials,
+        b"s@fixture.invalid",
+        b"r@fixture.invalid",
+        data,
+        b"1000",
+    ];
+    let run_helper = |input: &[u8]| {
+        let mut child = command()
+            .args(["--internal-provider-v1", "smtp-starttls"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(input);
+        child.wait_with_output().unwrap()
+    };
+    let mut invalid = vec![vec![], vec![0], u32::MAX.to_be_bytes().to_vec()];
+    for (index, value) in [
+        (0, b"invalid-profile".as_slice()),
+        (1, b"invalid-fingerprint"),
+        (2, b"bad-roots"),
+        (3, b"bad-credentials"),
+        (3, b"\0wrong-user\0fixture-password"),
+        (4, b"bad address"),
+        (6, b"invalid frozen message"),
+        (7, b"0"),
+        (7, b"01000"),
+        (7, b"30001"),
+    ] {
+        let mut changed = fields;
+        changed[index] = value;
+        invalid.push(frame(&changed));
+    }
+    let oversized = vec![0; 65665];
+    let mut changed = fields;
+    changed[2] = &oversized;
+    invalid.push(frame(&changed));
+    let mut trailing = frame(&fields);
+    trailing.push(0);
+    invalid.push(trailing);
+    let implicit = smtp_provider_revision::Descriptor::new(&smtp_provider_revision::Profile {
+        tls: smtp_provider_revision::TlsMode::Implicit,
+        ..profile
+    })
+    .unwrap();
+    let mut changed = fields;
+    changed[0] = implicit.canonical();
+    changed[1] = implicit.token().as_bytes();
+    invalid.push(frame(&changed));
+    for input in invalid {
+        let output = run_helper(&input);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, b"SMTP_SUBMIT AUTH INPUT\n");
+        assert!(output.stderr.is_empty());
+    }
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        socket
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        socket.write_all(b"220 fixture\r\n").unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("EHLO "));
+        reader.get_mut().write_all(b"250 fixture\r\n").unwrap();
+        assert_eq!(
+            reader.read(&mut [0; 1]).unwrap(),
+            0,
+            "AUTH must not be sent without STARTTLS"
+        );
+    });
+    let output = run_helper(&frame(&fields));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"SMTP_SUBMIT AUTH TLS_MISSING\n");
+    assert!(output.stderr.is_empty());
+    server.join().unwrap();
+}

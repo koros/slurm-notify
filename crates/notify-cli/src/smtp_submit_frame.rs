@@ -1,18 +1,26 @@
-//! Private fixture submission envelope and canonical sanitized results.
+//! Shared canonical submission acknowledgments and private fixture envelopes.
 use super::{
-    delivery::ProviderOutcome,
-    smtp_auth::Credentials,
-    smtp_auth_frame, smtp_message,
+    provider_outcome::ProviderOutcome,
+    smtp_auth_frame,
     smtp_submit::{Acceptance, Diagnostic, Phase, Report},
-    transport,
 };
+#[cfg(test)]
+use super::{smtp_auth::Credentials, smtp_message, transport};
+#[cfg(not(test))]
+use crate::provider_frame as transport;
+#[cfg(test)]
 use std::io::Read;
+#[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 const BOUNDS: [usize; 10] = [4096, 5, 64, 128, 254, 254, 64, 128, 4096, 10];
+#[cfg(test)]
 pub(super) const INPUT_LIMIT: usize = 40 + 4096 + 5 + 64 + 128 + 254 + 254 + 64 + 128 + 4096 + 10;
+#[cfg(test)]
 pub(super) const OUTPUT_LIMIT: usize = 48;
 // No Debug or raw credential accessors. Root is fixture-only, never ambient trust.
+#[cfg(test)]
 pub(super) struct Request {
     pub(super) root: Vec<u8>,
     pub(super) port: u16,
@@ -20,6 +28,7 @@ pub(super) struct Request {
     pub(super) message: smtp_message::Prepared,
 }
 
+#[cfg(test)]
 pub(super) fn decode_request(mut input: impl Read) -> Result<Request, transport::Error> {
     let invalid = || transport::Error::InvalidInput;
     let mut fields = Vec::with_capacity(10);
@@ -163,6 +172,7 @@ pub(super) fn encode_ack(ack: Ack) -> Result<Vec<u8>, transport::Error> {
     }
     Ok(token(ack))
 }
+#[cfg(test)]
 pub(super) fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
     canonical()
         .into_iter()

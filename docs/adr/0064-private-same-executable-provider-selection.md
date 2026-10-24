@@ -2,8 +2,9 @@
 
 Date: 2026-10-24
 
-Status: selector and process acceptance implemented; installed webhook helper
-handler has malformed-input acceptance. Bound SMTP helper activation remains pending.
+Status: selector/process acceptance and installed webhook/SMTP handlers implemented.
+Installed rejection and missing-STARTTLS/no-AUTH acceptance pass; monitoring and
+successful installed submission/restart acceptance remain pending.
 
 ## Decision
 

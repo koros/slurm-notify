@@ -40,8 +40,9 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    Private same-executable helper selection now has exact grammar and process
    acceptance ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
    The installed private webhook helper now shares bounded codecs/HTTPS transport
-   and has malformed-input binary acceptance. Next activate the bound SMTP helper,
-   then connect helper selection and installed monitoring.
+   and has malformed-input binary acceptance. The installed bound SMTP helper now has malformed-frame, implicit-TLS rejection
+   and missing-STARTTLS/no-AUTH binary acceptance. Next connect helper selection
+   and installed monitoring, with installed successful-send/restart acceptance.
 4. Complete installed orchestration/helper binding and
    webhook-only composition and status contention acceptance, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

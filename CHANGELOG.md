@@ -7,6 +7,12 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed private bound SMTP child handler now shares provider fingerprint/trust
+  validation, frozen-message validation, required STARTTLS, verified TLS and AUTH
+  submission codecs. Binary acceptance covers malformed input, rejected implicit
+  TLS and a loopback relay without STARTTLS, proving no plaintext AUTH. The locked
+  scalar `base64` dependency now builds normally without version/feature changes.
+
 - Installed private webhook child handler now shares the bounded frame codec and
   HTTPS transport, validating public UUID/payload identity and request ceilings.
   Malformed input exits silently with 2; installed monitoring and the SMTP child

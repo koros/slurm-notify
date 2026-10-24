@@ -103,10 +103,8 @@ mod supervised_provider;
 #[cfg(test)]
 mod smtp_policy;
 
-#[cfg(test)]
 mod smtp_reply;
 
-#[cfg(test)]
 mod smtp_tls;
 
 #[cfg(test)]
@@ -115,16 +113,13 @@ mod smtp_ack;
 #[cfg(test)]
 mod smtp_dispatch;
 
-#[cfg(test)]
 mod smtp_auth;
 
-#[cfg(test)]
 mod smtp_auth_frame;
 
 #[cfg(test)]
 mod smtp_auth_dispatch;
 
-#[cfg(test)]
 mod smtp_message;
 
 #[cfg(test)]
@@ -133,11 +128,11 @@ mod smtp_render;
 #[cfg(test)]
 mod smtp_routes;
 
-#[cfg(test)]
 mod smtp_bound_transport;
 #[cfg(test)]
 mod smtp_provider_delivery;
 mod smtp_provider_revision;
+mod smtp_resolved;
 #[cfg(test)]
 mod smtp_revision;
 #[cfg(test)]
@@ -146,10 +141,8 @@ mod smtp_revision_delivery;
 #[cfg(test)]
 mod smtp_metadata;
 
-#[cfg(test)]
 mod smtp_submit;
 
-#[cfg(test)]
 mod smtp_submit_frame;
 
 #[cfg(test)]
@@ -170,6 +163,15 @@ fn main() -> std::process::ExitCode {
         );
     }
 
+    if args.len() == 2 && args[0] == "--internal-provider-v1" && args[1] == "smtp-starttls" {
+        return std::process::ExitCode::from(
+            if smtp_bound_transport::serve(std::io::stdin(), std::io::stdout()).is_ok() {
+                0
+            } else {
+                2
+            },
+        );
+    }
     if args.len() == 1 && args[0] == "--help" {
         print!("{HELP}");
         return std::process::ExitCode::SUCCESS;

@@ -1,17 +1,24 @@
-//! Private credential framing experiment. No public helper or delivery contract.
+//! Shared sanitized AUTH acknowledgments and private fixture credential framing.
+#[cfg(test)]
 use super::{smtp_auth::Credentials, transport};
+#[cfg(test)]
 use std::io::Read;
+#[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 const BOUNDS: [usize; 3] = [5, 64, 128];
+#[cfg(test)]
 pub(super) const LIMIT: usize = 12 + 5 + 64 + 128;
 
 // Deliberately no Debug/Clone; decoding never returns raw credentials.
+#[cfg(test)]
 pub(super) struct Request {
     pub(super) port: u16,
     pub(super) credentials: Credentials,
 }
 
+#[cfg(test)]
 pub(super) fn decode(mut input: impl Read) -> Result<Request, transport::Error> {
     let mut fields = Vec::with_capacity(3);
     for bound in BOUNDS {
@@ -56,6 +63,7 @@ pub(super) fn decode(mut input: impl Read) -> Result<Request, transport::Error> 
 
 // Own and erase the outgoing frame too; callers must preserve this wrapper when
 // eventually moving it into a supervised writer. No argv/environment transport.
+#[cfg(test)]
 pub(super) fn encode(
     port: u16,
     username: &str,
@@ -75,6 +83,7 @@ pub(super) fn encode(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Ack {
+    #[cfg(test)]
     Authenticated,
     Credentials,
     Unsupported,
@@ -93,6 +102,7 @@ pub(super) enum Ack {
 impl Ack {
     pub(super) fn bytes(self) -> &'static [u8] {
         match self {
+            #[cfg(test)]
             Self::Authenticated => b"SMTP_AUTH AUTHENTICATED\n",
             Self::Credentials => b"SMTP_AUTH CREDENTIALS\n",
             Self::Unsupported => b"SMTP_AUTH UNSUPPORTED\n",
@@ -110,6 +120,7 @@ impl Ack {
         }
     }
 }
+#[cfg(test)]
 const ACKS: [Ack; 14] = [
     Ack::Authenticated,
     Ack::Credentials,
@@ -126,6 +137,7 @@ const ACKS: [Ack; 14] = [
     Ack::UpgradeTemporary,
     Ack::UpgradePermanent,
 ];
+#[cfg(test)]
 pub(super) fn decode_ack(bytes: &[u8]) -> Result<Ack, transport::Error> {
     ACKS.into_iter()
         .find(|ack| ack.bytes() == bytes)

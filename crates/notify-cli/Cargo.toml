@@ -30,9 +30,10 @@ time = "=0.3.55"
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 httpdate = "=1.0.3"
 
-[dev-dependencies]
-# Private AUTH PLAIN codec; retain scalar implementation without new unsafe SIMD.
+# Bound SMTP helper AUTH PLAIN; retain the locked scalar implementation.
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
 # Retain unrelated builder transitive versions during the security update.
 email-encoding = "=0.4.1"
 idna_adapter = "=1.1.0"

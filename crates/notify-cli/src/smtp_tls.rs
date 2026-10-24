@@ -1,4 +1,4 @@
-//! Private implicit-TLS and required-STARTTLS experiments; no AUTH or submission.
+//! Shared verified STARTTLS boundary; implicit-TLS/greeting fixtures stay test-only.
 use super::smtp_reply::{read_reply, read_reply_with_text, Limits};
 use std::{io::Write, net::TcpStream, sync::Arc};
 
@@ -31,6 +31,7 @@ fn handshake_error(error: std::io::Error) -> Error {
 
 // Socket deadlines must already be set. Parent supervision is still required
 // for an absolute deadline; repeated successful reads can extend socket waits.
+#[cfg(test)]
 fn greeting(
     socket: TcpStream,
     config: Arc<rustls::ClientConfig>,
@@ -74,6 +75,7 @@ fn greeting(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn required_starttls(
     socket: TcpStream,
     config: Arc<rustls::ClientConfig>,

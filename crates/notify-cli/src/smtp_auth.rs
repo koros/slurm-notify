@@ -1,4 +1,4 @@
-//! Private bounded AUTH PLAIN experiment; no message or submission outcome.
+//! Shared bounded AUTH PLAIN over verified TLS; no submission outcome.
 use super::{
     smtp_reply::{read_reply, read_reply_with_text, Limits},
     smtp_tls,
@@ -34,9 +34,11 @@ impl Credentials {
         plain.extend_from_slice(password.as_bytes());
         Ok(Self { plain })
     }
+    #[cfg(test)]
     pub(super) fn into_plain(self) -> Zeroizing<Vec<u8>> {
         self.plain
     }
+    #[cfg(test)]
     pub(super) fn matches_identity(&self, identity: &str) -> bool {
         let identity_end = 1 + identity.len();
         self.plain.get(1..identity_end) == Some(identity.as_bytes())
@@ -57,6 +59,7 @@ impl Credentials {
 
 // Validate before calling the injected connector. Credential sources and parent
 // deadlines are caller responsibilities; no environment lookup or plaintext mode.
+#[cfg(test)]
 fn authenticate(
     username: Option<&str>,
     password: Option<&str>,
@@ -68,6 +71,7 @@ fn authenticate(
     authenticate_credentials(credentials, connect, config, name)
 }
 
+#[cfg(test)]
 pub(super) fn authenticate_credentials(
     credentials: Credentials,
     connect: impl FnOnce() -> std::io::Result<TcpStream>,
