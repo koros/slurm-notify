@@ -151,7 +151,11 @@ mod smtp_submit_frame;
 mod smtp_submit_dispatch;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+mod config_create;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod installed_doctor;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod installed_init;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod installed_provider_test;
 const HELP: &str = include_str!("../../../contracts/cli/help.stdout");
@@ -269,6 +273,38 @@ fn main() -> std::process::ExitCode {
         {
             let _ = (path, alias);
             eprintln!("Provider testing is unavailable on this platform.");
+            return std::process::ExitCode::from(2);
+        }
+    }
+    if args.len() == 2
+        && args.iter().any(|arg| arg == "init")
+        && args.iter().any(|arg| arg == "--help")
+    {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/init-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if let Some(path) = finite_path(&args, "init") {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        return match installed_init::run(&path) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                let(code,message)=match error {
+                installed_init::Error::Terminal=>(2,"Interactive setup requires a terminal; no file was written."),
+                installed_init::Error::Input=>(2,"Setup input or required resources are invalid; no file was written."),
+                installed_init::Error::Destination=>(2,"Configuration destination is unsafe or already exists; no file was written."),
+                installed_init::Error::Write=>(1,"Configuration write failed; inspect the destination before retrying."),
+            };
+                eprintln!("{message}");
+                std::process::ExitCode::from(code)
+            }
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = path;
+            eprintln!("Interactive setup is unavailable on this platform.");
             return std::process::ExitCode::from(2);
         }
     }

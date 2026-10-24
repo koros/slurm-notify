@@ -1470,6 +1470,20 @@ fn installed_foreground_webhook_only_persists_and_reopens_without_smtp() {
         b"Configuration invalid or required resource unavailable.\n",
     );
     assert!(!state.exists());
+    expect(
+        command()
+            .args(["start", "--foreground", "--config"])
+            .arg(&path)
+            .env("PATH", &root)
+            .env("SLURM_NOTIFY_WEBHOOK_URL", "http://127.0.0.1:9/hook")
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"Configuration invalid or required resource unavailable.\n",
+    );
+    assert!(!state.exists());
     // An owned, closed loopback port gives a controlled connection failure.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!(
@@ -2223,6 +2237,184 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
     assert!(body
         .windows(b"Synthetic Slurm Notify test.".len())
         .any(|bytes| bytes == b"Synthetic Slurm Notify test."));
+    assert!(!state.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "support/terminal.rs"]
+mod terminal;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn init_requires_terminal_confirmation_and_never_overwrites_or_sends() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    for args in [["init", "--help"], ["--help", "init"]] {
+        expect(
+            command().args(args).output().unwrap(),
+            0,
+            include_bytes!("../../../contracts/cli/init-help.stdout"),
+            b"",
+        );
+    }
+    for args in [
+        vec!["init"],
+        vec!["init", "--config", "relative"],
+        vec!["init", "--config", "/absent", "--extra"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    expect(
+        command()
+            .args(["init", "--config", "/absent/config.json"])
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"Interactive setup requires a terminal; no file was written.\n",
+    );
+    let root = std::env::temp_dir().join(format!("slurm-notify-init-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.join("new.json");
+    let state = root.join("state/state.sqlite3");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-webhook-config.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(state);
+    source["routes"] = serde_json::json!([]);
+    let run = |path: &std::path::Path, source: &[u8], answer: &[u8]| {
+        let mut cmd = command();
+        cmd.args(["init", "--config"])
+            .arg(path)
+            .env(
+                "SLURM_NOTIFY_WEBHOOK_URL",
+                format!(
+                    "https://127.0.0.1:{}/private-fixture",
+                    listener.local_addr().unwrap().port()
+                ),
+            )
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture");
+        let draft = root.join("draft.json");
+        std::fs::write(&draft, source).unwrap();
+        std::fs::set_permissions(&draft, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut input = draft.to_str().unwrap().as_bytes().to_vec();
+        input.push(b'\n');
+        input.extend_from_slice(answer);
+        input.push(b'\n');
+        terminal::run(cmd, &input)
+    };
+    let bytes = serde_json::to_vec(&source).unwrap();
+    let cancelled = run(&path, &bytes, b"no");
+    assert_eq!(cancelled.status.code(), Some(0));
+    assert!(String::from_utf8(cancelled.stdout)
+        .unwrap()
+        .contains("Routes are empty: monitoring will send no alerts."));
+    assert!(!path.exists());
+    let invalid = run(&path, b"{\"secret\":\"private-fixture\"}", b"yes");
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(!String::from_utf8(invalid.stdout)
+        .unwrap()
+        .contains("private-fixture"));
+    assert!(!path.exists());
+    let missing = run(&root.join("missing/config.json"), &bytes, b"yes");
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(!root.join("missing").exists());
+    let success = run(&path, &bytes, b"yes");
+    assert_eq!(success.status.code(), Some(0));
+    assert!(success.stderr.is_empty());
+    let output = String::from_utf8(success.stdout).unwrap();
+    assert!(output.contains("initial_observation=suppress"));
+    assert!(!output.contains("private-fixture"));
+    assert!(output.ends_with(
+        std::str::from_utf8(include_bytes!("../../../contracts/cli/init-success.stdout")).unwrap()
+    ));
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&before).unwrap(),
+        source
+    );
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+        0o600
+    );
+    let existing = run(&path, &bytes, b"yes");
+    assert_eq!(existing.status.code(), Some(2));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let link = root.join("linked.json");
+    symlink(&path, &link).unwrap();
+    assert_eq!(run(&link, &bytes, b"yes").status.code(), Some(2));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        run(&root.join("unsafe.json"), &bytes, b"yes").status.code(),
+        Some(2)
+    );
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!state.exists());
+    assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn init_enrolls_only_reviewed_current_smtp_pairs_without_credentials_or_network() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("slurm-notify-init-smtp-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let cert = rcgen::generate_simple_self_signed(vec!["smtp.example.invalid".into()]).unwrap();
+    let trust = root.join("trust.der");
+    std::fs::write(&trust, cert.cert.der()).unwrap();
+    std::fs::set_permissions(&trust, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let path = root.join("config.json");
+    let state = root.join("state/state.sqlite3");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["providers"]["research_email"]["trust_der_files"] = serde_json::json!([trust]);
+    source["storage"]["path"] = serde_json::json!(state);
+    let draft = root.join("draft.json");
+    std::fs::write(&draft, serde_json::to_vec(&source).unwrap()).unwrap();
+    std::fs::set_permissions(&draft, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut input = draft.to_str().unwrap().as_bytes().to_vec();
+    input.extend_from_slice(b"\nyes\n");
+    let mut cmd = command();
+    cmd.args(["init", "--config"])
+        .arg(&path)
+        .env("SLURM_NOTIFY_WEBHOOK_URL", "https://fixture.invalid/hook")
+        .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture");
+    let result = terminal::run(cmd, &input);
+    assert_eq!(result.status.code(), Some(0));
+    assert!(result.stderr.is_empty());
+    let output = String::from_utf8(result.stdout).unwrap();
+    assert!(output.contains("SMTP permission: alias=research_email rendering_revision="));
+    assert!(output.contains("visibility=hidden"));
+    let created: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let permissions = created["delivery"]["smtp_permissions"].as_array().unwrap();
+    assert_eq!(permissions.len(), 1);
+    assert_ne!(
+        created["delivery"]["smtp_permissions"],
+        source["delivery"]["smtp_permissions"]
+    );
+    let valid = command()
+        .args(["config", "validate", "--config"])
+        .arg(&path)
+        .env("SLURM_NOTIFY_WEBHOOK_URL", "https://fixture.invalid/hook")
+        .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+        .env("SLURM_NOTIFY_SMTP_USERNAME", "researcher")
+        .env("SLURM_NOTIFY_SMTP_PASSWORD", "fixture-password")
+        .output()
+        .unwrap();
+    assert_eq!(valid.status.code(), Some(0));
+    assert!(String::from_utf8(valid.stdout)
+        .unwrap()
+        .contains("smtp_permissions=approved"));
     assert!(!state.exists());
     std::fs::remove_dir_all(root).unwrap();
 }

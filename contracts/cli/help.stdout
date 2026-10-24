@@ -1,4 +1,5 @@
 Usage: slurm-notify --help | --version
+       slurm-notify init --config <absolute-path>
        slurm-notify config validate --config <absolute-path>
        slurm-notify status --config <absolute-path>
        slurm-notify doctor --config <absolute-path>
@@ -12,6 +13,7 @@ Options:
   --foreground  Run monitoring in the foreground
 
 Commands:
+  init             Review and create a new protected configuration
   config validate  Validate configuration and local resources
   status           Inspect existing historical state
   doctor           Check local resources and bounded Slurm probes

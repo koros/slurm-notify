@@ -9,8 +9,8 @@ and prototype `start --foreground` for webhook, SMTP and mixed configurations. N
 `no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
 `invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
 versioned child protocols, not user provider-test commands. There is no service
-installation or setup command in this build. Doctor and explicit provider tests
-are installed as described below.
+installation command in this build. Interactive setup, doctor and explicit provider
+tests are installed as described below.
 
 ## Configuration-validation addition (2026-10-13)
 
@@ -136,3 +136,19 @@ permission is checked before credentials. Missing resources/alias exit 2, denied
 SMTP permission 3, unacknowledged transport 1 and acknowledged acceptance 0 with
 `test-success.stdout`. Failure may leave acceptance unknown; it never establishes
 human receipt. `test-help.stdout` is resource-free. See [ADR 0069](../../docs/adr/0069-explicit-one-shot-provider-tests.md).
+
+## Interactive configuration review
+
+`init --config <absolute-path>` uses finite command grammar and resource-free
+`init-help.stdout`. Terminal stdin is required; otherwise exit 2 before access.
+Enter the absolute path to a protected draft JSON file. Review policy, transmitted
+fields, safe provider identity and exact current SMTP pairs. Literal `yes` enrolls
+those pairs into a new mode-0600 file and emits `init-success.stdout`; any other
+complete answer cancels with exit 0 and no file. Historical permission entries are
+not retained. Settings are explicit, with no filled operational defaults.
+
+Existing targets/symlinks, unsafe parents or invalid resources/input fail with exit
+2. No parent directories are created. Publication is atomic and refuses concurrent
+replacement; write failure exits 1 and may require inspecting a complete destination
+after sync failure. No provider request, credential lookup for SMTP, scheduler/state
+activity or monitoring occurs. See [ADR 0070](../../docs/adr/0070-protected-interactive-config-review.md).

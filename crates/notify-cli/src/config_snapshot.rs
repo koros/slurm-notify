@@ -104,10 +104,7 @@ mod unix {
             && before.ctime() == after.ctime()
             && before.ctime_nsec() == after.ctime_nsec()
     }
-    pub(super) fn read_with(
-        path: &Path,
-        read: impl FnOnce(&mut File) -> Result<Snapshot, Error>,
-    ) -> Result<Snapshot, Error> {
+    pub(super) fn parent(path: &Path) -> Result<(File, std::ffi::OsString), Error> {
         let raw = path.as_os_str().as_bytes();
         if !path.is_absolute()
             || path.to_str().is_none()
@@ -149,7 +146,16 @@ mod unix {
                 }
             }
         }
-        let mut file = open_at(&directory, parts[parts.len() - 1], false)?;
+        Ok((directory, parts[parts.len() - 1].to_os_string()))
+    }
+    pub(super) fn read_with(
+        path: &Path,
+        read: impl FnOnce(&mut File) -> Result<Snapshot, Error>,
+    ) -> Result<Snapshot, Error> {
+        let (directory, name) = parent(path)?;
+        // SAFETY: geteuid has no arguments or memory preconditions.
+        let owner = unsafe { libc::geteuid() };
+        let mut file = open_at(&directory, &name, false)?;
         let before = file_metadata(&file, owner)?;
         if before.len() == 0 || before.len() > MAX_BYTES as u64 {
             return Err(Error::Limit);
@@ -164,6 +170,12 @@ mod unix {
     pub(super) fn read(path: &Path) -> Result<Snapshot, Error> {
         read_with(path, |file| bounded(file))
     }
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn protected_parent(
+    path: &std::path::Path,
+) -> Result<(std::fs::File, std::ffi::OsString), Error> {
+    unix::parent(path)
 }
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn read(path: &std::path::Path) -> Result<Snapshot, Error> {

@@ -7,6 +7,8 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Reject HTTP-only webhook resources before foreground state creation.
+
 - Bound post-close lock handoff in process recovery acceptance, matching the
   existing unit fixture policy for transient inherited descriptors. Runtime lock
   ownership remains exclusive and unchanged; persistent leaks still fail tests.
@@ -16,6 +18,10 @@ the design handoff; no release has been published.
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Add terminal-based configuration review from a protected JSON draft, safe provider/
+  disclosure previews and explicit current SMTP pair enrollment. New files publish
+  atomically with mode 0600 and no overwrite; setup sends nothing and creates no state.
 
 - Add explicit one-shot webhook/SMTP provider tests with synthetic previews, exact
   SMTP permission guards and supervised verified TLS. No scheduler, durable state

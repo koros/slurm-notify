@@ -1,0 +1,6 @@
+Usage: slurm-notify init --config <absolute-path>
+
+Read a protected JSON draft, review its settings in a terminal and confirm creation.
+Shows transmitted fields, observation policy and exact SMTP permission pairs.
+Requires an existing protected parent directory; never overwrites files or symlinks.
+Sends no provider request and starts no monitoring. No operational defaults are filled.

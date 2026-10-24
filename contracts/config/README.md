@@ -33,15 +33,15 @@ This validates current profiles only, not pending historical database profiles.
 Permission hashes are computed from explicit rendering metadata, canonical provider
 metadata, local resource references and actual trust fingerprints using the existing
 versioned codecs. Changing a recipient, disclosure, relay or trust content requires
-new exact enrollment. There is no implicit enrollment or retargeting. Setup will
-compute and explain the tokens; users should not need to calculate hashes manually.
-Until that workflow exists, SMTP enrollment is a development acceptance limitation.
+new exact enrollment. There is no implicit enrollment or retargeting. Interactive `init` computes and displays current pairs, then enrolls them only
+after explicit confirmation into a new file. It does not retain historical pairs
+or overwrite an existing configuration. Manual hash calculation is unnecessary.
 
 The examples' numeric values are not defaults or polling-policy recommendations.
 OS environment lookup allocates before accepted-byte checks and has no promised
 hard startup deadline. Validation cannot prove TLS handshake/relay acceptance or
 human receipt. Historical `status` inspects existing state without resolving provider
-resources. Foreground monitoring is installed; test/doctor/init remain under implementation.
+resources. Foreground monitoring, explicit provider tests, doctor and interactive init are installed.
 
 Compatibility: this unreleased 0.0.0 increment replaces the explicit unsupported-SMTP
 exit-2 diagnostic with supported validation and exact-permission exit 3. Global and

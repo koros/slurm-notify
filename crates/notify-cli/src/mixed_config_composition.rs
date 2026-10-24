@@ -80,6 +80,13 @@ impl Smtp {
     }
 }
 impl Plan {
+    pub(super) fn webhook_origins(&self) -> Option<Vec<(&str, String)>> {
+        self.common
+            .webhooks
+            .iter()
+            .map(|webhook| Some((webhook.alias.as_str(), webhook.resources.safe_origin()?)))
+            .collect()
+    }
     pub(super) fn synthetic_test(
         &self,
         alias: &str,
@@ -198,7 +205,6 @@ impl Plan {
             })
             .collect()
     }
-    #[cfg(test)]
     pub(super) fn revisions(&self) -> Vec<(&str, &str, &str)> {
         self.smtp
             .iter()

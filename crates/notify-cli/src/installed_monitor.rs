@@ -62,6 +62,11 @@ pub(super) fn run(path: &Path) -> u8 {
             )))
         }
     };
+    if plan.webhook_origins().is_none() {
+        return finish(Summary::Startup(StartupReport::classify(
+            Error::Preparation,
+        )));
+    }
     let Some((active, accounting)) = programs() else {
         eprintln!("Required Slurm executables unavailable in absolute PATH directories.");
         return 2;

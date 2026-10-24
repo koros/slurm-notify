@@ -58,6 +58,18 @@ impl Resources {
     pub(super) fn public_revision(&self) -> Option<&str> {
         self.public_https.then_some(self.revision.as_str())
     }
+    pub(super) fn safe_origin(&self) -> Option<String> {
+        if !self.public_https {
+            return None;
+        }
+        let endpoint = std::str::from_utf8(&self.endpoint).ok()?;
+        Some(
+            webhook::endpoint_url(endpoint)
+                .ok()?
+                .origin()
+                .ascii_serialization(),
+        )
+    }
     pub(super) fn synthetic_request(
         &self,
         id: &str,

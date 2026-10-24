@@ -12,7 +12,7 @@ It aims to discover the current user's jobs and send lifecycle alerts without ro
 access or changes to batch scripts.
 
 **Current status: prototype foreground monitoring accepts webhook, SMTP and mixed configs.**
-The executable supports `--help`, `--version`,
+The executable supports `--help`, `--version`, `init --config <absolute-path>`,
 `config validate --config <absolute-path>`, `status --config <absolute-path>`,
 `doctor --config <absolute-path>`, `test <provider-name> --config <absolute-path>`, and
 `start --foreground --config <absolute-path>` on Linux/macOS. Webhook-only runs have persistence/restart acceptance; installed HTTPS retry/delivery and restart have controlled TLS acceptance. Validate
@@ -63,8 +63,8 @@ CI artifacts contain the development prototype CLI.
 
 ## Remaining work
 
-The local MVP still needs interactive setup and authorized cluster/provider
-acceptance. Installed SMTP/mixed foreground runs now have synthetic scheduler,
+The local command set is implemented. Authorized cluster/provider acceptance,
+installation/upgrade review and support baselines remain. Installed SMTP/mixed foreground runs now have synthetic scheduler,
 verified-STARTTLS submission, signal and durable restart acceptance. The intended MVP includes generic
 webhook and SMTP delivery. Slack/Teams scope remains to be settled. Log analysis
 and remote SSH monitoring are later phases.
