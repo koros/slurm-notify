@@ -90,3 +90,7 @@ Run `sh scripts/check-coverage.sh` after installing cargo-llvm-cov 0.6.21 and th
 pinned compiler's llvm-tools-preview component. Coverage tools are optional for
 local hooks and mandatory in CI. Reports and development artifact scope are
 explained in [CI and coverage](docs/operations/ci-and-coverage.md).
+
+For the implemented user flow, see [getting started](docs/operations/getting-started.md).
+Use [security reporting](SECURITY.md) for sensitive findings and retain the
+[support/release gates](docs/operations/support-and-acceptance.md).

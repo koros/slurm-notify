@@ -70,9 +70,10 @@ checkpoint planning, health, cancellation and maintenance. Cancellation after qu
 completion preserves the atomic poll while stopping before delivery. Owned continuous sessions now retain the prepared plan and single state owner
 across public poll-budget renewal. Controlled child acceptance verifies retry and
 cancellation recovery after configuration removal. Installed SMTP/mixed runs have controlled SMTP submission and store-restart
-acceptance; successful installed webhook submission remains outstanding. At-least-once replay can still duplicate a provider-accepted request
+acceptance; installed verified HTTPS retry/submission/restart also has controlled acceptance. At-least-once replay can still duplicate a provider-accepted request
 whose acknowledgment/local completion was lost; no exactly-once/human-receipt claim.
-Cluster/platform/source-data acceptance and setup/permission UX remain pending.
+Interactive setup/permission review is installed. Authorized cluster/platform/source-data
+acceptance remains a support gate.
 
 Explicit `test` uses [test-v1.schema.json](test-v1.schema.json), a separate labelled
 synthetic payload with no cluster/job data. It is not a durable monitoring event.

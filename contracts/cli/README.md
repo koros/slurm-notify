@@ -4,13 +4,11 @@ The local MVP contracts were adopted on 2026-10-13, following exact help/version
 approval on 2026-10-12. Snapshots are intentional UTF-8 bytes with final newlines;
 acceptance compares streams and exit codes without regenerating baselines.
 
-Installed user commands are help/version, configuration validation, historical status
-and prototype `start --foreground` for webhook, SMTP and mixed configurations. No arguments emit
-`no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
-`invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
-versioned child protocols, not user provider-test commands. There is no service
-installation command in this build. Interactive setup, doctor and explicit provider
-tests are installed as described below.
+Installed user commands are help/version, interactive init, configuration validation,
+doctor, explicit provider tests, historical status and foreground start for webhook,
+SMTP and mixed configurations. No arguments emit `no-arguments.stderr` with exit 2.
+Invalid/duplicate/extra invocation words emit `invalid-invocation.stderr`, empty
+stdout and exit 2. Helpers below are private child protocols. No service is installed.
 
 ## Configuration-validation addition (2026-10-13)
 
@@ -63,8 +61,8 @@ command or provider-test interface; help and supported command baselines are unc
 The handler requires HTTPS, a UUID-v4 public ID matching the JSON payload and
 explicit bounded timeout/field sizes. It does not read config/environment resources
 or open state. The supervising parent must enforce the total wall-clock deadline
-and child cleanup, including DNS/TLS stalls. Installed monitoring activation remains pending; malformed-input acceptance is not
-provider-send acceptance.
+and child cleanup, including DNS/TLS stalls. Installed foreground send/restart now
+has controlled verified-TLS acceptance; malformed-input checks alone do not prove delivery.
 
 ## Private bound SMTP child handler
 
@@ -84,7 +82,7 @@ missing STARTTLS produces a sanitized refusal without transmitting AUTH in plain
 Installed helper acceptance also verifies STARTTLS/AUTH and a temporary final DATA
 refusal followed by relay acceptance from a fresh helper process using identical
 frozen bytes. This is helper replay, not installed monitor/store restart acceptance;
-monitoring command acceptance remains pending.
+installed monitoring acceptance now includes verified TLS submission and restart.
 
 ## Foreground activation (2026-10-24)
 

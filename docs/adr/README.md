@@ -14,3 +14,8 @@ Installed foreground decisions: [SMTP/mixed activation](0065-installed-smtp-mixe
 and [webhook-only composition](0066-webhook-only-foreground-composition.md).
 
 [Explicit webhook trust and installed HTTPS](0067-explicit-webhook-trust-and-installed-https.md) records controlled TLS acceptance.
+
+Local MVP completion: [doctor](0068-installed-read-only-doctor.md),
+[provider tests](0069-explicit-one-shot-provider-tests.md),
+[interactive review](0070-protected-interactive-config-review.md) and
+[relocated workflow acceptance](0071-relocated-local-mvp-workflow.md).

@@ -59,20 +59,17 @@ and active-callback recovery are tested. See [ADR 0057](../adr/0057-private-comb
 and the readiness evidence. Python draft checks are supplementary review tooling.
 The installed protected parser now serves webhook-only configuration validation
 with structural webhook/SMTP schemas and exact output baselines. Offline historical
-status is installed without provider resource resolution. Live status and
-public events still need installed acceptance.
+status is installed without provider resource resolution. Live status remains separate; public event emission now has controlled installed acceptance.
 
-| Activation gap | Concrete decision or implementation needed |
+| Area | Current implementation / remaining gate |
 | --- | --- |
-| First finite CLI | Help/version approved and implemented; later finite commands require config/output review |
-| Config validation/status | Installed validation/status have exact output/error baselines; status does not resolve provider resources and works for webhook/mixed metadata |
-| Status while monitoring | Installed historical status requires exclusive ownership and closed rollback-journal state; it reports busy without reading active state. Live inspection remains separate |
-| Signal exit policy | Draft proposes 130/143; the bridge now retains the first delivered handler reason (first atomic winner for concurrent handlers). Bind and test installed exits before activation |
-| Continuous foreground run | Continuous owned sessions now renew finite poll batches with shared clock/wait guards, retained health and ownership, plus cancellation/failure/restart acceptance; OS-backed installed orchestration remains pending |
-| Resource lifetime/deadlines | Environment lookup caps accepted bytes after OS allocation; NSS lookup is synchronous. Review deadline/failure behavior before claiming bounded installed startup |
-| Webhook-only foreground | Unified session currently prepares a mixed plan requiring SMTP; compose a reviewed webhook-only path without silently changing the public scope |
-| Public event transaction | Webhook-only public transactions now freeze ring-generated UUIDs, bytes and resolved endpoint revisions; mixed SMTP composition and actual dispatch remain pending. Unknown source times remain null; numeric IDs are canonical strings bounded by payload bytes |
-| Setup/provider permissions | Implement reviewed onboarding, safe explicit tests and exact SMTP permission enrollment; no implicit enrollment or retargeting |
+| CLI/config/status | All local MVP commands have deliberate grammar/help/output and installed acceptance; final release compatibility review remains |
+| Status while monitoring | Historical status reports busy under exclusive ownership; process health stays unknown; live inspection is separate |
+| Signals and foreground | Installed SIGINT/SIGTERM exits 130/143, owned continuous orchestration and bounded active-stage recovery are accepted |
+| Resource lifetime | Protected snapshots, explicit trust and permissions are installed; environment allocation/NSS/filesystem startup do not have universal hard deadlines |
+| Webhook/mixed events | Frozen UUID/JSON/endpoint revisions, mixed SMTP composition and actual verified TLS dispatch/restart are accepted with controlled fixtures |
+| Setup/tests/doctor | Protected interactive draft review/enrollment, one-shot synthetic tests and read-only bounded probes are installed |
+| External support | Authorized cluster/provider, source identity/timezone, platform/install/upgrade and exact release-artifact acceptance remain |
 
 These are distinct from already tested cooperative callback cancellation and frozen
 SMTP recovery. Private 96-byte summaries are not public CLI snapshots. Document

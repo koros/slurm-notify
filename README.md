@@ -11,14 +11,18 @@ Slurm Notify is an MIT-licensed Rust project for user-space Slurm job notificati
 It aims to discover the current user's jobs and send lifecycle alerts without root
 access or changes to batch scripts.
 
-**Current status: prototype foreground monitoring accepts webhook, SMTP and mixed configs.**
-The executable supports `--help`, `--version`, `init --config <absolute-path>`,
-`config validate --config <absolute-path>`, `status --config <absolute-path>`,
-`doctor --config <absolute-path>`, `test <provider-name> --config <absolute-path>`, and
-`start --foreground --config <absolute-path>` on Linux/macOS. Webhook-only runs have persistence/restart acceptance; installed HTTPS retry/delivery and restart have controlled TLS acceptance. Validate
-site polling/execution policy before starting on a real cluster. No supported
-monitoring release is available yet. See the [CLI contract](contracts/cli/README.md)
-and [configuration contract](contracts/config/README.md) for exact behavior.
+**Current status: the local MVP command set is implemented; this is an unreleased prototype.**
+It includes interactive `init`, `config validate`, `doctor`, explicit provider
+`test`, foreground `start`, historical `status`, help and version. Controlled
+acceptance covers webhook, SMTP and mixed delivery, verified TLS, signals and
+durable restart from a relocated executable.
+
+Start with the [getting-started guide](docs/operations/getting-started.md).
+The [CLI contract](contracts/cli/README.md) and
+[configuration contract](contracts/config/README.md) define exact behavior.
+Validate site polling/execution policy before real-cluster monitoring. The
+[support and acceptance gates](docs/operations/support-and-acceptance.md) distinguish
+local implementation from a supported deployment/release.
 
 ## Implemented
 
@@ -61,26 +65,21 @@ sh scripts/check-coverage.sh
 See [contributing](CONTRIBUTING.md) and [CI/coverage details](docs/operations/ci-and-coverage.md).
 CI artifacts contain the development prototype CLI.
 
-## Remaining work
+## Remaining acceptance
 
-The local command set is implemented. Authorized cluster/provider acceptance,
-installation/upgrade review and support baselines remain. Installed SMTP/mixed foreground runs now have synthetic scheduler,
-verified-STARTTLS submission, signal and durable restart acceptance. The intended MVP includes generic
-webhook and SMTP delivery. Slack/Teams scope remains to be settled. Log analysis
-and remote SSH monitoring are later phases.
+Authorized real-cluster/provider acceptance, platform/Slurm support baselines,
+operator installation/upgrade review and explicit release approval remain. See
+[product readiness](docs/architecture/product-readiness.md) and the
+[current plan](docs/architecture/implementation-plan.md). Generic webhook and SMTP
+are the local MVP scope; Slack/Teams-specific integrations, log analysis and remote
+SSH are later work.
 
-The [current plan](docs/architecture/implementation-plan.md) records the next work.
-The [contract review package](docs/proposals/local-contract-review-v1.md) records
-adopted MVP interfaces and remaining acceptance. Configuration examples are synthetic
-and require protected resources and exact SMTP permissions. Real-provider acceptance
-remains outstanding.
-The [original design](SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md),
+The [contract adoption package](docs/proposals/local-contract-review-v1.md) records
+reviewed interfaces. Examples are synthetic and require protected resources and
+explicit SMTP enrollment. The [original design](SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md),
 [implementation history](docs/architecture/implementation-history.md) and
-[ADRs](docs/adr/README.md) preserve design decisions and past evidence.
-
-Product platform/Slurm support, cluster polling policy, security reporting and
-release/install acceptance remain pending. A pinned development compiler and CI
-platform matrix do not establish a supported deployment matrix.
+[ADRs](docs/adr/README.md) preserve design decisions and historical evidence.
+See [security reporting](SECURITY.md) before sharing diagnostics.
 
 ## License
 

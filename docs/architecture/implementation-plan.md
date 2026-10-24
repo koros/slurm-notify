@@ -1,58 +1,51 @@
 # Current implementation plan
 
-The installed executable supports help/version, configuration validation, historical
-status, private bounded webhook/SMTP child protocols and prototype foreground
-monitoring for webhook, SMTP and mixed configurations. Webhook-only runs have
-controlled failure and persistence/restart acceptance. [Product readiness](product-readiness.md) records
-current evidence and limits; [implementation history](implementation-history.md)
-preserves historical increments.
+The local MVP command set is implemented. It remains an unreleased prototype,
+with controlled acceptance rather than a supported deployment promise.
+[Product readiness](product-readiness.md) records current evidence and limits;
+[implementation history](implementation-history.md) preserves historical increments.
 
-## Current MVP milestone
+## Completed local scope
 
-The target is a local foreground MVP with generic HTTPS webhook and required
-STARTTLS SMTP delivery, explicit JSON configuration, durable recovery, and
-setup/test/doctor/status workflows. Broader local MVP contract proposals were adopted on 2026-10-13;
-help/version, configuration validation, historical status and webhook/SMTP foreground
-monitoring are installed. MIT licensing, refreshed guidance,
-90% coverage and accurate badges are complete.
+- Resource-free help/version and deliberate CLI/config/event contract baselines.
+- Interactive protected draft review, safe provider/disclosure previews, explicit
+  current SMTP pair enrollment and atomic no-overwrite configuration creation.
+- Protected configuration/resource validation and read-only doctor with bounded
+  scheduler version probes; no hidden network/state activity.
+- Explicit one-shot synthetic HTTPS/SMTP tests with preview and no automatic retry.
+- Effective-user local foreground monitoring with generic HTTPS webhook, verified
+  required STARTTLS SMTP and mixed routes; no background service or public Rust API.
+- Atomic public UUID/frozen payload/SMTP preparation, owned private SQLite state,
+  retry and pending-resource guards, bounded maintenance and durable restart.
+- SIGINT/SIGTERM handling, sampled health and offline historical status.
+- Relocated-executable terminal setup/validation/doctor/mixed-delivery acceptance,
+  partial completion, identical HTTPS replay and no replay of completed SMTP work.
+- MIT licensing, hooks, shared checks and a minimum 90% Rust line coverage gate.
 
-Continuous scheduling and first-signal reason retention are now implemented
-privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
-Continuous scheduling now retains one owned session across poll-batch renewal
-([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Historical status is
-installed ([ADR 0062](../adr/0062-installed-historical-status.md)). Public mixed
-composition and OS-backed orchestration now back the installed SMTP/mixed command
-([ADR 0065](../adr/0065-installed-smtp-mixed-foreground-command.md)).
+The local contracts were adopted on 2026-10-13. Recent decisions are recorded in
+[ADRs 0065–0071](../adr/README.md), including protected trust, doctor, provider tests,
+setup and relocated workflow acceptance. The
+[getting-started guide](../operations/getting-started.md) documents the implemented flow.
 
-## Next product milestones
+## Remaining support and release gates
 
-1. Completed: the approved [help/version slice](../proposals/finite-cli-activation-v1.md)
-   has exact output/exit snapshots and installed-binary acceptance.
-2. Completed: installed webhook/SMTP configuration validation and offline historical
-   status, with deliberate schemas/output baselines and no hidden sending.
-3. Public UUIDs, frozen payloads/route revisions and mixed SMTP work commit atomically
-   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Guarded mixed
-   delivery, runtime cycles and owned continuous orchestration have private recovery
-   acceptance. Same-executable helper selection and installed bounded child handlers
-   exist ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
-   Local continuous orchestration now retains one same-executable helper selection;
-   controlled bound-SMTP recovery tests dispatch through its versioned commands.
-   Installed SMTP helpers have verified STARTTLS/AUTH and identical-byte replay after
-   a temporary final reply. Installed foreground SMTP delivery, signals, blocked
-   recovery and durable no-replay restart now have controlled acceptance. Installed HTTPS helpers now have verified TLS retry/submission/restart acceptance.
-4. Webhook-only foreground composition and installed HTTPS retry/delivery acceptance
-   are implemented. Broaden mixed-provider installed failure/recovery evidence and finish
-   remaining ownership/platform acceptance before claiming a supported MVP.
-5. Interactive setup, doctor and explicit provider tests are installed. Validate an authorized cluster/provider and agreed
-   platform/Slurm baseline. Complete security reporting, installation/upgrade,
-   dependency notices and explicitly authorized release acceptance.
+1. Obtain explicit authorization and site policy for real-cluster/provider
+   acceptance. Establish Slurm/accounting/job-identity/timezone baselines from
+   evidence; preserve privacy and current-user filtering.
+2. Verify intended target/platform/filesystem installation, termination, migration,
+   closed backup and rollback behavior. Local/CI tests do not define an MSRV/libc
+   or supported platform matrix.
+3. Complete maintainer interface/security/dependency-license and repository
+   protection review, then approve an artifact/release plan. Publishing requires
+   explicit authorization and acceptance of the exact installation artifacts.
 
-Slack/Teams scope remains undecided. Log analysis and remote SSH follow the local
-MVP. No supported monitoring release or public Rust library API exists yet.
+See [the acceptance checklist](../operations/support-and-acceptance.md).
+Slack/Teams-specific integrations, log monitoring, remote SSH and background service
+installation are outside the implemented local MVP. No release is published.
 
 ## Validation
 
-`sh scripts/check.sh` is the shared local/CI suite; hooks must pass.
+`sh scripts/check.sh` is the shared local/CI suite; staged and pre-push hooks must pass.
 `sh scripts/check-coverage.sh` enforces at least 90% aggregate Rust line coverage.
-Current recorded results belong in product readiness, not duplicated historical
-status paragraphs in this plan or README. Hosted CI status must be verified separately.
+Record current results in product readiness, without appending obsolete status to
+README. Verify hosted checks separately from local results.

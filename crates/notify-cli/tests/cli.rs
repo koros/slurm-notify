@@ -2418,3 +2418,184 @@ fn init_enrolls_only_reviewed_current_smtp_pairs_without_credentials_or_network(
     assert!(!state.exists());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn relocated_mvp_setup_doctor_and_mixed_delivery_recover_without_smtp_replay() {
+    use std::{
+        io::{BufRead, BufReader},
+        os::unix::fs::PermissionsExt,
+        process::Stdio,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    struct Reap(std::process::Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root =
+        std::env::temp_dir().join(format!("slurm-notify-relocated-mvp-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let bin = root.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let binary = bin.join("slurm-notify");
+    std::fs::copy(env!("CARGO_BIN_EXE_slurm-notify"), &binary).unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (http_der, http_port, http_server) = https_relay::start();
+    let (smtp_der, smtp_port, smtp_server) = smtp_relay::start();
+    let write = |path: &std::path::Path, bytes: &[u8], mode| {
+        std::fs::write(path, bytes).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let http_trust = root.join("http.der");
+    let smtp_trust = root.join("smtp.der");
+    write(&http_trust, &http_der, 0o600);
+    write(&smtp_trust, &smtp_der, 0o600);
+    let draft = root.join("draft.json");
+    let config = root.join("config.json");
+    let state = root.join("state/state.sqlite3");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-mixed-config.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(state);
+    source["monitor"]["initial_observation"] = serde_json::json!("emit");
+    source["delivery"]["initial_backoff_seconds"] = serde_json::json!(1);
+    source["delivery"]["jitter_seconds"] = serde_json::json!(0);
+    source["providers"]["primary"]["trust_der_files"] = serde_json::json!([http_trust]);
+    let smtp = &mut source["providers"]["research_email"];
+    smtp["trust_der_files"] = serde_json::json!([smtp_trust]);
+    smtp["relay"] = serde_json::json!("127.0.0.1");
+    smtp["port"] = serde_json::json!(smtp_port);
+    smtp["server_name"] = serde_json::json!("smtp.fixture.invalid");
+    smtp["authentication"]["identity"] = serde_json::json!("fixture-user");
+    smtp["sender"] = serde_json::json!("s@fixture.invalid");
+    smtp["recipient"] = serde_json::json!("r@fixture.invalid");
+    source["routes"] =
+        serde_json::json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email"]}]);
+    write(&draft, &serde_json::to_vec_pretty(&source).unwrap(), 0o600);
+    for(name,body)in [("squeue","#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'slurm synthetic\\n'; fi\nexit 0\n"),("sacct","#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'slurm synthetic\\n'; exit 0; fi\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {write(&bin.join(name),body.as_bytes(),0o700);}
+    let run = || {
+        let mut cmd = Command::new(&binary);
+        cmd.env_clear()
+            .current_dir(&root)
+            .env("PATH", &bin)
+            .env(
+                "SLURM_NOTIFY_WEBHOOK_URL",
+                format!("https://127.0.0.1:{http_port}/hook"),
+            )
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+            .env("SLURM_NOTIFY_SMTP_USERNAME", "fixture-user")
+            .env("SLURM_NOTIFY_SMTP_PASSWORD", "fixture-password");
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            cmd.env("LLVM_PROFILE_FILE", profile);
+        }
+        cmd
+    };
+    let mut cmd = run();
+    cmd.args(["init", "--config"]).arg(&config);
+    let input = format!("{}\nyes\n", draft.to_str().unwrap());
+    let initialized = terminal::run(cmd, input.as_bytes());
+    assert_eq!(initialized.status.code(), Some(0));
+    assert!(initialized.stderr.is_empty());
+    assert!(!state.exists());
+    expect(run().args(["config","validate","--config"]).arg(&config).output().unwrap(),0,b"Configuration valid: schema_version=1 cluster=research-cluster destinations=2 smtp_permissions=approved\n",b"");
+    expect(
+        run()
+            .args(["doctor", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap(),
+        0,
+        include_bytes!("../../../contracts/cli/doctor-success.stdout"),
+        b"",
+    );
+    assert!(!state.exists());
+    let mut frozen = None;
+    for iteration in 0..3 {
+        let mut child = Reap(
+            run()
+                .args(["start", "--foreground", "--config"])
+                .arg(&config)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut line = String::new();
+            BufReader::new(stdout).read_line(&mut line).unwrap();
+            let _ = tx.send(line);
+        });
+        assert!(rx
+            .recv_timeout(Duration::from_secs(8))
+            .unwrap()
+            .starts_with("Foreground health:"));
+        // SAFETY: this signal targets the owned relocated executable.
+        assert_eq!(
+            unsafe { libc::kill(child.0.id().try_into().unwrap(), libc::SIGTERM) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(143));
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        reader.join().unwrap();
+        let db = rusqlite::Connection::open_with_flags(
+            &state,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let frame:(String,Vec<u8>,Vec<u8>)=db.query_row("SELECT p.public_id,p.payload,m.data FROM public_event_frames p JOIN smtp_messages m ON m.event_id=p.internal_event_id",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        if let Some(previous) = &frozen {
+            assert_eq!(&frame, previous);
+        }
+        frozen = Some(frame);
+        let counts:(i64,i64,i64)=db.query_row("SELECT (SELECT COUNT(*) FROM outbox WHERE status='delivered'),(SELECT COUNT(*) FROM delivery_attempts),(SELECT COUNT(*) FROM outbox)",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(counts, if iteration == 0 { (1, 2, 2) } else { (2, 3, 2) });
+        let smtp_attempts: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM delivery_attempts WHERE destination='research_email'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(smtp_attempts, 1);
+        if iteration == 0 {
+            std::thread::sleep(Duration::from_millis(1100));
+        }
+    }
+    let (id, json, mail) = frozen.unwrap();
+    assert_eq!(smtp_server.join().unwrap(), mail);
+    let requests = http_server.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    for (headers, body) in requests {
+        assert_eq!(body, json);
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains(&format!("idempotency-key: {id}\r\n")));
+    }
+    let status = run()
+        .args(["status", "--config"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert_eq!(status.status.code(), Some(0));
+    assert!(String::from_utf8(status.stdout)
+        .unwrap()
+        .contains("Historical"));
+    std::fs::remove_dir_all(root).unwrap();
+}

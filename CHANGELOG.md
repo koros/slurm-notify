@@ -19,6 +19,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Verify a relocated local MVP workflow through interactive setup, validation,
+  doctor, mixed verified HTTPS/SMTP partial completion and restart without SMTP
+  replay. Add source-build operation, upgrade, support/acceptance and security guidance.
+
 - Add terminal-based configuration review from a protected JSON draft, safe provider/
   disclosure previews and explicit current SMTP pair enrollment. New files publish
   atomically with mode 0600 and no overwrite; setup sends nothing and creates no state.
