@@ -35,7 +35,7 @@ base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Retain unrelated builder transitive versions during the security update.
-email-encoding = "=0.4.1"
+email-encoding = "=0.4.2"
 idna_adapter = "=1.1.0"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
