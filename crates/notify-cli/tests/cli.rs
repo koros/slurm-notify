@@ -888,3 +888,208 @@ fn installed_smtp_helper_validates_bound_frames_and_never_authenticates_without_
     assert!(output.stderr.is_empty());
     server.join().unwrap();
 }
+
+#[test]
+fn installed_smtp_helpers_replay_identical_frozen_message_after_temporary_final_reply() {
+    use base64::Engine;
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        process::Stdio,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+    let frame = |fields: &[&[u8]]| {
+        let mut bytes = Vec::new();
+        for field in fields {
+            bytes.extend_from_slice(&(field.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(field);
+        }
+        bytes
+    };
+    let cert = rcgen::generate_simple_self_signed(vec!["smtp.fixture.invalid".into()]).unwrap();
+    let root = cert.cert.der().to_vec();
+    let server_config = Arc::new(
+        rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![rustls::pki_types::CertificateDer::from(root.clone())],
+                rustls::pki_types::PrivateKeyDer::Pkcs8(
+                    rustls::pki_types::PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()),
+                ),
+            )
+            .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let hash = smtp_provider_revision::trust_fingerprint(&[&root]).unwrap();
+    let descriptor = smtp_provider_revision::Descriptor::new(&smtp_provider_revision::Profile {
+        destination: "smtp",
+        relay: "127.0.0.1",
+        port: listener.local_addr().unwrap().port(),
+        tls: smtp_provider_revision::TlsMode::RequiredStartTls,
+        server_name: "smtp.fixture.invalid",
+        trust_reference: "fixture-trust",
+        trust_fingerprint: &hash,
+        authentication_identity: "fixture-user",
+        credential_reference: "fixture-secret",
+    })
+    .unwrap();
+    let data = b"Date: Thu, 01 Jan 1970 00:00:10 +0000\r\nMessage-ID: <frozen-fixture@fixture.invalid>\r\nSubject: fixture\r\n\r\nfixture\r\n..dot\r\n.\r\n";
+    let roots = frame(&[&root]);
+    let request = frame(&[
+        descriptor.canonical(),
+        descriptor.token().as_bytes(),
+        &roots,
+        b"\0fixture-user\0fixture-password",
+        b"s@fixture.invalid",
+        b"r@fixture.invalid",
+        data,
+        b"2000",
+    ]);
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        let mut received = Vec::new();
+        for attempt in 0..2 {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(2))
+                    }
+                    Err(error) => panic!("fixture accept failed: {error:?}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut plain = BufReader::new(socket);
+            plain.get_mut().write_all(b"220 fixture\r\n").unwrap();
+            let mut line = String::new();
+            plain.read_line(&mut line).unwrap();
+            assert!(line.starts_with("EHLO "));
+            plain
+                .get_mut()
+                .write_all(b"250-fixture\r\n250 STARTTLS\r\n")
+                .unwrap();
+            line.clear();
+            plain.read_line(&mut line).unwrap();
+            assert_eq!(line, "STARTTLS\r\n");
+            assert!(plain.buffer().is_empty());
+            plain.get_mut().write_all(b"220 upgrade\r\n").unwrap();
+            let stream = rustls::StreamOwned::new(
+                rustls::ServerConnection::new(server_config.clone()).unwrap(),
+                plain.into_inner(),
+            );
+            let mut tls = BufReader::new(stream);
+            line.clear();
+            tls.read_line(&mut line).unwrap();
+            assert!(line.starts_with("EHLO "));
+            tls.get_mut()
+                .write_all(b"250-fixture\r\n250 AUTH PLAIN\r\n")
+                .unwrap();
+            tls.get_mut().flush().unwrap();
+            line.clear();
+            tls.read_line(&mut line).unwrap();
+            assert_eq!(
+                line,
+                format!(
+                    "AUTH PLAIN {}\r\n",
+                    base64::engine::general_purpose::STANDARD
+                        .encode(b"\0fixture-user\0fixture-password")
+                )
+            );
+            tls.get_mut().write_all(b"235 authenticated\r\n").unwrap();
+            tls.get_mut().flush().unwrap();
+            for (expected, reply) in [
+                (
+                    "MAIL FROM:<s@fixture.invalid>\r\n",
+                    b"250 mail\r\n".as_slice(),
+                ),
+                ("RCPT TO:<r@fixture.invalid>\r\n", b"250 recipient\r\n"),
+                ("DATA\r\n", b"354 data\r\n"),
+            ] {
+                line.clear();
+                tls.read_line(&mut line).unwrap();
+                assert_eq!(line, expected);
+                tls.get_mut().write_all(reply).unwrap();
+                tls.get_mut().flush().unwrap();
+            }
+            let mut body = Vec::new();
+            loop {
+                let mut part = Vec::new();
+                assert!(tls.read_until(b'\n', &mut part).unwrap() > 0);
+                let end = part == b".\r\n";
+                body.extend(part);
+                if end {
+                    break;
+                }
+            }
+            received.push(body);
+            tls.get_mut()
+                .write_all(if attempt == 0 {
+                    b"451 temporary\r\n"
+                } else {
+                    b"250 accepted\r\n"
+                })
+                .unwrap();
+            tls.get_mut().flush().unwrap();
+            // Complete the client's orderly end before closing the fixture socket.
+            if attempt == 1 {
+                line.clear();
+                let _ = tls.read_line(&mut line);
+            }
+        }
+        received
+    });
+    for expected in [
+        b"SMTP_SUBMIT FINAL TEMP NA\n".as_slice(),
+        b"SMTP_SUBMIT FINAL ACCEPTED RA\n",
+    ] {
+        let mut child = command()
+            .args(["--internal-provider-v1", "smtp-starttls"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(&request).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                panic!("SMTP helper exceeded fixture deadline");
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let mut stdout = Vec::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .take(129)
+            .read_to_end(&mut stdout)
+            .unwrap();
+        let mut stderr = Vec::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .take(129)
+            .read_to_end(&mut stderr)
+            .unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(0));
+        assert_eq!(stdout, expected);
+        assert!(stderr.is_empty());
+    }
+    let received = server.join().unwrap();
+    assert_eq!(received, vec![data.to_vec(), data.to_vec()]);
+}

@@ -1,9 +1,10 @@
 # Current implementation plan
 
-The private engine and OS resource/signal lifecycle are implemented and tested.
-The installed executable supports the approved help/version slice. [Product readiness](product-readiness.md)
-contains current capability evidence and limitations; [implementation history](implementation-history.md)
-preserves past increments without treating their next steps as current instructions.
+The installed executable supports help/version, configuration validation, historical
+status and private bounded webhook/SMTP child protocols. Installed foreground
+monitoring remains unavailable. [Product readiness](product-readiness.md) records
+current evidence and limits; [implementation history](implementation-history.md)
+preserves historical increments.
 
 ## Current MVP milestone
 
@@ -17,8 +18,9 @@ Continuous scheduling and first-signal reason retention are now implemented
 privately ([ADR 0058](../adr/0058-private-continuous-scheduler-and-signal-reason.md)).
 Continuous scheduling now retains one owned session across poll-batch renewal
 ([ADR 0059](../adr/0059-private-owned-continuous-session.md)). Historical status is
-installed ([ADR 0062](../adr/0062-installed-historical-status.md)); next complete
-mixed public-event/SMTP composition and bind OS-backed orchestration and monitoring commands.
+installed ([ADR 0062](../adr/0062-installed-historical-status.md)). Public mixed
+composition and OS-backed orchestration are tested privately; installed helper
+binding and monitoring activation remain pending.
 
 ## Next product milestones
 
@@ -26,23 +28,14 @@ mixed public-event/SMTP composition and bind OS-backed orchestration and monitor
    has exact output/exit snapshots and installed-binary acceptance.
 2. Completed: installed webhook/SMTP configuration validation and offline historical
    status, with deliberate schemas/output baselines and no hidden sending.
-3. Transactional webhook public IDs/bytes/route revisions are implemented and tested
-   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Mixed SMTP/public storage preparation now shares that transaction. Mixed composition admission now checks complete HTTPS bindings and payload limits.
-   Stored-frame supervised delivery now has controlled child retry/restart acceptance.
-   Mixed delivery composition now shares the checked retry worker with SMTP,
-   preserving exact permissions and partial completion. Public poll and delivery composition now share runtime-cycle preflight,
-   cancellation, health and maintenance. Owned sessions and the continuous runner now accept public ticks, with
-   lock/resource retention, poll-budget renewal and cancellation recovery acceptance.
-   Continuous startup/shutdown orchestration now uses OS monotonic/interruptible
-   waits and correctly bounded summaries for unbounded tick counts. Local orchestration now binds effective UID, explicit environment references,
-   absolute scheduler programs, bounded subprocesses and caller-owned provider helpers.
-   Retained signal/exit mapping now has exact SIGINT/SIGTERM process acceptance.
-   Private same-executable helper selection now has exact grammar and process
-   acceptance ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
-   The installed private webhook helper now shares bounded codecs/HTTPS transport
-   and has malformed-input binary acceptance. The installed bound SMTP helper now has malformed-frame, implicit-TLS rejection
-   and missing-STARTTLS/no-AUTH binary acceptance. Next connect helper selection
-   and installed monitoring, with installed successful-send/restart acceptance.
+3. Public UUIDs, frozen payloads/route revisions and mixed SMTP work commit atomically
+   ([ADR 0063](../adr/0063-transactional-public-webhook-events.md)). Guarded mixed
+   delivery, runtime cycles and owned continuous orchestration have private recovery
+   acceptance. Same-executable helper selection and installed bounded child handlers
+   exist ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
+   Installed SMTP helpers have verified STARTTLS/AUTH and identical-byte replay after
+   a temporary final reply. Successful webhook helper send and installed monitoring/
+   durable-store restart acceptance remain pending.
 4. Complete installed orchestration/helper binding and
    webhook-only composition and status contention acceptance, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.

@@ -3,8 +3,9 @@
 Date: 2026-10-24
 
 Status: selector/process acceptance and installed webhook/SMTP handlers implemented.
-Installed rejection and missing-STARTTLS/no-AUTH acceptance pass; monitoring and
-successful installed submission/restart acceptance remain pending.
+Installed rejection, missing-STARTTLS/no-AUTH and verified SMTP helper submission/
+replay acceptance pass. Installed monitoring/store restart and successful webhook
+helper send acceptance remain pending.
 
 ## Decision
 

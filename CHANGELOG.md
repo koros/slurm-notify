@@ -5,7 +5,18 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+### Fixed
+
+- Killed-owner process acceptance allows bounded interpreter startup under parallel
+  test load while still requiring proof that the child acquired its lock before
+  termination. Runtime ownership/deadline behavior is unchanged.
+
 ### Added
+
+- Installed SMTP helper acceptance now covers verified STARTTLS/AUTH, a temporary
+  final DATA refusal and a fresh helper process replaying identical frozen Date,
+  Message-ID and dot-stuffed bytes before relay acceptance. Tests use an ephemeral
+  loopback certificate/server; no real provider or installed monitoring is exercised.
 
 - Installed private bound SMTP child handler now shares provider fingerprint/trust
   validation, frozen-message validation, required STARTTLS, verified TLS and AUTH

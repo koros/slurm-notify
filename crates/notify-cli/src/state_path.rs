@@ -351,8 +351,10 @@ mod tests {
         let mut command = std::process::Command::new("python3");
         command.args(["-c", "import fcntl,sys,time; f=open(sys.argv[1],'r+b'); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],'w').close(); time.sleep(30)"])
             .arg(path.join(".owner.lock")).arg(&marker);
+        // Allow bounded interpreter startup under parallel acceptance load before
+        // requiring proof that the killed child actually acquired the lock.
         assert_eq!(
-            crate::transport::supervise(&mut command, vec![], Duration::from_millis(300), 16, 32),
+            crate::transport::supervise(&mut command, vec![], Duration::from_secs(2), 16, 32),
             Err(crate::transport::Error::Timeout)
         );
         assert!(

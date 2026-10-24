@@ -81,4 +81,7 @@ produce `SMTP_SUBMIT AUTH INPUT` and a newline with empty stderr. Parent permiss
 guards and acknowledgment classification remain mandatory. Parent supervision bounds
 DNS/TLS/socket lifetime and cleans up the child. Installed loopback acceptance proves
 missing STARTTLS produces a sanitized refusal without transmitting AUTH in plaintext.
-Successful installed submission/restart and monitoring command acceptance are pending.
+Installed helper acceptance also verifies STARTTLS/AUTH and a temporary final DATA
+refusal followed by relay acceptance from a fresh helper process using identical
+frozen bytes. This is helper replay, not installed monitor/store restart acceptance;
+monitoring command acceptance remains pending.
