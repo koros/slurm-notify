@@ -2678,6 +2678,7 @@ fn owned_revision_delivery_restart() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn owned_bound_transport_restart() {
+    let selected_helpers = provider_helpers::Selection::current().unwrap();
     use base64::Engine;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use smtp_provider_delivery::{Permission, Permissions, Resolved};
@@ -2952,13 +2953,13 @@ fn owned_bound_transport_restart() {
                         resolve_resources(bound, &profile, &trust_path, b"first-fixture")
                     },
                     |_: &storage::DueDelivery| {
-                        let mut command = Command::new(std::env::current_exe().unwrap());
-                        command.arg(if mode == 10 {
-                            "--smtp-bound-lost-result"
+                        if mode == 10 {
+                            let mut command = Command::new(std::env::current_exe().unwrap());
+                            command.arg("--smtp-bound-lost-result");
+                            command
                         } else {
-                            "--smtp-bound-fixture"
-                        });
-                        command
+                            selected_helpers.command(provider_helpers::Kind::Smtp)
+                        }
                     },
                     |item: &storage::DueDelivery| {
                         assert_eq!(item.destination, "webhook");
@@ -3167,9 +3168,7 @@ fn owned_bound_transport_restart() {
                     },
                     |item: &storage::DueDelivery| {
                         assert_eq!(item.attempt_number, 2);
-                        let mut command = Command::new(std::env::current_exe().unwrap());
-                        command.arg("--smtp-bound-fixture");
-                        command
+                        selected_helpers.command(provider_helpers::Kind::Smtp)
                     },
                     |item: &storage::DueDelivery| {
                         assert_eq!(item.destination, "webhook");

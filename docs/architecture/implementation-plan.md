@@ -33,10 +33,12 @@ binding and monitoring activation remain pending.
    delivery, runtime cycles and owned continuous orchestration have private recovery
    acceptance. Same-executable helper selection and installed bounded child handlers
    exist ([ADR 0064](../adr/0064-private-same-executable-provider-selection.md)).
+   Local continuous orchestration now retains one same-executable helper selection;
+   controlled bound-SMTP recovery tests dispatch through its versioned commands.
    Installed SMTP helpers have verified STARTTLS/AUTH and identical-byte replay after
    a temporary final reply. Successful webhook helper send and installed monitoring/
    durable-store restart acceptance remain pending.
-4. Complete installed orchestration/helper binding and
+4. Activate installed monitoring orchestration and complete
    webhook-only composition and status contention acceptance, then activate reviewed
    webhook/SMTP flows with ownership, privacy and restart acceptance.
 5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed

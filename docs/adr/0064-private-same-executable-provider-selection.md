@@ -12,6 +12,7 @@ helper send acceptance remain pending.
 Capture `std::env::current_exe()` once as an absolute regular-file pathname. Build
 provider commands from that owned path with exactly two fixed arguments:
 `--internal-provider-v1 webhook` or `--internal-provider-v1 smtp-starttls`.
+The private local continuous runner captures one selection for the entire owned run.
 Do not discover helpers through PATH, configuration, or environment overrides.
 The supervisor clears the child environment and transfers per-request endpoint,
 authorization, public event bytes or SMTP resources through bounded owned stdin.
@@ -41,3 +42,8 @@ Unit tests check the current image, exact argument arrays, absent environment
 selection and rejected relative/missing/directory paths and malformed grammar.
 Process acceptance executes both selected helper modes with malformed stdin and
 requires supervised failure without a provider request or recursive parent startup.
+
+Bound-SMTP recovery acceptance now uses the selected versioned command for normal
+child dispatch and restart retry; explicit lost-result fault fixtures remain separate.
+Local-run startup tests preserve cancellation/budget/resource error precedence.
+Installed monitoring command activation remains pending.

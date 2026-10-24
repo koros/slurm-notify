@@ -125,6 +125,36 @@ where
     Summary::Shutdown(Report::classify_continuous(&result))
 }
 
+// The selected executable is retained for the complete owned run; no per-send
+// executable discovery or caller-provided helper-path override is used here.
+pub(super) fn run_selected_local_continuous(
+    request: ContinuousRequest<'_>,
+    signal: &Signal,
+    programs: (&Path, &Path),
+) -> Summary {
+    if signal.cancelled().unwrap_or(true) {
+        return Summary::Startup(StartupReport::classify(Error::Cancelled));
+    }
+    if !(1..=1024).contains(&request.poll_batch) {
+        return Summary::Startup(StartupReport::classify(Error::InvalidLimit));
+    }
+    let helpers = match crate::provider_helpers::Selection::current() {
+        Ok(helpers) => helpers,
+        Err(_) => return Summary::Startup(StartupReport::classify(Error::Preparation)),
+    };
+    run_local_continuous(
+        request,
+        signal,
+        programs,
+        (
+            |_: &crate::storage::DueDelivery| helpers.command(crate::provider_helpers::Kind::Smtp),
+            |_: &crate::storage::DueDelivery| {
+                helpers.command(crate::provider_helpers::Kind::Webhook)
+            },
+        ),
+    )
+}
+
 // Explicit scheduler programs and caller-owned trusted helper commands. This binds
 // existing OS adapters without adding installed flags, PATH search or helper discovery.
 pub(super) fn run_local_continuous<S, W>(
@@ -266,6 +296,19 @@ mod tests {
                 ),
             );
             assert_eq!(summary.render(), format!("foreground startup={expected}\n"));
+            let selected = run_selected_local_continuous(
+                ContinuousRequest {
+                    path: Path::new("/nonexistent-private-config"),
+                    poll_batch: batch,
+                    lock_timeout: Duration::from_millis(50),
+                },
+                &signal,
+                (Path::new(active), Path::new(accounting)),
+            );
+            assert_eq!(
+                selected.render(),
+                format!("foreground startup={expected}\n")
+            );
         }
     }
     #[test]

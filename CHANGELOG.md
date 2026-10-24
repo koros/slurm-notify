@@ -13,6 +13,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private local continuous runner now captures and reuses one same-executable
+  provider selection for SMTP/webhook children. Controlled bound-SMTP recovery
+  acceptance uses the versioned selected commands; startup cancellation/resource
+  precedence remains covered. Installed monitoring command activation is pending.
+
 - Installed SMTP helper acceptance now covers verified STARTTLS/AUTH, a temporary
   final DATA refusal and a fresh helper process replaying identical frozen Date,
   Message-ID and dot-stuffed bytes before relay acceptance. Tests use an ephemeral
