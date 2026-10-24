@@ -1,0 +1,2 @@
+Doctor checks passed: configuration=valid resources=valid scheduler_probes=passed state=not_inspected.
+Validate site polling/execution policy before monitoring a real cluster.

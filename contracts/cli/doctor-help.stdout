@@ -1,0 +1,5 @@
+Usage: slurm-notify doctor --config <absolute-path>
+
+Check protected configuration/resources and bounded Slurm --version probes.
+Creates no state and sends no provider request. State ownership/health uses status.
+Executable availability does not establish site policy or supported Slurm behavior.

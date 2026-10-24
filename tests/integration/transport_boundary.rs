@@ -172,6 +172,23 @@ use std::time::{Duration, Instant};
 #[path = "../../crates/notify-cli/src/provider_helpers.rs"]
 mod provider_helpers;
 
+fn reopen_after_close(path: &std::path::Path) -> storage::Store {
+    // A concurrent fork/exec or killed descendant can briefly retain the inherited
+    // CLOEXEC lock descriptor. Bound the handoff; persistent leaks still fail.
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        match storage::Store::open_private(path, Duration::from_millis(50)) {
+            Ok(store) => return store,
+            Err(storage::StorageError::StatePath(state_path::Error::AlreadyOwned))
+                if std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(2))
+            }
+            Err(error) => panic!("state reopen failed: {error:?}"),
+        }
+    }
+}
+
 fn main() {
     let helper_args: Vec<_> = std::env::args_os().skip(1).collect();
     if helper_args
@@ -769,7 +786,7 @@ fn orchestrated_owned_http_restart() {
         .event_id
         .clone();
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let mut cycles = Cycles::new(1).unwrap();
     let decoy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     decoy.set_nonblocking(true).unwrap();
@@ -853,7 +870,7 @@ fn orchestrated_owned_http_restart() {
         ))
     ));
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let mut cycles = Cycles::new(2).unwrap();
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
@@ -900,7 +917,7 @@ fn orchestrated_owned_http_restart() {
         0
     );
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     assert!(store
         .due_deliveries("cluster", 7400, 10)
         .unwrap()
@@ -963,7 +980,7 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
         .unwrap()
         .is_empty());
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     // Deliberate test-only injection against the trusted owned database.
     let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_second_cleanup BEFORE DELETE ON outbox WHEN OLD.destination='secondary' BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
@@ -999,7 +1016,7 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
     );
     drop(db);
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
     db.execute_batch("DROP TRIGGER reject_second_cleanup;")
         .unwrap();
@@ -1091,7 +1108,7 @@ fn orchestrated_timeout_retry_recovery() {
     assert_eq!(retry.len(), 1);
     assert_eq!(retry[0].attempt_number, 2);
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let mut cycles = Cycles::new(2).unwrap();
     let (endpoint, server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
@@ -1129,7 +1146,7 @@ fn orchestrated_timeout_retry_recovery() {
     );
     assert_eq!(cleaned.cleanup.unwrap().unwrap(), 1);
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     assert!(store
         .due_deliveries("cluster", 7400, 10)
         .unwrap()
@@ -1213,7 +1230,7 @@ fn orchestrated_blocked_dispatch_restart() {
     assert!(first_request.contains(&id));
     assert!(pending.iter().all(|item| item.attempt_number == 1));
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let (b_endpoint, b_server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
@@ -1334,7 +1351,7 @@ fn orchestrated_mid_batch_cancellation_restart() {
     assert!(first_request.contains(&id));
     assert!(pending.iter().all(|item| item.attempt_number == 1));
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let (b_endpoint, b_server) = webhook::tests::server(
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
@@ -1925,7 +1942,7 @@ fn owned_smtp_lost_result_replay() {
     assert_eq!(report.retrying, 1);
     assert_eq!(report.delivered, 0);
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     assert!(store.due_deliveries("cluster", 24, 10).unwrap().is_empty());
     let retry = store.due_deliveries("cluster", 25, 10).unwrap().remove(0);
     assert_eq!(retry.event_id, identity);
@@ -2012,7 +2029,7 @@ fn orchestrated_mixed_render_failure_restart() {
     );
     assert!(health.poll.checkpoint_age_seconds.is_none());
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let (restored, checkpoint) = store.restore("cluster", 10).unwrap();
     assert!(restored.latest.is_empty() && restored.emitted.is_empty() && checkpoint.is_none());
     let db = rusqlite::Connection::open(root.join("state.sqlite3")).unwrap();
@@ -2096,7 +2113,7 @@ fn orchestrated_mixed_render_failure_restart() {
     assert_eq!(recovered.cleanup.unwrap().unwrap(), 0);
     assert_eq!(recovered.health.unwrap().unwrap().poll.last_failure, None);
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let replay = restarted.tick_prepared_fallible(
         &settings,
         &orchestration_maintenance(),
@@ -2239,7 +2256,7 @@ fn orchestrated_frozen_blocked_restart() {
         .map(|item| smtp_frozen_frame::load(&store, &item.event_id, &item.destination).unwrap())
         .collect();
     drop(store);
-    let mut store = storage::Store::open_private(&root, Duration::from_millis(50)).unwrap();
+    let mut store = reopen_after_close(&root);
     let mut restarted = Cycles::new(1).unwrap();
     let mut clocks = [7211, 7211, 7220, 7221, 7221, 7221].into_iter();
     let mut calls = 0;

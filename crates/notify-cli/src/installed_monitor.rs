@@ -1,7 +1,7 @@
 //! Installed prototype foreground command. No service installation or implicit config.
 use std::path::{Path, PathBuf};
 const POLL_BATCH: usize = 64;
-fn programs() -> Option<(PathBuf, PathBuf)> {
+pub(super) fn programs() -> Option<(PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
     let value = std::env::var_os("PATH")?;
     if value.as_encoded_bytes().len() > 4096 {

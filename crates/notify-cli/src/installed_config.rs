@@ -17,7 +17,16 @@ fn validate_with(
     mut lookup: impl FnMut(&str) -> Result<Zeroizing<Vec<u8>>, Error>,
 ) -> Result<String, Error> {
     let snapshot = crate::config_snapshot::read(path).map_err(|_| Error::Invalid)?;
-    let draft = crate::config_validate::validate(snapshot.bytes()).map_err(|_| Error::Invalid)?;
+    validate_content(snapshot.bytes(), &mut lookup)
+}
+pub(super) fn validate_bytes(bytes: &[u8]) -> Result<String, Error> {
+    validate_content(bytes, read_env)
+}
+fn validate_content(
+    bytes: &[u8],
+    mut lookup: impl FnMut(&str) -> Result<Zeroizing<Vec<u8>>, Error>,
+) -> Result<String, Error> {
+    let draft = crate::config_validate::validate(bytes).map_err(|_| Error::Invalid)?;
     let root = object(&draft.value).map_err(|_| Error::Invalid)?;
     let providers =
         object(get(root, "providers").map_err(|_| Error::Invalid)?).map_err(|_| Error::Invalid)?;

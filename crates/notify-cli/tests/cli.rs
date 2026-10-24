@@ -1908,3 +1908,113 @@ fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn doctor_checks_resources_and_bounded_probes_without_state_or_provider_activity() {
+    use std::{
+        io::Write,
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
+    for args in [["doctor", "--help"], ["--help", "doctor"]] {
+        expect(
+            command().args(args).output().unwrap(),
+            0,
+            include_bytes!("../../../contracts/cli/doctor-help.stdout"),
+            b"",
+        );
+    }
+    for args in [
+        vec!["doctor"],
+        vec!["doctor", "--config", "relative"],
+        vec!["doctor", "doctor", "--config", "/absent"],
+        vec!["doctor", "--config", "/absent", "--unknown"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    let root = std::env::temp_dir().join(format!("slurm-notify-doctor-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.join("config.json");
+    let state = root.join("state/state.sqlite3");
+    let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/proposals/examples/local-webhook-config.json"
+    ))
+    .unwrap();
+    source["storage"]["path"] = serde_json::json!(state);
+    source["monitor"]["query_timeout_seconds"] = serde_json::json!(3);
+    source["monitor"]["command_output_limit_bytes"] = serde_json::json!(1024);
+    let write = |path: &std::path::Path, bytes: &[u8], mode| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(mode)
+            .open(path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    write(&config, &serde_json::to_vec(&source).unwrap(), 0o600);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let run = || {
+        command()
+            .args(["--config"])
+            .arg(&config)
+            .arg("doctor")
+            .env("PATH", &root)
+            .env(
+                "SLURM_NOTIFY_WEBHOOK_URL",
+                format!(
+                    "https://127.0.0.1:{}/hook",
+                    listener.local_addr().unwrap().port()
+                ),
+            )
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture")
+            .output()
+            .unwrap()
+    };
+    expect(
+        run(),
+        2,
+        b"",
+        b"Required Slurm executables unavailable in absolute PATH directories.\n",
+    );
+    for name in ["squeue", "sacct"] {
+        write(&root.join(name),b"#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 7\nprintf 'slurm synthetic\\n'\n",0o700);
+    }
+    expect(
+        run(),
+        0,
+        include_bytes!("../../../contracts/cli/doctor-success.stdout"),
+        b"",
+    );
+    source["monitor"]["query_timeout_seconds"] = serde_json::json!(1);
+    write(&config, &serde_json::to_vec(&source).unwrap(), 0o600);
+    for body in [
+        "#!/bin/sh\nexit 7\n",
+        "#!/bin/sh\nexec /bin/sleep 3\n",
+        "#!/bin/sh\ni=0; while [ \"$i\" -lt 2048 ]; do printf x; i=$((i+1)); done\n",
+        "#!/bin/sh\nexit 0\n",
+    ] {
+        write(&root.join("sacct"), body.as_bytes(), 0o700);
+        expect(
+            run(),
+            1,
+            b"",
+            b"Slurm capability probe failed or exceeded its budget.\n",
+        );
+    }
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+    expect(
+        run(),
+        2,
+        b"",
+        b"Configuration invalid or required resource unavailable.\n",
+    );
+    assert!(!state.exists());
+    assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 413 private Rust tests plus fourteen installed CLI acceptance tests
+The latest implementation milestone passed 413 private Rust tests plus fifteen installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.14% (25,819/26,580); the gate is 90%.
+Python tests. Rust line coverage was 97.12% (25,892/26,659); the gate is 90%.
 These are recorded local results, not a claim that hosted checks currently pass.
 
 | Capability | Current evidence | Remaining gap |
@@ -53,7 +53,7 @@ scheduler. Controlled loopback fixtures establish no real-provider acceptance.
 | Public contracts | Help/version, config validation and status have baselines; webhook/SMTP start and public event persistence are implemented; final compatibility review remains | Concrete command, output, exit-code, schema/default and migration review, then approved compatibility fixtures |
 | Installed runtime | Help/version, config validation and historical status are installed; webhook/SMTP monitoring is installed; controlled installed HTTPS retry/delivery is accepted; real-provider acceptance remains pending | Fresh-install and authorized real-provider acceptance |
 | Resource resolution | Installed validation and webhook/SMTP monitoring bind protected resources and exact permissions | Document synchronous lookup limits and finish provider acceptance |
-| Onboarding | Historical status exists; setup wizard, provider test and doctor are pending | Reviewed flows, safe opt-in test delivery, accessible/noninteractive behavior and newcomer acceptance |
+| Onboarding | Historical status exists; doctor is installed; setup wizard and provider test are pending | Reviewed flows, safe opt-in test delivery, accessible/noninteractive behavior and newcomer acceptance |
 | Scheduler policy | No supported Slurm/site baseline or real-cluster acceptance | Validate command features, accounting lag, job identity and permitted polling/execution at an authorized cluster |
 | Provider scope | Generic webhook/SMTP prototypes exist; Slack/Teams priority remains open | Agree MVP scope, payload compatibility and supported provider setup; test real providers only when authorized |
 | Platform support | Development toolchain is pinned; product MSRV/libc/Slurm matrix remains undecided | Target builds, installation and process/permission/deadline smoke tests; mark unverified targets explicitly |
@@ -73,7 +73,7 @@ records the installed command's behavior and limits.
 
 1. Installed HTTPS helper acceptance is complete with verified TLS, retry and durable
    restart. Broaden mixed-provider recovery evidence as onboarding is added.
-2. Complete setup/test/doctor flows and review remaining output and migration
+2. Complete setup/provider-test flows and review remaining output and migration
    baselines, including actionable diagnostics for blocked work.
 3. Obtain authorized cluster/provider acceptance and settle platform, Slurm source
    identity/timezone and dependency support baselines.

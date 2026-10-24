@@ -43,7 +43,7 @@ composition and OS-backed orchestration now back the installed SMTP/mixed comman
 4. Webhook-only foreground composition and installed HTTPS retry/delivery acceptance
    are implemented. Broaden mixed-provider installed failure/recovery evidence and finish
    remaining ownership/platform acceptance before claiming a supported MVP.
-5. Implement setup/test/doctor UX; validate an authorized cluster/provider and agreed
+5. Doctor is installed with bounded read-only probes. Implement setup/provider-test UX; validate an authorized cluster/provider and agreed
    platform/Slurm baseline. Complete security reporting, installation/upgrade,
    dependency notices and explicitly authorized release acceptance.
 

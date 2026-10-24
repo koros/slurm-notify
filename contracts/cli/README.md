@@ -9,7 +9,7 @@ and prototype `start --foreground` for webhook, SMTP and mixed configurations. N
 `no-arguments.stderr` with exit 2. Invalid/duplicate/extra invocation words emit
 `invalid-invocation.stderr`, empty stdout and exit 2. Helpers below are private
 versioned child protocols, not user provider-test commands. There is no service
-installation, setup, test or doctor command in this build.
+installation, setup or provider-test command in this build.
 
 ## Configuration-validation addition (2026-10-13)
 
@@ -112,3 +112,14 @@ truncation; it makes no exact-total claim. See [ADR 0065](../../docs/adr/0065-in
 for lifecycle, error, cleanup and compatibility details. Installed accepted SMTP
 submission and no-replay restart have controlled TLS acceptance; no real-cluster/
 provider or supported-release claim follows.
+
+## Doctor
+
+`doctor --config <absolute-path>` and its resource-free help use the same finite
+option grammar as status. Checks protected config/trust/credentials and exact SMTP
+permission, then bounded `squeue --version` and `sacct --version` probes. It sends
+nothing and creates no state. Success labels state uninspected; historical status
+remains separate. Outputs are static and exclude raw probe text. Missing config or
+programs exit 2, SMTP permission denial 3, unsuccessful/empty/over-budget probes 1;
+success exits 0 with `doctor-success.stdout`. Shared timeout/output budgets and
+scope are recorded in [ADR 0068](../../docs/adr/0068-installed-read-only-doctor.md).

@@ -150,6 +150,8 @@ mod smtp_submit_frame;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_submit_dispatch;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod installed_doctor;
 const HELP: &str = include_str!("../../../contracts/cli/help.stdout");
 const CONFIG_HELP: &str = include_str!("../../../contracts/cli/config-help.stdout");
 
@@ -190,6 +192,50 @@ fn main() -> std::process::ExitCode {
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             eprintln!("Foreground monitoring is unavailable on this platform.");
+            return std::process::ExitCode::from(2);
+        }
+    }
+    if args.len() == 2
+        && args.iter().any(|arg| arg == "doctor")
+        && args.iter().any(|arg| arg == "--help")
+    {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/doctor-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if let Some(path) = finite_path(&args, "doctor") {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        return match installed_doctor::run(&path) {
+            Ok(output) => {
+                print!("{output}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => {
+                let (code, message) = match error {
+                    installed_doctor::Error::Config => {
+                        (2, "Configuration invalid or required resource unavailable.")
+                    }
+                    installed_doctor::Error::Permission => (
+                        3,
+                        "SMTP delivery permission is not approved for the current profile.",
+                    ),
+                    installed_doctor::Error::Programs => (
+                        2,
+                        "Required Slurm executables unavailable in absolute PATH directories.",
+                    ),
+                    installed_doctor::Error::Probe => {
+                        (1, "Slurm capability probe failed or exceeded its budget.")
+                    }
+                };
+                eprintln!("{message}");
+                std::process::ExitCode::from(code)
+            }
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            eprintln!("Doctor is unavailable on this platform.");
             return std::process::ExitCode::from(2);
         }
     }
@@ -315,6 +361,10 @@ fn config_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
 }
 
 fn status_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
+    finite_path(args, "status")
+}
+
+fn finite_path(args: &[std::ffi::OsString], name: &str) -> Option<std::path::PathBuf> {
     if args.len() != 3 {
         return None;
     }
@@ -337,7 +387,7 @@ fn status_path(args: &[std::ffi::OsString]) -> Option<std::path::PathBuf> {
             return None;
         }
     }
-    if command.is_some_and(|arg| arg == "status") {
+    if command.is_some_and(|arg| arg == name) {
         path
     } else {
         None

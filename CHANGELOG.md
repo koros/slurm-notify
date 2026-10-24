@@ -7,11 +7,18 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Bound post-close lock handoff in process recovery acceptance, matching the
+  existing unit fixture policy for transient inherited descriptors. Runtime lock
+  ownership remains exclusive and unchanged; persistent leaks still fail tests.
+
 - Killed-owner process acceptance allows bounded interpreter startup under parallel
   test load while still requiring proof that the child acquired its lock before
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Add read-only `doctor` resource checks and bounded Slurm version probes, with
+  static diagnostics, shared time/output budgets and no state/provider activity.
 
 - Add optional protected DER webhook trust, preserving verified bundled roots when
   absent and binding custom trust fingerprints to frozen endpoint revisions.
