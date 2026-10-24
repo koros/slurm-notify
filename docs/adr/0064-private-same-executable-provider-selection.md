@@ -2,8 +2,8 @@
 
 Date: 2026-10-24
 
-Status: implemented in the private engine and process acceptance harness; installed
-helper entry points remain pending.
+Status: selector and process acceptance implemented; installed webhook helper
+handler has malformed-input acceptance. Bound SMTP helper activation remains pending.
 
 ## Decision
 
@@ -22,8 +22,9 @@ sanitized acknowledgment classification remain authoritative.
 ## Compatibility and limits
 
 This is an internal versioned helper protocol, not a supported user command or Rust
-API. Installed CLI grammar/help baselines remain unchanged. Activating the installed
-handlers must use the same bounded codecs and add installed-binary acceptance before
+API. Public CLI grammar/help baselines remain unchanged. The installed webhook
+handler shares the bounded codec and HTTPS client with malformed-input binary
+acceptance. Activating the remaining installed handlers must add acceptance before
 monitoring can select them. No dependency or operational timeout defaults change.
 
 Capturing a pathname avoids ambient helper discovery; it does not pin an executable

@@ -653,3 +653,115 @@ fn status_grammar_and_help_do_not_resolve_resources() {
         include_bytes!("../../../contracts/cli/config-invalid.stderr"),
     );
 }
+
+#[test]
+fn installed_webhook_helper_rejects_malformed_private_input_without_output_or_state() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let id = b"evt_00000000000040008000000000000000";
+    let payload = br#"{"event_id":"evt_00000000000040008000000000000000"}"#;
+    let frame = |fields: &[&[u8]]| {
+        let mut bytes = Vec::new();
+        for field in fields {
+            bytes.extend_from_slice(&(field.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(field);
+        }
+        bytes
+    };
+    let mut rejected = vec![
+        vec![],
+        vec![0],
+        u32::MAX.to_be_bytes().to_vec(),
+        frame(&[b"https://fixture.invalid/private-token", b"", id, payload]),
+        frame(&[
+            b"http://127.0.0.1:9/private-token",
+            b"",
+            id,
+            payload,
+            b"1000",
+        ]),
+        frame(&[
+            b"https://fixture.invalid/private-token",
+            b"",
+            b"private-attempt",
+            payload,
+            b"1000",
+        ]),
+        frame(&[
+            b"https://fixture.invalid/private-token",
+            b"",
+            id,
+            b"{}",
+            b"1000",
+        ]),
+        frame(&[
+            b"https://fixture.invalid/private-token",
+            b"",
+            id,
+            b"not-json",
+            b"1000",
+        ]),
+        frame(&[
+            b"https://fixture.invalid/private-token",
+            b"Bearer secret\r\n",
+            id,
+            payload,
+            b"1000",
+        ]),
+    ];
+    for timeout in [b"0".as_slice(), b"30001", b"01000", b"invalid"] {
+        rejected.push(frame(&[
+            b"https://fixture.invalid/private-token",
+            b"",
+            id,
+            payload,
+            timeout,
+        ]));
+    }
+    for (endpoint, auth, body) in [
+        (vec![b'x'; 4097], vec![], payload.to_vec()),
+        (
+            b"https://fixture.invalid/private-token".to_vec(),
+            vec![b'x'; 4097],
+            payload.to_vec(),
+        ),
+        (
+            b"https://fixture.invalid/private-token".to_vec(),
+            vec![],
+            vec![b'x'; 16385],
+        ),
+    ] {
+        rejected.push(frame(&[&endpoint, &auth, id, &body, b"1000"]));
+    }
+    let mut trailing = frame(&[
+        b"https://fixture.invalid/private-token",
+        b"",
+        id,
+        payload,
+        b"1000",
+    ]);
+    trailing.push(0);
+    rejected.push(trailing);
+    for input in rejected {
+        let mut child = command()
+            .args(["--internal-provider-v1", "webhook"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(&input);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    }
+    for args in [
+        ["--internal-provider-v1", "webhook", "extra"],
+        ["--internal-provider-v1", "smtp-starttls", "extra"],
+    ] {
+        let output = command().args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.stderr, INVALID);
+        assert!(output.stdout.is_empty());
+    }
+}

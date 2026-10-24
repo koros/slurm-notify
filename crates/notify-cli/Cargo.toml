@@ -26,11 +26,11 @@ rustls = { version = "=0.23.45", default-features = false, features = ["ring", "
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks"] }
 time = "=0.3.55"
 
-[dev-dependencies]
-# Prototype-only bundled SQLite.
-# Private blocking HTTP prototype; no async runtime or response decompression.
+# Installed bounded HTTPS helper; reuse locked TLS client without proxy discovery/decompression.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 httpdate = "=1.0.3"
+
+[dev-dependencies]
 # Private AUTH PLAIN codec; retain scalar implementation without new unsafe SIMD.
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 # Retain unrelated builder transitive versions during the security update.

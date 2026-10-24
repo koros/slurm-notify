@@ -1,12 +1,16 @@
 //! Private implementation of the adopted minimal public event payload; no sender.
+#[cfg(test)]
 use ring::rand::{SecureRandom, SystemRandom};
+#[cfg(test)]
 use serde_json::json;
 
+#[cfg(test)]
 pub(super) fn random() -> Result<[u8; 16], ()> {
     let mut bytes = [0; 16];
     SystemRandom::new().fill(&mut bytes).map_err(|_| ())?;
     Ok(bytes)
 }
+#[cfg(test)]
 pub(super) fn identifier(mut bytes: [u8; 16]) -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -25,6 +29,7 @@ pub(super) fn valid_id(id: &str) -> bool {
         && id.as_bytes()[16] == b'4'
         && b"89ab".contains(&id.as_bytes()[20])
 }
+#[cfg(test)]
 pub(super) fn payload(
     id: &str,
     cluster: &str,

@@ -7,6 +7,12 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Installed private webhook child handler now shares the bounded frame codec and
+  HTTPS transport, validating public UUID/payload identity and request ceilings.
+  Malformed input exits silently with 2; installed monitoring and the SMTP child
+  handler remain pending. Existing locked `ureq`/`httpdate` dependencies now build
+  normally, with unchanged TLS features and no added dependency versions.
+
 - Private provider helper selection now captures the current executable and builds
   fixed versioned webhook/required-STARTTLS commands without PATH/environment helper
   discovery. Exact grammar and malformed-stdin process acceptance are covered;

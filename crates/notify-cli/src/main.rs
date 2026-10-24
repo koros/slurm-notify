@@ -17,11 +17,13 @@ mod foreground_wait;
 mod installed_config;
 mod installed_smtp;
 mod installed_status;
+mod installed_webhook_helper;
 #[cfg(test)]
 mod mixed_config_composition;
+mod provider_frame;
 #[cfg(test)]
 mod provider_helpers;
-#[cfg(test)]
+mod provider_outcome;
 mod public_event;
 mod rendering_fingerprint;
 mod routing_validation;
@@ -82,7 +84,6 @@ mod smtp_poll;
 #[cfg(test)]
 mod storage;
 
-#[cfg(test)]
 mod webhook;
 
 #[cfg(test)]
@@ -159,6 +160,16 @@ const CONFIG_HELP: &str = include_str!("../../../contracts/cli/config-help.stdou
 
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).take(8).collect();
+    if args.len() == 2 && args[0] == "--internal-provider-v1" && args[1] == "webhook" {
+        return std::process::ExitCode::from(
+            if installed_webhook_helper::serve(std::io::stdin(), std::io::stdout()).is_ok() {
+                0
+            } else {
+                2
+            },
+        );
+    }
+
     if args.len() == 1 && args[0] == "--help" {
         print!("{HELP}");
         return std::process::ExitCode::SUCCESS;

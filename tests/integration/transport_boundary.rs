@@ -12,6 +12,10 @@ mod credential_resolution;
 mod delivery;
 #[path = "../../crates/notify-cli/src/lifecycle.rs"]
 mod lifecycle;
+#[path = "../../crates/notify-cli/src/provider_frame.rs"]
+mod provider_frame;
+#[path = "../../crates/notify-cli/src/provider_outcome.rs"]
+mod provider_outcome;
 #[path = "../../crates/notify-cli/src/provider_resolution.rs"]
 mod provider_resolution;
 #[path = "../../crates/notify-cli/src/public_event.rs"]

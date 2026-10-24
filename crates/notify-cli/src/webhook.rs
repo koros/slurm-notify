@@ -1,5 +1,5 @@
 //! Private transport experiment. Caller supplies bytes; no event wire contract.
-use super::delivery::ProviderOutcome;
+use crate::provider_outcome::ProviderOutcome;
 use std::time::{Duration, UNIX_EPOCH};
 use url::{Host, Url};
 
@@ -90,6 +90,7 @@ impl Webhook {
     }
 
     // Private acceptance fixture used only by the custom test child.
+    #[cfg(test)]
     pub(super) fn block_resolver_fixture(&mut self) {
         self.agent = ureq::AgentBuilder::new()
             .resolver(|_: &str| {
@@ -103,6 +104,7 @@ impl Webhook {
             .build();
     }
 
+    #[cfg(test)]
     pub(super) fn send(
         &self,
         event_id: &str,
