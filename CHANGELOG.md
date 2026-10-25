@@ -7,6 +7,10 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Update rustls to 0.23.46, rustls-webpki to 0.103.16 and certificate roots to
+  1.0.10 to address current RustSec TLS/session and distrusted-certificate advisories.
+
+
 - Detect local Slurm ClusterName mismatches before state acquisition when sibling
   scontrol is available; reject mismatching accounting snapshots explicitly before
   persistence. Setup now discovers scheduler identity instead of using a host label.
@@ -33,6 +37,10 @@ the design handoff; no release has been published.
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Full-graph advisory, dependency-license and source policy checks with pinned
+  cargo-deny and scheduled CI; no advisory exceptions.
+
 
 - Opt-in detailed Slack alerts with status icons (including ✅ completed), duration,
   allocation exit status/signal, validated start/end times, separate array-task
