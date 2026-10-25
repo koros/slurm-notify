@@ -3,8 +3,9 @@
 Slack incoming webhooks use HTTPS, so they may work where outbound SMTP is blocked.
 The operator has confirmed a separate Python test posted a message from uop-hpc.
 The operator subsequently confirmed the installed Rust synthetic Slack test too.
-Real scheduler monitoring remains under acceptance. This does not establish
-a supported platform or authorize real scheduler polling.
+The operator also confirmed healthy monitoring and completed array-task alerts
+using the original message format. Detailed messages still need HPC acceptance.
+This does not establish a supported platform or authorize real scheduler polling.
 
 Create a Slack app in your workspace, enable Incoming Webhooks, and add a webhook
 for your intended channel using [Slack's instructions](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/).

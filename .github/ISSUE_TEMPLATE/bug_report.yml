@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible problem with sanitized evidence.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities use the private Security reporting channel. Never attach secrets, webhook URLs, raw scheduler output or state databases."
+  - type: input
+    id: revision
+    attributes:
+      label: Commit and build
+      description: Commit hash, development compiler and build command.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, filesystem type and Slurm version if relevant; omit private paths and hostnames.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Steps, expected result and actual result; use synthetic config values.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Safe diagnostics
+      description: Exit code and static stage/reason tokens, plus relevant config settings without secret values.

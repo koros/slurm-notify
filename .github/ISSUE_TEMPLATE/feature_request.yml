@@ -1,0 +1,17 @@
+name: Feature request
+description: Describe a user problem and proposed behavior.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Who needs this and what are they trying to do? Use synthetic examples.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and alternatives
+      description: Include privacy, compatibility and operational implications where relevant.
+    validations:
+      required: true

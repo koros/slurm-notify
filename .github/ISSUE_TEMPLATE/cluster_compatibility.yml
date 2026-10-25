@@ -1,0 +1,32 @@
+name: Cluster compatibility report
+description: Record deployment evidence without claiming general support.
+body:
+  - type: markdown
+    attributes:
+      value: "Only run tests allowed by your site's policy. Do not attach real job records, credentials or databases. One report does not establish platform support."
+  - type: input
+    id: revision
+    attributes:
+      label: Commit, OS and Slurm version
+      description: Include architecture and filesystem type; omit private identities and paths.
+    validations:
+      required: true
+  - type: textarea
+    id: policy
+    attributes:
+      label: Authorized scope
+      description: What monitoring/polling was permitted? Do not include private policy documents.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Acceptance evidence
+      description: Record setup, doctor, delivery, stop/restart and upgrade outcomes; distinguish synthetic tests from real-source observations.
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Failures and limits
+      description: Sanitized stage/reason tokens, exit codes and untested scenarios.

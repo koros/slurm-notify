@@ -38,8 +38,11 @@ the design handoff; no release has been published.
 
 ### Added
 
-- Full-graph advisory, dependency-license and source policy checks with pinned
-  cargo-deny and scheduled CI; no advisory exceptions.
+- User-focused README, current contributor/security guidance, Contributor Covenant
+  3.0 with private reporting contact, issue forms and repository social-preview assets.
+- Full-graph advisory/license/source checks, OpenSSF Scorecard and measured Codecov
+  reporting; retain the independent 90% Rust line gate and honest prototype badges.
+- Move the original design handoff into docs/history as historical context.
 
 
 - Opt-in detailed Slack alerts with status icons (including ✅ completed), duration,

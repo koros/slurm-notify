@@ -1,96 +1,74 @@
 # Contributing
 
-This project has a tested private engine and an unavailable installed runtime.
-Read the [current plan](docs/architecture/implementation-plan.md) and
-[product readiness](docs/architecture/product-readiness.md) first.
+Slurm Notify is an unreleased MIT-licensed prototype. Contributions that improve
+reliability, privacy, diagnostics and operator documentation are welcome. Read
+[AGENTS.md](AGENTS.md), the [current plan](docs/architecture/implementation-plan.md)
+and relevant [ADRs](docs/adr/README.md) before changing behavior. Follow the
+[Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities through [SECURITY.md](SECURITY.md).
 
-## Local development
+## Development setup
 
-Install Rust through your normal development process. `rust-toolchain.toml` pins
-Rust 1.88.0 for reproducible development checks; it does not establish an MSRV or a
-supported deployment platform. The workspace currently has one executable. The test-only storage prototype uses
-rusqlite with bundled SQLite; running Rust tests requires a native C compiler.
-There are no runtime dependencies in the placeholder executable.
-
-```sh
-cargo build --workspace --locked
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-python3 -m unittest discover -s tests/integration/storage -p 'test_*.py' -v
-```
-
-The executable is a development placeholder and exits with status 1. No commands,
-flags, configuration, or notification functionality are supported yet. The test suite uses synthetic scheduler records and controlled HTTP/SMTP loopback
-fixtures, with private process acceptance for resources, cancellation and recovery.
-It sends no external provider notifications and requires no Slurm cluster.
-
-## Local Git hooks
-
-Install the version-controlled hooks once per clone:
+Use the pinned Rust 1.88.0 development toolchain, Python 3, Git and a native C
+compiler for bundled SQLite. No minimum supported Rust version is declared.
+The workspace currently has one package, `crates/notify-cli`; other crate folders
+reserve possible future boundaries.
 
 ```sh
 sh scripts/install-hooks.sh
-```
-
-The installer sets this repository's local `core.hooksPath` to `.githooks` and
-preserves an existing custom hooks path by refusing to overwrite it. Git, Cargo,
-Rustup, Python 3, and a native C compiler for the SQLite test dependency are required.
-There is no separate hook manager to install.
-
-Pre-commit checks staged files for common credential patterns, credential filenames,
-merge markers, and trailing whitespace. Markdown's two-space hard breaks are
-allowed. It exports the staged index to a temporary directory and runs formatting,
-strict Clippy, Rust tests, SQLite tests, hook tests, build, and executable smoke
-checks there. Unstaged changes cannot mask failures in committed content. Symlinks
-and submodules are unsupported by this snapshot check and are rejected explicitly.
-Temporary files are removed afterward; build cache stays under `target/hooks`.
-
-Pre-push checks tracked index files and runs the same suite against the working
-tree. It does not validate each historical commit or every ref named in a push.
-CI independently runs the same suite for the checked-out commit; contributors
-must install local hooks themselves because Git does not activate them on clone.
-The credential patterns are a small guardrail, not a complete credential scanner.
-
-Run the shared suite manually with:
-
-```sh
 sh scripts/check.sh
 ```
 
-Keep commit messages descriptive; there is no mandatory message format or
-commit-message hook. Branch protection and required reviews must be configured
-on GitHub separately; this setup does not change remote repository settings.
+Ordinary tests need no Slurm installation or provider account. Synthetic scheduler
+children and controlled local TLS/HTTP fixtures exercise normal, failure, signal
+and restart behavior. Do not point fixtures at real accounts or clusters. Site
+polling policy and explicit operational acceptance are separate from these tests.
 
-## Changes and review
+## Required validation
 
-Keep changes focused and explain the behaviour, rationale, and validation in each
-pull request. Add fixtures under `tests/fixtures`, keep credentials out of samples,
-and use mocked scheduler/provider dependencies for ordinary tests. Add unit tests
-inside the owning crate. The custom Cargo harness explicitly includes process
-fixtures under `tests/integration`; Python fixture suites run through
-`scripts/check.sh`. `tests/e2e` reserves future authorized cluster acceptance.
+`sh scripts/check.sh` runs formatting, strict Clippy, locked Rust and process tests,
+Python checks, and debug build/CLI smoke checks. Pre-commit validates the staged
+snapshot; pre-push runs shared checks. Fix failures; never bypass hooks or CI.
 
-Public contract changes need explicit approval, compatibility impact, migration
-instructions where relevant, documentation, and an appropriate version decision.
-See `contracts/README.md`. Use descriptive commits; no commit format is mandated.
+For Rust behavior or coverage configuration changes, install cargo-llvm-cov 0.6.21
+and matching compiler tools, then run the 90% line-coverage gate:
 
-The project is MIT licensed; contributions use the same license unless explicitly
-agreed otherwise. Product security/support and release acceptance remain pending.
+```sh
+rustup component add llvm-tools-preview --toolchain 1.88.0
+cargo install cargo-llvm-cov --version 0.6.21 --locked
+sh scripts/check-coverage.sh
+```
 
-The SQLite schema experiment uses Python 3's standard-library `sqlite3`; Cargo does
-not run these tests. The CI workflow invokes them separately. No Python runtime
-requirement is introduced for the eventual notification executable.
+Install cargo-deny 0.20.2 (or use its checksum-verified release binary) and check
+advisories, dependency licenses and sources:
 
-## CI and coverage
+```sh
+cargo deny --locked check
+```
 
-CI now checks Linux and macOS, documentation, workflow syntax, and pull-request
-dependency vulnerabilities, and enforces at least 90% aggregate Rust line coverage.
-Run `sh scripts/check-coverage.sh` after installing cargo-llvm-cov 0.6.21 and the
-pinned compiler's llvm-tools-preview component. Coverage tools are optional for
-local hooks and mandatory in CI. Reports and development artifact scope are
-explained in [CI and coverage](docs/operations/ci-and-coverage.md).
+The allowlist in `deny.toml` includes the current dependencies' permissive code
+licenses and CDLA-Permissive-2.0 for certificate-root data. It does not change this
+project's MIT license. Review new licenses and advisories deliberately; do not
+silence a finding with blanket exceptions. Duplicate transitive crate versions
+are warnings, since compatible upstream dependency ranges can differ.
 
-For the implemented user flow, see [getting started](docs/operations/getting-started.md).
-Use [security reporting](SECURITY.md) for sensitive findings and retain the
-[support/release gates](docs/operations/support-and-acceptance.md).
+See [CI and coverage](docs/operations/ci-and-coverage.md) for report artifacts,
+external services and check names. Hosted CI also validates workflows and rustdoc.
+
+## Proposing changes
+
+Keep increments focused. Describe the problem, resulting behavior, tests and
+remaining limits. Update current docs and CHANGELOG.md with behavior changes;
+put historical results in the implementation history. Use an ADR for durable
+architectural decisions and proposals for unsettled public interfaces.
+
+CLI, config, event and persistence changes need an explicit compatibility review.
+Keep Rust internals private unless intentionally supporting a public API. Contract
+baselines are reviewed evidence: do not regenerate them just to make checks pass.
+Test meaningful failure/restart paths, especially where persisted data or delivery
+semantics change. Prefer bounded subprocess argument arrays and explicit resource
+ownership. Preserve verified TLS, privacy and durable recovery guarantees.
+
+Use synthetic examples in issues and pull requests. Never attach secrets, webhook
+URLs, authorization headers, real scheduler output or state databases. A cluster
+compatibility report records evidence; it does not establish platform support.
+Releases require explicit authorization and verified support/install acceptance.

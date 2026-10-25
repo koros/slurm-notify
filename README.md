@@ -1,90 +1,151 @@
 # Slurm Notify
 
 [![CI](https://github.com/koros/slurm-notify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/koros/slurm-notify/actions/workflows/ci.yml)
-[![Coverage gate ≥90%](https://img.shields.io/badge/coverage_gate-%E2%89%A590%25-brightgreen)](docs/operations/ci-and-coverage.md)
+[![Coverage](https://codecov.io/gh/koros/slurm-notify/branch/main/graph/badge.svg)](https://codecov.io/gh/koros/slurm-notify)
+[![Dependency policy](https://github.com/koros/slurm-notify/actions/workflows/dependencies.yml/badge.svg?branch=main)](https://github.com/koros/slurm-notify/actions/workflows/dependencies.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/koros/slurm-notify/badge)](https://scorecard.dev/viewer/?uri=github.com/koros/slurm-notify)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Development Rust 1.88.0](https://img.shields.io/badge/development_Rust-1.88.0-orange?logo=rust)](rust-toolchain.toml)
 [![Status: prototype](https://img.shields.io/badge/status-prototype-yellow)](docs/architecture/product-readiness.md)
-[![CI platforms: Linux and macOS](https://img.shields.io/badge/CI_platforms-Linux%20%7C%20macOS-blue)](.github/workflows/ci.yml)
+[![Contributor Covenant 3.0](https://img.shields.io/badge/Contributor_Covenant-3.0-purple)](CODE_OF_CONDUCT.md)
+[![Last commit](https://img.shields.io/github/last-commit/koros/slurm-notify)](https://github.com/koros/slurm-notify/commits/main/)
 
-Slurm Notify is an MIT-licensed Rust project for user-space Slurm job notifications.
-It aims to discover the current user's jobs and send lifecycle alerts without root
-access or changes to batch scripts.
+Get Slack, email or HTTPS webhook alerts when your Slurm jobs finish, fail, run out
+of memory or time out—without editing batch scripts, configuring `--mail-type`, or
+needing root. Slurm Notify monitors your jobs as your user, saves pending alerts
+locally, and retries delivery after temporary failures or restarts.
 
-**Current status: the local MVP command set is implemented; this is an unreleased prototype.**
-It includes interactive `init`, `config validate`, `doctor`, explicit provider
-`test`, foreground `start`, historical `status`, help and version. Controlled
-acceptance covers webhook, SMTP and mixed delivery, verified TLS, signals and
-durable restart from a relocated executable.
+**Unreleased prototype.** Check your site's polling and execution policy before
+running scheduler probes or monitoring. CI checks Linux and macOS; this is not a
+supported platform or Slurm-version matrix. Rust 1.88.0 is the development
+compiler, not a declared minimum supported Rust version.
 
-Slack supports opt-in job details and names, status icons and frozen-message
-recovery. For Slack incoming webhooks, use the [HPC Slack setup guide](docs/operations/slack.md).
+## What you receive
 
-Start with the [getting-started guide](docs/operations/getting-started.md).
-The [CLI contract](contracts/cli/README.md) and
-[configuration contract](contracts/config/README.md) define exact behavior.
-Validate site polling/execution policy before real-cluster monitoring. The
-[support and acceptance gates](docs/operations/support-and-acceptance.md) distinguish
-local implementation from a supported deployment/release.
+A detailed Slack alert can look like this (synthetic values):
 
-## Implemented
+```text
+✅ Slurm Notify: COMPLETED
+Job: 123456 · Array task: 2
+Cluster: research-cluster
+Duration: 5m 0s
+Exit code (status:signal): 0:0
+Started: 2026-10-25T11:30:00Z
+Finished: 2026-10-25T11:35:00Z
+Observed: 2026-10-25T11:36:00Z
+Event: evt_482417c0689d4bccb07011e02307198a
+```
 
-- Synthetic Slurm parsing, lifecycle reconciliation, filtering and routing.
-- Durable SQLite checkpoints/outbox, deduplication, retries and frozen SMTP work.
-- Transactional public webhook UUIDs, frozen payloads and endpoint revision bindings
-  with guarded mixed-provider delivery, runtime cycles and owned continuous sessions
-  in the shared engine; installed SMTP submission/restart has controlled TLS acceptance.
-- Supervised HTTPS webhook and verified required-STARTTLS SMTP transports.
-- Protected config/trust snapshots, bounded Rust validation, explicit environment
-  resources and effective-user lookup.
-- Owned foreground sessions, continuous scheduling, SIGINT/SIGTERM cancellation and
-  process tests for shutdown, partial delivery and restart recovery. Local continuous
-  orchestration binds OS identity/environment and bounded synthetic scheduler children
-  with explicit provider helper commands.
-- Linux/macOS CI, pre-commit/pre-push checks and a 90% minimum Rust coverage gate.
+Slack details are opt-in; names require a separate opt-in and remain in protected
+state/backups for the ledger's lifetime. Missing details say unavailable. Email and
+generic webhooks use their own minimal payloads. See the [Slack guide](docs/operations/slack.md)
+for setup, disclosure controls and upgrades from the original message format.
 
-These capabilities use synthetic scheduler data and controlled process/loopback
-fixtures. See [product readiness](docs/architecture/product-readiness.md) for current
-validation results and limits.
+## Quick start
 
-## Development
+Build from source with the [pinned Rust toolchain](rust-toolchain.toml), Python 3
+(for the setup recipe), and a native C compiler for bundled SQLite:
 
-The workspace has one Cargo package, `crates/notify-cli`. Other crate directories
-reserve future boundaries. Use the pinned Rust toolchain, Python 3 and a native C
-compiler for bundled SQLite tests:
+```sh
+git clone https://github.com/koros/slurm-notify.git
+cd slurm-notify
+cargo build --release --locked
+./target/release/slurm-notify --help
+```
+
+The binary runs directly; installation and administrator access are not required.
+For Slack, create an incoming webhook for your intended channel, then follow the
+[protected draft setup](docs/operations/slack.md). That recipe discovers the actual
+Slurm cluster name, copies the complete example config, sets private state paths,
+and loads the webhook URL into an environment variable through a hidden prompt.
+Do not use the login hostname as an arbitrary cluster label.
+
+With the draft ready and `SN_SLACK_DIR` set by that recipe:
+
+```sh
+./target/release/slurm-notify init --config "$SN_SLACK_DIR/config.json"
+# Enter the absolute draft path, review the settings, then type yes.
+./target/release/slurm-notify config validate --config "$SN_SLACK_DIR/config.json"
+# After checking site policy:
+./target/release/slurm-notify doctor --config "$SN_SLACK_DIR/config.json"
+./target/release/slurm-notify test slack --config "$SN_SLACK_DIR/config.json"
+./target/release/slurm-notify start --foreground --config "$SN_SLACK_DIR/config.json"
+```
+
+The explicit test sends one synthetic message. Keep the terminal open while
+monitoring; Ctrl-C stops it. The example polls every 60 seconds and suppresses
+existing history on first observation. It does not install a background service.
+For email and generic HTTPS, use [getting started](docs/operations/getting-started.md)
+and the [configuration examples](contracts/config/README.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["squeue / sacct: your jobs"] --> B[Reconcile job changes]
+    B --> C[SQLite checkpoint and outbox]
+    C --> D[Supervised provider process]
+    D --> E[Slack / SMTP / HTTPS webhook]
+```
+
+Checkpoints and pending alerts are saved together. Repeated observations are
+deduplicated, and retries reuse the saved message. A provider may accept a message
+without returning an acknowledgement, so delivery can still be duplicated.
+`status` shows historical state; it does not prove a monitor process is alive.
+
+## Status
+
+| Feature | Status and evidence |
+| --- | --- |
+| Foreground monitoring, setup, validation, doctor, status | Implemented; controlled process and restart tests |
+| Slack incoming webhooks | Operator-confirmed synthetic and completed-job alerts on one HPC; detailed format covered by controlled tests |
+| SMTP with required STARTTLS | Controlled TLS acceptance; Gmail delivery from that HPC is blocked by its network |
+| Generic HTTPS webhook | Controlled acceptance, retries and restart recovery |
+| Durable outbox, routing and observation deduplication | Implemented; delivery may duplicate after an unknown acknowledgement |
+| Platform and Slurm compatibility | Acceptance in progress; no support matrix established |
+| Teams, log analysis, remote SSH, background service | Not implemented |
+| Published releases / crates.io packages | None |
+
+See [product readiness](docs/architecture/product-readiness.md), the
+[current plan](docs/architecture/implementation-plan.md), and
+[support/acceptance gates](docs/operations/support-and-acceptance.md).
+
+## Security
+
+Credentials are supplied through named environment variables, never inline in
+config or command arguments. Config/trust/state must be protected and user-owned;
+setup creates config files with mode 0600. SMTP requires explicit trusted DER
+certificates and verified STARTTLS. HTTPS uses bundled public roots unless an
+explicit trust bundle replaces them. TLS verification cannot be disabled.
+
+Keep webhook URLs, job metadata and state databases out of issues and logs.
+[Report vulnerabilities privately](https://github.com/koros/slurm-notify/security/advisories/new);
+see [SECURITY.md](SECURITY.md) for boundaries and reporting guidance.
+
+## Contributing
+
+Ordinary tests use synthetic Slurm data and controlled local providers; no Slurm
+cluster, email account or Slack workspace is needed. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) and the
+[ADRs](docs/adr/README.md). Install the hooks and run the shared checks:
 
 ```sh
 sh scripts/install-hooks.sh
 sh scripts/check.sh
-```
-
-For coverage, install cargo-llvm-cov 0.6.21 and the pinned compiler's
-llvm-tools-preview component, then run:
-
-```sh
 sh scripts/check-coverage.sh
 ```
 
-See [contributing](CONTRIBUTING.md) and [CI/coverage details](docs/operations/ci-and-coverage.md).
-CI artifacts contain the development prototype CLI.
+The local/CI Rust line-coverage gate is 90%. The Codecov badge reports uploaded
+coverage rather than the configured threshold; see [CI and coverage](docs/operations/ci-and-coverage.md)
+for metric definitions and external reporting. Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Remaining acceptance
-
-Authorized real-cluster/provider acceptance, platform/Slurm support baselines,
-operator installation/upgrade review and explicit release approval remain. See
-[product readiness](docs/architecture/product-readiness.md) and the
-[current plan](docs/architecture/implementation-plan.md). Generic webhook and SMTP form the original local MVP scope; an explicit Slack
-incoming webhook adapter is now implemented with controlled acceptance. Teams,
-log analysis and remote SSH remain later work.
-
-The [contract adoption package](docs/proposals/local-contract-review-v1.md) records
-reviewed interfaces. Examples are synthetic and require protected resources and
-explicit SMTP enrollment. The [original design](SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md),
-[implementation history](docs/architecture/implementation-history.md) and
-[ADRs](docs/adr/README.md) preserve design decisions and historical evidence.
-See [security reporting](SECURITY.md) before sharing diagnostics.
+Exact behavior is documented in the [CLI](contracts/cli/README.md),
+[config](contracts/config/README.md) and [event](contracts/events/README.md) contracts. The
+[original handoff](docs/history/SLURM_NOTIFY_DESIGN_AND_CODEX_HANDOFF.md) and
+[implementation history](docs/architecture/implementation-history.md) are historical context.
 
 ## License
 
-[MIT](LICENSE). Contributions are provided under the same license unless explicitly
-agreed otherwise. Dependency notices retain their respective licenses.
+[MIT](LICENSE). Contributions use the same license unless explicitly agreed
+otherwise. Dependencies retain their own licenses. The adapted Contributor
+Covenant document retains its stated CC BY-SA 4.0 license.

@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 433 private Rust tests plus twenty installed CLI acceptance tests
+The latest repository-hygiene/TLS dependency validation passed 433 private Rust tests plus twenty installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 13 draft-config
-Python tests. Rust line coverage was 97.11% (27,396/28,212); the gate is 90%.
+Python tests. Rust line coverage was 97.12% (27,399/28,212); the gate is 90%.
 The optimized build and help baseline smoke check also passed. Hosted checks are verified separately from these local results.
 
 | Capability | Current evidence | Remaining gap |
@@ -61,15 +61,16 @@ not real-cluster/provider permission or a supported release.
 | Cluster/site | Explicit authorization, polling policy, Slurm/version/accounting/job-identity/timezone baseline and real-source acceptance |
 | Real providers | Authorized intended endpoints/accounts, trust/auth/refusal/unknown-acceptance and recovery review |
 | Platform/install/upgrade | Intended target/filesystem operator acceptance, MSRV/libc matrix, closed backup/migration/rollback and exact release-artifact installation |
-| Security/governance | Maintainer threat/dependency-license review, private reporting channel availability and repository review/check protection |
+| Security/governance | Maintainer threat review, dependency-policy maintenance and repository review/check protection |
 | Release | Explicit approval, binaries, checksums/provenance/notices and upgrade notes; none published |
 
 The [security policy](../../SECURITY.md) provides reporting guidance without promising
-an SLA. The [support checklist](../operations/support-and-acceptance.md) details
+an SLA. Private GitHub vulnerability reporting is enabled; dependency/license
+checks and a conduct reporting contact are configured. The [support checklist](../operations/support-and-acceptance.md) details
 remaining external acceptance. Generic HTTPS and required STARTTLS SMTP are the
 original local MVP scope. Explicit Slack incoming webhook rendering extends it;
-installed synthetic HPC Slack delivery is operator-confirmed; real monitoring
-remains pending. Teams-specific adapters, log monitoring, remote SSH and
+installed synthetic HPC Slack delivery and completed array-task monitoring are
+operator-confirmed on one cluster; detailed Slack rendering still needs HPC acceptance. Teams-specific adapters, log monitoring, remote SSH and
 background services are later work.
 
 Environment value caps do not bound initial OS allocation. Effective-user NSS and

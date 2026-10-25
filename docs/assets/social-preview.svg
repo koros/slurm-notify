@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640"><rect width="1280" height="640" fill="#101d2c"/>
+<text x="80" y="73" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="25" font-weight="700" fill="#50dec3">SLURM NOTIFY</text>
+<text x="80" y="156" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="70" font-weight="700" fill="#edf5fa">Your Slurm jobs.</text>
+<text x="80" y="240" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="70" font-weight="700" fill="#edf5fa">Your notifications.</text>
+<text x="80" y="356" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="32" font-weight="400" fill="#aabed0">Slack  /  Email  /  HTTPS webhooks</text>
+<text x="80" y="415" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="27" font-weight="400" fill="#aabed0">No root. No batch-script changes.</text>
+<text x="80" y="536" dominant-baseline="text-before-edge" font-family="Arial,sans-serif" font-size="20" font-weight="700" fill="#50dec3">MIT LICENSE   •   UNRELEASED PROTOTYPE</text>
+<rect x="1090" y="78" width="110" height="110" rx="26" fill="#50dec3"/><path d="M1115 130 L1135 150 L1175 108" fill="none" stroke="#101d2c" stroke-width="10"/></svg>

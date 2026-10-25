@@ -21,6 +21,8 @@ with controlled acceptance rather than a supported deployment promise.
 - Relocated-executable terminal setup/validation/doctor/mixed-delivery acceptance,
   partial completion, identical HTTPS replay and no replay of completed SMTP work.
 - MIT licensing, hooks, shared checks and a minimum 90% Rust line coverage gate.
+- User-focused setup/status documentation, private security/conduct reporting, issue
+  forms, dependency policy checks and external coverage/Scorecard publication.
 
 The local contracts were adopted on 2026-10-13. Recent decisions are recorded in
 [ADRs 0065–0071](../adr/README.md), including protected trust, doctor, provider tests,

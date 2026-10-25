@@ -3850,3 +3850,27 @@ public contract review; a generic continuation does not establish acceptance.
 Validation: documentation-only milestone; required staged/push hooks run the shared
 suite. Latest source coverage remains the recorded `a94e6e8` result: 97.24%
 (22,174/22,803), above the 80% gate.
+
+
+## 2026-10-25 repository hygiene and TLS dependency review
+
+Reworked the README around user setup, example output, feature evidence, durability
+limits and contribution entry points. Replaced stale placeholder-CLI contributor
+instructions, moved the original handoff to docs/history, added issue forms and an
+adapted Contributor Covenant 3.0 with the maintainer's private reporting contact.
+GitHub private vulnerability reporting was enabled; description/topics were updated.
+Social-preview PNG/SVG assets were prepared; activating the repository preview needs
+an authenticated administrator browser session.
+
+Added SHA-pinned cargo-deny, Scorecard and OIDC Codecov reporting workflows. The
+independent 90% Rust line gate remains mandatory; external coverage reporting does
+not waive it. Dependency review found TLS advisories, resolved by rustls 0.23.46,
+rustls-webpki 0.103.16 and webpki-roots 1.0.10. The explicit license policy covers
+the existing permissive dependencies and CDLA-Permissive-2.0 root-certificate data;
+no advisory exceptions were added. Duplicate transitive versions remain warnings.
+
+Fresh coverage passed at 97.12% (27,399/28,212). One cluster-probe unit test failed
+while shared/coverage builds ran concurrently; it passed in isolation and in the
+coverage suite. Complete shared checks were rerun sequentially. Workflow validation,
+changed-document link checks, rustdoc and optimized CLI help/version smoke passed.
+External service publication and hosted workflow results must be checked separately.
