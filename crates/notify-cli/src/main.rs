@@ -295,7 +295,11 @@ fn main() -> std::process::ExitCode {
                 installed_init::Error::Terminal=>(2,"Interactive setup requires a terminal; no file was written."),
                 installed_init::Error::Input=>(2,"Setup input or required resources are invalid; no file was written."),
                 installed_init::Error::Destination=>(2,"Configuration destination is unsafe or already exists; no file was written."),
-                installed_init::Error::Write=>(1,"Configuration write failed; inspect the destination before retrying."),
+                installed_init::Error::Write(crate::config_create::Error::FileSync)=>(1,"Configuration file sync failed; no new configuration was published."),
+                installed_init::Error::Write(crate::config_create::Error::Publication)=>(1,"Atomic configuration publication failed; inspect the destination before retrying."),
+                installed_init::Error::Write(crate::config_create::Error::PublishedCleanup)=>(1,"Configuration was published but temporary-link cleanup failed; inspect links before use."),
+                installed_init::Error::Write(crate::config_create::Error::PublishedSync)=>(1,"Configuration was published but directory sync failed; inspect it before use."),
+                installed_init::Error::Write(_)=>(1,"Configuration write failed; inspect the destination before retrying."),
             };
                 eprintln!("{message}");
                 std::process::ExitCode::from(code)

@@ -9,9 +9,14 @@ use std::{
     },
     path::Path,
 };
+#[derive(Debug)]
 pub(super) enum Error {
     Destination,
     Io,
+    FileSync,
+    Publication,
+    PublishedCleanup,
+    PublishedSync,
 }
 fn parent(path: &Path) -> Result<(File, CString), Error> {
     let (dir, name) =
@@ -53,6 +58,21 @@ impl Drop for Temporary {
     }
 }
 pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+    write_using(path, bytes, rename_noreplace)
+}
+fn write_using(
+    path: &Path,
+    bytes: &[u8],
+    rename: impl FnOnce(&Temporary, &CString) -> std::io::Result<()>,
+) -> Result<(), Error> {
+    write_steps(path, bytes, rename, File::sync_all)
+}
+fn write_steps(
+    path: &Path,
+    bytes: &[u8],
+    rename: impl FnOnce(&Temporary, &CString) -> std::io::Result<()>,
+    mut sync: impl FnMut(&File) -> std::io::Result<()>,
+) -> Result<(), Error> {
     if bytes.is_empty() || bytes.len() > 65536 {
         return Err(Error::Destination);
     }
@@ -82,9 +102,13 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let mut file = unsafe { File::from_raw_fd(fd) };
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .map_err(|_| Error::Io)?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|_| Error::Io)?;
+    file.write_all(bytes).map_err(|_| Error::Io)?;
+    sync(&file).map_err(|_| Error::FileSync)?;
+    publish(&mut temporary, &target, rename)?;
+    sync(&temporary.directory).map_err(|_| Error::PublishedSync)?;
+    Ok(())
+}
+fn rename_noreplace(temporary: &Temporary, target: &CString) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     // SAFETY: both names are relative to the same owned directory; NOREPLACE is atomic.
     let renamed = unsafe {
@@ -107,12 +131,56 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), Error> {
             libc::RENAME_EXCL,
         )
     };
-    if renamed != 0 {
-        return Err(Error::Io);
+    if renamed == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
-    temporary.created = false;
-    temporary.directory.sync_all().map_err(|_| Error::Io)?;
-    Ok(())
+}
+fn publish(
+    temporary: &mut Temporary,
+    target: &CString,
+    rename: impl FnOnce(&Temporary, &CString) -> std::io::Result<()>,
+) -> Result<(), Error> {
+    match rename(temporary, target) {
+        Ok(()) => {
+            temporary.created = false;
+            Ok(())
+        }
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::ENOSYS) | Some(libc::EINVAL) | Some(libc::EOPNOTSUPP)
+            ) =>
+        {
+            // SAFETY: both names are relative to the owned protected directory.
+            // linkat atomically refuses an existing target; it never replaces it.
+            if unsafe {
+                libc::linkat(
+                    temporary.directory.as_raw_fd(),
+                    temporary.name.as_ptr(),
+                    temporary.directory.as_raw_fd(),
+                    target.as_ptr(),
+                    0,
+                )
+            } != 0
+            {
+                return Err(Error::Publication);
+            }
+            // Remove the original link before reporting success: protected readers
+            // require exactly one link. A crash here is detected as unsafe state.
+            // SAFETY: this unlinks only the temporary name created by this operation.
+            if unsafe {
+                libc::unlinkat(temporary.directory.as_raw_fd(), temporary.name.as_ptr(), 0)
+            } != 0
+            {
+                return Err(Error::PublishedCleanup);
+            }
+            temporary.created = false;
+            Ok(())
+        }
+        Err(_) => Err(Error::Publication),
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -147,6 +215,130 @@ mod tests {
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(check(&root.join("unsafe")).is_err());
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    #[test]
+    fn unsupported_rename_falls_back_to_private_single_link_publication() {
+        use std::os::unix::fs::{symlink, MetadataExt};
+        let dir = crate::storage::tests::Directory::new();
+        let root = dir.path().parent().unwrap().canonicalize().unwrap();
+        for (index, code) in [libc::ENOSYS, libc::EINVAL, libc::EOPNOTSUPP]
+            .into_iter()
+            .enumerate()
+        {
+            let path = root.join(format!("fallback-{index}.json"));
+            let fallback =
+                |_: &Temporary, _: &CString| Err(std::io::Error::from_raw_os_error(code));
+            assert!(write_using(&path, b"{}\n", fallback).is_ok());
+            assert_eq!(
+                crate::config_snapshot::read(&path).unwrap().bytes(),
+                b"{}\n"
+            );
+            let metadata = std::fs::metadata(&path).unwrap();
+            assert_eq!(metadata.nlink(), 1);
+            assert_eq!(metadata.mode() & 0o7777, 0o600);
+            assert!(matches!(
+                write_using(&path, b"replacement", fallback),
+                Err(Error::Publication)
+            ));
+            let link = root.join(format!("symlink-{index}"));
+            symlink(&path, &link).unwrap();
+            assert!(write_using(&link, b"replacement", fallback).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"{}\n");
+        }
+        assert!(!std::fs::read_dir(root).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".slurm-notify-init-")));
+    }
+    #[test]
+    fn publication_failures_keep_sync_guarantees_and_report_stage() {
+        let dir = crate::storage::tests::Directory::new();
+        let root = dir.path().parent().unwrap().canonicalize().unwrap();
+        let failed = root.join("failed.json");
+        assert!(matches!(
+            write_using(&failed, b"{}", |_, _| Err(
+                std::io::Error::from_raw_os_error(libc::EACCES)
+            )),
+            Err(Error::Publication)
+        ));
+        assert!(!failed.exists());
+        assert!(matches!(
+            write_steps(
+                &failed,
+                b"{}",
+                |_, _| panic!("must not publish without file sync"),
+                |_| Err(std::io::Error::from_raw_os_error(libc::EIO))
+            ),
+            Err(Error::FileSync)
+        ));
+        assert!(!failed.exists());
+        let mut calls = 0;
+        assert!(matches!(
+            write_steps(&failed, b"{}", rename_noreplace, |file| {
+                calls += 1;
+                if calls == 1 {
+                    file.sync_all()
+                } else {
+                    Err(std::io::Error::from_raw_os_error(libc::EIO))
+                }
+            }),
+            Err(Error::PublishedSync)
+        ));
+        assert_eq!(
+            crate::config_snapshot::read(&failed).unwrap().bytes(),
+            b"{}"
+        );
+        assert!(write_new(&failed, b"replacement").is_err());
+        assert_eq!(std::fs::read(&failed).unwrap(), b"{}");
+    }
+    #[test]
+    fn interrupted_link_publication_remains_blocked_until_extra_link_is_removed() {
+        let dir = crate::storage::tests::Directory::new();
+        let root = dir.path().parent().unwrap().canonicalize().unwrap();
+        let temporary = root.join("interrupted-temp");
+        let target = root.join("interrupted.json");
+        std::fs::write(&temporary, b"{}").unwrap();
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::hard_link(&temporary, &target).unwrap();
+        assert_eq!(
+            crate::config_snapshot::read(&target).err(),
+            Some(crate::config_snapshot::Error::UnsafePermissions)
+        );
+        assert!(write_new(&target, b"replacement").is_err());
+        assert_eq!(std::fs::read(&temporary).unwrap(), b"{}");
+        // Model deliberate recovery of the known extra name after the owner stops.
+        std::fs::remove_file(temporary).unwrap();
+        assert_eq!(
+            crate::config_snapshot::read(&target).unwrap().bytes(),
+            b"{}"
+        );
+    }
+    #[test]
+    fn concurrent_fallback_has_one_complete_winner() {
+        let dir = crate::storage::tests::Directory::new();
+        let root = dir.path().parent().unwrap().canonicalize().unwrap();
+        let path = root.join("fallback-race.json");
+        let mut tasks = Vec::new();
+        for bytes in [b"first".as_slice(), b"second"] {
+            let path = path.clone();
+            tasks.push(std::thread::spawn(move || {
+                write_using(&path, bytes, |_, _| {
+                    Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP))
+                })
+                .is_ok()
+            }));
+        }
+        assert_eq!(
+            tasks
+                .into_iter()
+                .map(|task| task.join().unwrap())
+                .filter(|won| *won)
+                .count(),
+            1
+        );
+        let data = crate::config_snapshot::read(&path).unwrap();
+        assert!([b"first".as_slice(), b"second"].contains(&data.bytes()));
     }
     #[test]
     fn concurrent_publish_has_one_complete_winner() {

@@ -150,3 +150,21 @@ Existing targets/symlinks, unsafe parents or invalid resources/input fail with e
 replacement; write failure exits 1 and may require inspecting a complete destination
 after sync failure. No provider request, credential lookup for SMTP, scheduler/state
 activity or monitoring occurs. See [ADR 0070](../../docs/adr/0070-protected-interactive-config-review.md).
+
+### Filesystem publication failures
+
+On unsupported no-replace rename (`ENOSYS`, `EINVAL`, `EOPNOTSUPP`), init uses
+same-directory atomic hard-link publication and removes its temporary name before
+success. Existing targets are never replaced. File/directory sync remains required;
+no new config keys or dependencies are introduced. See [ADR 0072](../../docs/adr/0072-portable-no-overwrite-configuration-publication.md).
+
+Exit 1 diagnostics now distinguish:
+
+- `Configuration file sync failed; no new configuration was published.`
+- `Atomic configuration publication failed; inspect the destination before retrying.`
+- `Configuration was published but temporary-link cleanup failed; inspect links before use.`
+- `Configuration was published but directory sync failed; inspect it before use.`
+
+Other write errors retain the existing generic diagnostic. A crash between link
+and unlink can leave a two-link file that protected readers reject. Inspect it
+while setup is stopped; never relax permissions/link validation to force acceptance.

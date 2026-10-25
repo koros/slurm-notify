@@ -29,6 +29,10 @@ setup and relocated workflow acceptance. The
 
 ## Remaining support and release gates
 
+A GPFS setup failure without a published file is under acceptance: the
+[portable publication fallback](../adr/0072-portable-no-overwrite-configuration-publication.md)
+is locally tested, but must be retried on the HPC. Sync failures remain fatal.
+
 1. Obtain explicit authorization and site policy for real-cluster/provider
    acceptance. Establish Slurm/accounting/job-identity/timezone baselines from
    evidence; preserve privacy and current-user filtering.

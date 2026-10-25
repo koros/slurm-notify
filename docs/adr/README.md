@@ -19,3 +19,6 @@ Local MVP completion: [doctor](0068-installed-read-only-doctor.md),
 [provider tests](0069-explicit-one-shot-provider-tests.md),
 [interactive review](0070-protected-interactive-config-review.md) and
 [relocated workflow acceptance](0071-relocated-local-mvp-workflow.md).
+
+[Portable configuration publication](0072-portable-no-overwrite-configuration-publication.md)
+adds an unsupported-rename fallback without relaxing sync/no-overwrite guarantees.

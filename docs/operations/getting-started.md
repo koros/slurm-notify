@@ -70,11 +70,17 @@ existing files, symlinks and concurrent replacement. It creates no parent
 directories and fills no operational defaults. Historical SMTP permission pairs
 are not copied into the new file. Any other complete answer cancels without writing.
 Setup sends nothing, reads no SMTP credentials and starts no monitoring.
+On filesystems without no-replace rename support, setup uses atomic hard-link
+publication followed by temporary-link removal, preserving no-overwrite behavior.
 
 If a write/sync failure is reported, inspect the destination before retrying: a
 complete file may already have been published. A killed setup can leave an
 unpublished private `.slurm-notify-init-*` temporary file; inspect it while setup is
-stopped before removing it. Never treat it as an automatically approved config.
+stopped before removing it. The hard-link fallback can leave the target and temporary
+name linked to one complete file after a crash. Readers reject multiple links;
+inspect inode/link counts and content before deliberate cleanup while setup is
+stopped. Never relax validation or treat a temporary file as an approved config.
+File and directory sync remain required; GPFS operation still needs HPC acceptance.
 
 ## Validate and diagnose
 

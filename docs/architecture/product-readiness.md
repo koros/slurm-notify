@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 416 private Rust tests plus nineteen installed CLI acceptance tests
+The latest implementation milestone passed 420 private Rust tests plus nineteen installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.16% (26,330/27,099); the gate is 90%.
+Python tests. Rust line coverage was 97.13% (26,464/27,247); the gate is 90%.
 The optimized build, 16 relocated command/helper smoke cases and strict rustdoc
 checks also passed. Hosted checks are verified separately from these local results.
 
@@ -74,3 +74,7 @@ Environment value caps do not bound initial OS allocation. Effective-user NSS an
 filesystem startup remain synchronous. Delivery is at least once and can duplicate
 a provider-accepted request whose local completion was lost. Historical status
 requires the foreground owner to stop; live queue inspection is not implemented.
+
+A reported GPFS setup failure had no published configuration. Unsupported-rename
+fallback and stage-specific write diagnostics now have local fault-injection
+acceptance; retry on the HPC remains required. See [ADR 0072](../adr/0072-portable-no-overwrite-configuration-publication.md).

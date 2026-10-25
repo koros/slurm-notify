@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Fall back to atomic no-overwrite hard-link configuration publication when a
+  filesystem rejects no-replace rename flags. Preserve sync, ownership and
+  single-link requirements; distinguish failed write stages without private details.
+  Unsupported-operation/race/recovery tests are synthetic; GPFS acceptance is pending.
+
 - Reject HTTP-only webhook resources before foreground state creation.
 
 - Bound post-close lock handoff in process recovery acceptance, matching the

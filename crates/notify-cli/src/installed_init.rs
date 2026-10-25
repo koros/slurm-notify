@@ -9,7 +9,7 @@ pub(super) enum Error {
     Terminal,
     Input,
     Destination,
-    Write,
+    Write(crate::config_create::Error),
 }
 struct Review {
     bytes: Zeroizing<Vec<u8>>,
@@ -102,7 +102,7 @@ pub(super) fn run(path: &Path) -> Result<(), Error> {
         println!("Configuration creation cancelled; no file was written.");
         return Ok(());
     }
-    crate::config_create::write_new(path, &review.bytes).map_err(|_| Error::Write)?;
+    crate::config_create::write_new(path, &review.bytes).map_err(Error::Write)?;
     print!(
         "{}",
         include_str!("../../../contracts/cli/init-success.stdout")
