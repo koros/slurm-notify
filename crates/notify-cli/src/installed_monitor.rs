@@ -22,6 +22,56 @@ pub(super) fn programs() -> Option<(PathBuf, PathBuf)> {
     };
     Some((find("squeue")?, find("sacct")?))
 }
+// Only fixed stage/category tokens; never format a raw error or report.
+fn stage_reason(error: crate::polling_cycle::StageError) -> &'static str {
+    use crate::polling_cycle::StageError;
+    match error {
+        StageError::Capacity => "capacity",
+        StageError::Cancelled => "cancelled",
+        StageError::Poll => "scheduler",
+        StageError::Storage => "storage",
+        StageError::Time => "time",
+        StageError::Policy => "policy",
+        StageError::DispatchBlocked => "dispatch_blocked",
+    }
+}
+fn fatal_stage(report: &crate::polling_cycle::TickReport) -> Option<(&'static str, &'static str)> {
+    use crate::polling_cycle::StageError;
+    let stages = [
+        ("preflight", stage_error(report.preflight.as_ref()), true),
+        ("poll", stage_error(report.poll.as_ref()), false),
+        ("delivery", stage_error(report.delivery.as_ref()), false),
+        ("cleanup", stage_error(report.cleanup.as_ref()), true),
+        ("health", stage_error(report.health.as_ref()), true),
+    ];
+    stages.into_iter().find_map(|(stage, error, always)| {
+        let error = error?;
+        (always
+            || matches!(
+                error,
+                StageError::Storage | StageError::Time | StageError::Policy
+            ))
+        .then_some((stage, stage_reason(error)))
+    })
+}
+fn stage_error<T>(
+    result: Option<&Result<T, crate::polling_cycle::StageError>>,
+) -> Option<crate::polling_cycle::StageError> {
+    result.and_then(|result| result.as_ref().err().copied())
+}
+fn schedule_reason(error: &crate::foreground_schedule::Error) -> &'static str {
+    use crate::foreground_schedule::Error;
+    match error {
+        Error::Policy => "policy",
+        Error::Clock => "clock",
+        Error::ClockRegressed => "clock_regressed",
+        Error::DeadlineOverflow => "deadline_overflow",
+        Error::Wait => "wait",
+        Error::NoProgress => "no_progress",
+        Error::WakeLimit => "wake_limit",
+        Error::Tick => "cycle",
+    }
+}
 pub(super) fn run(path: &Path) -> u8 {
     use crate::{
         foreground_report::{Report, StartupReport},
@@ -90,7 +140,6 @@ pub(super) fn run(path: &Path) -> u8 {
         };
     eprintln!("Foreground monitoring started.");
     let result = session.run_continuous_interruptible(POLL_BATCH, &signal, |session| {
-        use crate::polling_cycle::StageError;
         let report = session.tick_public_with(
             (&active, &accounting),
             crate::polling_cycle::Hooks {
@@ -107,26 +156,14 @@ pub(super) fn run(path: &Path) -> u8 {
                 clock: crate::delivery::unix_time,
                 cancelled: || signal.cancelled().unwrap_or(true),
             },
-        )?;
+        ).inspect_err(|_| {
+            eprintln!("Foreground failure: stage=cycle reason=preparation.");
+        })?;
         if report.cancelled {
             return Ok(report);
         }
-        let fatal = report.preflight.as_ref().is_some_and(Result::is_err)
-            || matches!(
-                report.poll,
-                Some(Err(StageError::Storage
-                    | StageError::Time
-                    | StageError::Policy))
-            )
-            || matches!(
-                report.delivery,
-                Some(Err(StageError::Storage
-                    | StageError::Time
-                    | StageError::Policy))
-            )
-            || report.cleanup.as_ref().is_some_and(Result::is_err)
-            || report.health.as_ref().is_some_and(Result::is_err);
-        if fatal {
+        if let Some((stage, reason)) = fatal_stage(&report) {
+            eprintln!("Foreground failure: stage={stage} reason={reason}.");
             return Err(Error::Cycle);
         }
         if report.poll.as_ref().is_some_and(Result::is_err) {
@@ -135,12 +172,77 @@ pub(super) fn run(path: &Path) -> u8 {
         if report.delivery.as_ref().is_some_and(Result::is_err) {
             eprintln!("Foreground delivery blocked; work remains pending.");
         }
-        if !signal.cancelled().unwrap_or(true) { session.prune_revisions()?; }
+        if !signal.cancelled().unwrap_or(true) {
+            session.prune_revisions().inspect_err(|_| {
+                eprintln!("Foreground failure: stage=revision_cleanup reason=storage.");
+            })?;
+        }
         if let Some(Ok(health))=&report.health {
             println!("Foreground health: stale={} pending_sampled={} failed_sampled={} sample_truncated={}",
                 health.poll.stale,health.storage.pending,health.storage.failed,health.storage.destinations_truncated);
         }
         Ok(report)
     });
+    if let Err(error) = &result {
+        eprintln!(
+            "Foreground scheduling failure: reason={}.",
+            schedule_reason(error)
+        );
+    }
     finish(Summary::Shutdown(Report::classify_continuous(&result)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::polling_cycle::{StageError, TickReport};
+    #[test]
+    fn diagnostics_preserve_retry_and_first_fatal_stage_precedence() {
+        let mut report = TickReport::default();
+        assert_eq!(fatal_stage(&report), None);
+        report.poll = Some(Err(StageError::Poll));
+        report.delivery = Some(Err(StageError::DispatchBlocked));
+        assert_eq!(fatal_stage(&report), None);
+        report.health = Some(Err(StageError::Storage));
+        assert_eq!(fatal_stage(&report), Some(("health", "storage")));
+        report.cleanup = Some(Err(StageError::Time));
+        assert_eq!(fatal_stage(&report), Some(("cleanup", "time")));
+        report.delivery = Some(Err(StageError::Policy));
+        assert_eq!(fatal_stage(&report), Some(("delivery", "policy")));
+        report.poll = Some(Err(StageError::Storage));
+        assert_eq!(fatal_stage(&report), Some(("poll", "storage")));
+        report.preflight = Some(Err(StageError::Capacity));
+        assert_eq!(fatal_stage(&report), Some(("preflight", "capacity")));
+        assert_eq!(stage_error(Some(&Ok::<_, StageError>(()))), None);
+        for error in [
+            StageError::Capacity,
+            StageError::Cancelled,
+            StageError::Poll,
+            StageError::Storage,
+            StageError::Time,
+            StageError::Policy,
+            StageError::DispatchBlocked,
+        ] {
+            let token = stage_reason(error);
+            assert!(
+                token.len() <= 16 && token.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+            );
+        }
+        use crate::foreground_schedule::Error;
+        for error in [
+            Error::Policy,
+            Error::Clock,
+            Error::ClockRegressed,
+            Error::DeadlineOverflow,
+            Error::Wait,
+            Error::NoProgress,
+            Error::WakeLimit,
+            Error::Tick,
+        ] {
+            let token = schedule_reason(&error);
+            assert!(
+                token.len() <= 20 && token.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+            );
+        }
+    }
 }

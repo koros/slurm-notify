@@ -7,6 +7,11 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Report bounded static foreground failure stages and categories before the final
+  runtime error, without raw job, provider or filesystem diagnostics. Preserve
+  fatal/retry classification, state recovery and exit codes. Document a per-command
+  short PATH for Slurm discovery on Spack environments exceeding the current cap.
+
 - Fall back to atomic no-overwrite hard-link configuration publication when a
   filesystem rejects no-replace rename flags. Preserve sync, ownership and
   single-link requirements; distinguish failed write stages without private details.

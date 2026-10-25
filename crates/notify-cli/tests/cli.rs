@@ -1353,7 +1353,7 @@ fn installed_foreground_keeps_blocked_smtp_frozen_across_signals_and_restart() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
-        b"Foreground monitoring started.\nForeground monitoring stopped after a runtime or state failure.\n"
+        b"Foreground monitoring started.\nForeground failure: stage=preflight reason=time.\nForeground scheduling failure: reason=cycle.\nForeground monitoring stopped after a runtime or state failure.\n"
     );
     // An unmatched event still advances the checkpoint and emits labelled sampled health.
     source["storage"]["path"] = serde_json::json!(root.join("healthy-state/state.sqlite3"));

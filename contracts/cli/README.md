@@ -181,3 +181,20 @@ its frame grammar is unchanged. The helper additionally accepts exactly four Sla
 fields with disabled formatting/unfurls and a bounded text field ending in the
 matching public event ID; other bodies still require the generic event_id binding.
 See ADR 0073 for persistence/retry compatibility.
+
+## Foreground failure diagnostics (2026-10-25)
+
+Fatal cycle failures additionally emit `Foreground failure: stage=<stage>
+reason=<reason>.` on one line before the existing final message. Stage tokens are
+`preflight`, `poll`, `delivery`, `cleanup`, `health`; reason tokens are `capacity`,
+`cancelled`, `scheduler`, `storage`, `time`, `policy`, `dispatch_blocked`.
+These are internal runtime checks: `policy` does not mean a site administrator
+refused permission. First fatal stage wins; ordinary poll/dispatch failures remain
+retryable and retain their existing messages. Preparation errors use
+`stage=cycle reason=preparation`; revision cleanup uses
+`stage=revision_cleanup reason=storage`.
+
+Scheduling errors add `Foreground scheduling failure: reason=<reason>.` with
+`policy`, `clock`, `clock_regressed`, `deadline_overflow`, `wait`, `no_progress`,
+`wake_limit` or `cycle`. Exit codes, cancellation and recovery behavior are unchanged.
+No error objects, private reports, URLs, scheduler output or config values are formatted.

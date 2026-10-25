@@ -2,7 +2,8 @@
 
 Slack incoming webhooks use HTTPS, so they may work where outbound SMTP is blocked.
 The operator has confirmed a separate Python test posted a message from uop-hpc.
-Installed Rust delivery still needs the explicit test below. This does not establish
+The operator subsequently confirmed the installed Rust synthetic Slack test too.
+Real scheduler monitoring remains under acceptance. This does not establish
 a supported platform or authorize real scheduler polling.
 
 Create a Slack app in your workspace, enable Incoming Webhooks, and add a webhook
@@ -83,3 +84,28 @@ Retry-After); other non-2xx responses reject the attempt. A lost acknowledgement
 produce a duplicate. The HTTP response body is not inspected; success means an HTTP
 acknowledgement, not verified channel viewing. Format/URL/trust changes block pending
 work; do not edit a provider type over a pending outbox to bypass that guard.
+
+## Troubleshooting first monitoring startup
+
+Doctor probes `squeue --version` and `sacct --version`; it cannot establish access to
+job/accounting queries. A successful synthetic Slack test establishes provider
+delivery, not scheduler compatibility or permission.
+
+Command discovery currently accepts at most 4096 PATH bytes and 64 absolute entries.
+An oversized Spack PATH produces the same unavailable-executables message as missing
+commands. If `command -v squeue` and `command -v sacct` both resolve under `/usr/bin`,
+use a per-command override rather than changing your shell or unloading modules:
+
+```bash
+PATH=/usr/bin:/bin ./target/release/slurm-notify doctor --config "$SN_SLACK_DIR/config.json"
+# Only after site polling/execution policy is established:
+PATH=/usr/bin:/bin ./target/release/slurm-notify start --foreground --config "$SN_SLACK_DIR/config.json"
+```
+
+If startup succeeds but the cycle stops, retain state and run
+`./target/release/slurm-notify status --config "$SN_SLACK_DIR/config.json"` while the
+monitor is stopped. An empty checkpoint means no completed poll was recorded; it
+does not prove permission denial. Updated builds print safe `stage`/`reason` tokens
+before the final runtime message. Share those tokens, exit code and historical
+status rather than credentials, raw scheduler output or database contents. The
+`policy` category describes an application validation check, not site authorization.
