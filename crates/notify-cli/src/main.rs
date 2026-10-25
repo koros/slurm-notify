@@ -86,6 +86,7 @@ mod smtp_poll;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod storage;
 
+mod slack_message;
 mod webhook;
 
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]

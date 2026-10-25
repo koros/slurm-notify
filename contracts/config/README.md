@@ -58,3 +58,16 @@ Hostname verification is always enabled. Custom trust fingerprints participate i
 endpoint revisions; changing trust blocks old pending frames instead of retargeting
 them. No old default-root revision changes. The structural schemas deliberately
 add this optional field without changing version 1 or existing examples.
+
+### Slack incoming webhooks (2026-10-25)
+
+Provider `type: "slack"` uses the same required/optional settings as `webhook`,
+with deterministic plain text rendering instead of the generic event JSON.
+`slack-v1.example.json` is a complete example without credentials. The URL is loaded
+from an environment reference; no Slack bot token/channel override is required.
+Both canonical/rendered payloads must fit `payload_limit_bytes`; text is capped
+at 4000 bytes. Setup previews its disclosed fields; explicit tests preview the
+actual Slack JSON. A versioned destination revision prevents reinterpreting pending
+webhook work as Slack or vice versa. Existing generic/SMTP baselines are unchanged.
+See [ADR 0073](../../docs/adr/0073-slack-incoming-webhook-rendering.md) and
+[setup](../../docs/operations/slack.md).

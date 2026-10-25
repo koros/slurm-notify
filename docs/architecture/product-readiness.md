@@ -1,6 +1,6 @@
 # Product readiness assessment
 
-Assessment after controlled relocated local MVP workflow acceptance.
+Assessment after controlled installed Slack adapter and relocated mixed workflow acceptance.
 The private OS/runtime lifecycle and continuous owned sessions are also tested.
 Historical increments remain in the implementation history; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
@@ -28,15 +28,15 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 420 private Rust tests plus nineteen installed CLI acceptance tests
+The latest implementation milestone passed 425 private Rust tests plus twenty installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
-custom process acceptance, eight SQLite tests, six hook tests and 11 draft-config
-Python tests. Rust line coverage was 97.13% (26,464/27,247); the gate is 90%.
-The optimized build, 16 relocated command/helper smoke cases and strict rustdoc
-checks also passed. Hosted checks are verified separately from these local results.
+custom process acceptance, eight SQLite tests, six hook tests and 12 draft-config
+Python tests. Rust line coverage was 97.16% (26,693/27,474); the gate is 90%.
+The optimized build and help baseline smoke check also passed. Hosted checks are verified separately from these local results.
 
 | Capability | Current evidence | Remaining gap |
 | --- | --- | --- |
+| Slack incoming webhook | Explicit provider, allowlisted plain text rendering, synthetic test and identical HTTPS retries after restart; relocated mixed setup/doctor workflow | Installed HPC Slack test and real scheduler/provider acceptance |
 | Protected resources | Installed validation and webhook/SMTP monitoring reuse protected configuration/trust snapshots and exact SMTP permissions | Bounded synchronous account lookup |
 | State ownership | Installed status and foreground runs enforce exclusive ownership; signal shutdown releases state | Live status access and installation acceptance |
 | Routing and recovery | Public event transactions, mixed admission, blocked-work preservation and restart recovery are tested | Authorized real-provider acceptance |
@@ -67,7 +67,8 @@ not real-cluster/provider permission or a supported release.
 The [security policy](../../SECURITY.md) provides reporting guidance without promising
 an SLA. The [support checklist](../operations/support-and-acceptance.md) details
 remaining external acceptance. Generic HTTPS and required STARTTLS SMTP are the
-local MVP scope. Slack/Teams-specific adapters, log monitoring, remote SSH and
+original local MVP scope. Explicit Slack incoming webhook rendering extends it;
+installed HPC acceptance is pending. Teams-specific adapters, log monitoring, remote SSH and
 background services are later work.
 
 Environment value caps do not bound initial OS allocation. Effective-user NSS and
@@ -75,6 +76,6 @@ filesystem startup remain synchronous. Delivery is at least once and can duplica
 a provider-accepted request whose local completion was lost. Historical status
 requires the foreground owner to stop; live queue inspection is not implemented.
 
-A reported GPFS setup failure had no published configuration. Unsupported-rename
-fallback and stage-specific write diagnostics now have local fault-injection
-acceptance; retry on the HPC remains required. See [ADR 0072](../adr/0072-portable-no-overwrite-configuration-publication.md).
+The operator confirmed GPFS configuration creation/validation after the publication
+fallback. Gmail SMTP connectivity timed out before authentication; a separate
+Python Slack test posted successfully. Installed Slack acceptance remains pending. See [ADR 0072](../adr/0072-portable-no-overwrite-configuration-publication.md).

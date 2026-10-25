@@ -30,8 +30,12 @@ pub(super) fn run(path: &Path, alias: &str) -> Result<(), Error> {
         })?;
     use crate::mixed_config_composition::{SyntheticRequest as Request, SMTP_TEST_BODY};
     let report = match request {
-        Request::Webhook { request, preview } => {
-            println!("Synthetic test: provider={alias} type=webhook payload={preview}");
+        Request::Webhook {
+            request,
+            preview,
+            kind,
+        } => {
+            println!("Synthetic test: provider={alias} type={kind} payload={preview}");
             std::io::stdout().flush().map_err(|_| Error::Transport)?;
             request.supervise(&mut helpers.command(Kind::Webhook))
         }

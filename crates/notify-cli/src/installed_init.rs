@@ -36,13 +36,17 @@ fn review(bytes: &[u8]) -> Result<Review, Error> {
     let mut summary=format!("Configuration review: schema_version=1 cluster={cluster} initial_observation={policy} destinations={} routes={}\n",providers.len(),source["routes"].as_array().ok_or(Error::Input)?.len());
     summary.push_str("Initial observation suppress avoids catch-up alerts; emit can notify selected existing history.\n");
     for (alias, provider) in providers {
-        if provider["type"] == "webhook" {
+        if provider["type"] != "smtp" {
             let origin = &origins
                 .iter()
                 .find(|(name, _)| *name == alias)
                 .ok_or(Error::Input)?
                 .1;
-            summary.push_str(&format!("Webhook: alias={alias} origin={origin} fields=schema_version,event_id,source,cluster_id,event_type,severity,observed_at,occurred_at,job.id,job.array_task_id,job.submitted_at,job.started_at,job.state\n"));
+            if provider["type"] == "slack" {
+                summary.push_str(&format!("Slack: alias={alias} origin={origin} fields=cluster_id,job_identifier,state,observed_at,event_id rendering=plain_text_v1\n"));
+            } else {
+                summary.push_str(&format!("Webhook: alias={alias} origin={origin} fields=schema_version,event_id,source,cluster_id,event_type,severity,observed_at,occurred_at,job.id,job.array_task_id,job.submitted_at,job.started_at,job.state\n"));
+            }
         } else {
             summary.push_str(&format!("SMTP: alias={alias} relay={}:{} tls=required_starttls verification_name={} fields=state,job_identifier visibility={} envelope=configured_sender_and_recipient\n",provider["relay"].as_str().ok_or(Error::Input)?,provider["port"].as_u64().ok_or(Error::Input)?,provider["server_name"].as_str().ok_or(Error::Input)?,provider["visibility"].as_str().ok_or(Error::Input)?));
         }

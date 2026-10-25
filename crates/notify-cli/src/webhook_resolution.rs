@@ -21,6 +21,7 @@ pub(super) struct Resources {
     revision: String,
     public_https: bool,
     trust: Option<crate::trust_snapshot::Trust>,
+    slack: bool,
 }
 // Owned secret-stdin request; constructed only from a checked frozen delivery.
 // No Debug/Clone and no endpoint/header/payload command arguments.
@@ -43,6 +44,30 @@ impl PublicRequest {
     }
 }
 impl Resources {
+    pub(super) fn with_slack(mut self) -> Self {
+        self.revision = crate::config_reference::reference(b"slack-render-v1\0", &[&self.revision]);
+        self.slack = true;
+        self
+    }
+    pub(super) fn kind(&self) -> &'static str {
+        if self.slack {
+            "slack"
+        } else {
+            "webhook"
+        }
+    }
+    pub(super) fn wire_payload(&self, payload: &[u8]) -> Result<Vec<u8>, Error> {
+        let bytes = if self.slack {
+            crate::slack_message::render(payload).map_err(|_| Error::Request)?
+        } else {
+            payload.to_vec()
+        };
+        if bytes.len() > self.payload_limit {
+            return Err(Error::Request);
+        }
+        Ok(bytes)
+    }
+
     pub(super) fn with_trust(mut self, paths: &[std::path::PathBuf]) -> Result<Self, Error> {
         let trust = crate::trust_snapshot::load(paths).map_err(|_| Error::Policy)?;
         self.revision = crate::config_reference::reference(
@@ -53,7 +78,9 @@ impl Resources {
         Ok(self)
     }
     pub(super) fn accepts_public_payload(&self, payload: &[u8]) -> bool {
-        self.public_https && payload.len() <= self.payload_limit
+        self.public_https
+            && payload.len() <= self.payload_limit
+            && self.wire_payload(payload).is_ok()
     }
     pub(super) fn public_revision(&self) -> Option<&str> {
         self.public_https.then_some(self.revision.as_str())
@@ -120,6 +147,7 @@ impl Resources {
         {
             return Err(Error::Request);
         }
+        let payload = self.wire_payload(payload)?;
         let millis = self.timeout.as_millis().to_string();
         let mut fields: Vec<&[u8]> = vec![
             &self.endpoint,
@@ -128,7 +156,7 @@ impl Resources {
                 .map(|bytes| bytes.as_slice())
                 .unwrap_or_default(),
             event_id.as_bytes(),
-            payload,
+            &payload,
             millis.as_bytes(),
         ];
         let roots = self
@@ -201,11 +229,56 @@ pub(super) fn resolve(
         revision,
         public_https,
         trust: None,
+        slack: false,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slack_revision_binds_renderer_and_checks_transformed_size() {
+        let resolve = || {
+            super::resolve(
+                "URL",
+                None,
+                std::time::Duration::from_secs(1),
+                1024,
+                |_, _| {
+                    Ok(zeroize::Zeroizing::new(
+                        b"https://fixture.invalid/hook".to_vec(),
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        let generic = resolve();
+        let slack = resolve().with_slack();
+        assert_ne!(generic.public_revision(), slack.public_revision());
+        assert_eq!(
+            slack.public_revision(),
+            resolve().with_slack().public_revision()
+        );
+        assert_eq!(slack.kind(), "slack");
+        assert_eq!(generic.kind(), "webhook");
+        let payload = crate::public_event::payload(
+            &crate::public_event::identifier([0; 16]),
+            "cluster",
+            "1",
+            "COMPLETED",
+            0,
+        )
+        .unwrap();
+        assert!(slack.accepts_public_payload(&payload));
+        assert_ne!(slack.wire_payload(&payload).unwrap(), payload);
+        assert_eq!(generic.wire_payload(&payload).unwrap(), payload);
+        assert!(!slack.accepts_public_payload(b"{}"));
+        let mut small = slack;
+        small.payload_limit = 1;
+        assert!(small.wire_payload(&payload).is_err());
+        assert!(small
+            .synthetic_request(&crate::public_event::identifier([0; 16]), &payload)
+            .is_err());
+    }
     #[allow(unused_imports)] // Custom process harness omits the unit test bodies.
     use super::*;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -289,6 +362,28 @@ mod tests {
         store.due_deliveries("cluster", 10, 10).unwrap().remove(0)
     }
     #[test]
+    fn pending_slack_cannot_be_reinterpreted_as_generic_webhook() {
+        let d = crate::storage::tests::Directory::new();
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let slack = public_resources("https://fixture.invalid/secret", 16384).with_slack();
+        let item = public_seed(&mut store, &slack, "1");
+        assert!(public_resources("https://fixture.invalid/secret", 16384)
+            .prepare_public(&store, &item)
+            .is_err());
+        let request = slack.prepare_public(&store, &item).unwrap();
+        transport::serve(
+            request.frame.as_slice(),
+            std::io::sink(),
+            request.frame.len(),
+            |fields| {
+                let message: serde_json::Value = serde_json::from_slice(&fields[3]).unwrap();
+                assert!(message["text"].as_str().unwrap().contains("Job: 1"));
+                Ok(crate::delivery::ProviderOutcome::Delivered)
+            },
+        )
+        .unwrap();
+    }
+    #[test]
     fn public_request_uses_frozen_uuid_and_bytes_and_blocks_changed_resources() {
         let d = crate::storage::tests::Directory::new();
         let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
@@ -317,6 +412,8 @@ mod tests {
             },
         )
         .unwrap();
+        let slack = public_resources("https://fixture.invalid/secret", 16384).with_slack();
+        assert!(slack.prepare_public(&store, &item).is_err());
         let changed = public_resources("https://fixture.invalid/changed", 16384);
         assert!(changed.prepare_public(&store, &item).is_err());
         let blocked = crate::delivery::deliver_due_checked(

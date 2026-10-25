@@ -160,7 +160,7 @@ def validate(data, manifest):
         if not isinstance(provider, dict):
             fail('Fields')
         kind = provider.get('type')
-        if kind == 'webhook':
+        if kind in ['webhook', 'slack']:
             object_fields(provider, ['type', 'url_env', 'request_timeout_seconds',
                                      'payload_limit_bytes'], ['authorization_env', 'trust_der_files'])
             if 'trust_der_files' in provider:
@@ -195,7 +195,7 @@ def validate(data, manifest):
             env(auth['password_env'])
         else:
             fail('Policy')
-        for key, bounds in manifest[kind + '_integer_ranges'].items():
+        for key, bounds in manifest[('webhook' if kind == 'slack' else kind) + '_integer_ranges'].items():
             bounded_integer(provider[key], bounds)
     events = {'JOB_STARTED', 'JOB_COMPLETED', 'JOB_FAILED', 'JOB_TIMEOUT', 'JOB_CANCELLED',
               'JOB_OUT_OF_MEMORY', 'JOB_NODE_FAILURE', 'JOB_BOOT_FAILURE', 'JOB_DEADLINE'}

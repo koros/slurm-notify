@@ -77,3 +77,24 @@ acceptance remains a support gate.
 
 Explicit `test` uses [test-v1.schema.json](test-v1.schema.json), a separate labelled
 synthetic payload with no cluster/job data. It is not a durable monitoring event.
+
+## Slack rendering v1
+
+`slack-v1.schema.json` defines the separate Slack incoming webhook body. It does
+not change the generic lifecycle/test schemas. Lifecycle text is exactly:
+
+```text
+Slurm Notify: <state>
+Cluster: <cluster_id>
+Job: <allocation_id>[_<array_task_id>]
+Observed: <observed_at>
+Event: <event_id>
+```
+
+Synthetic text is exactly `Slurm Notify test`, then
+`Synthetic Slurm Notify test; no scheduler data.`, then `Event: <event_id>`,
+separated by newlines. No trailing newline. Formatting/unfurl properties are false.
+Only existing allowlisted fields are used. Text is capped at 4000 bytes; canonical
+and rendered bytes must each fit the destination payload cap. Rendering is stable
+for a frozen frame and bound to a versioned destination revision; changing that
+revision blocks pending work. Slack may duplicate messages after lost acknowledgements.

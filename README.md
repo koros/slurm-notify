@@ -17,6 +17,8 @@ It includes interactive `init`, `config validate`, `doctor`, explicit provider
 acceptance covers webhook, SMTP and mixed delivery, verified TLS, signals and
 durable restart from a relocated executable.
 
+For Slack incoming webhooks, use the [HPC Slack setup guide](docs/operations/slack.md).
+
 Start with the [getting-started guide](docs/operations/getting-started.md).
 The [CLI contract](contracts/cli/README.md) and
 [configuration contract](contracts/config/README.md) define exact behavior.
@@ -70,9 +72,9 @@ CI artifacts contain the development prototype CLI.
 Authorized real-cluster/provider acceptance, platform/Slurm support baselines,
 operator installation/upgrade review and explicit release approval remain. See
 [product readiness](docs/architecture/product-readiness.md) and the
-[current plan](docs/architecture/implementation-plan.md). Generic webhook and SMTP
-are the local MVP scope; Slack/Teams-specific integrations, log analysis and remote
-SSH are later work.
+[current plan](docs/architecture/implementation-plan.md). Generic webhook and SMTP form the original local MVP scope; an explicit Slack
+incoming webhook adapter is now implemented with controlled acceptance. Teams,
+log analysis and remote SSH remain later work.
 
 The [contract adoption package](docs/proposals/local-contract-review-v1.md) records
 reviewed interfaces. Examples are synthetic and require protected resources and

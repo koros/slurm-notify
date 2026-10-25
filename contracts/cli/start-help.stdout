@@ -1,5 +1,5 @@
 Usage: slurm-notify start --foreground --config <absolute-path>
 
 Run local foreground monitoring until SIGINT or SIGTERM.
-Accepts HTTPS webhook, SMTP and mixed routes.
+Accepts HTTPS webhook, Slack, SMTP and mixed routes.
 Validate site polling/execution policy before starting on a real cluster.

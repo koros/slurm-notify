@@ -24,6 +24,8 @@ mod public_event;
 mod rendering_fingerprint;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
+#[path = "../../crates/notify-cli/src/slack_message.rs"]
+mod slack_message;
 #[path = "../../crates/notify-cli/src/smtp_address.rs"]
 mod smtp_address;
 #[path = "../../crates/notify-cli/src/smtp_bound_transport.rs"]

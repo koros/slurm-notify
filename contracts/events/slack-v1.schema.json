@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slurm Notify Slack incoming webhook rendering v1",
+  "$comment": "Deterministic rendering of a frozen lifecycle frame or explicit synthetic test. Rust also enforces byte limits and the matching final public event ID. This is separate from the generic webhook lifecycle schema.",
+  "type": "object",
+  "required": ["text", "mrkdwn", "unfurl_links", "unfurl_media"],
+  "additionalProperties": false,
+  "properties": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "mrkdwn": {"const": false},
+    "unfurl_links": {"const": false},
+    "unfurl_media": {"const": false}
+  }
+}

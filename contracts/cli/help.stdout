@@ -20,5 +20,5 @@ Commands:
   test             Send one synthetic alert to a selected provider
   start            Run local foreground monitoring
 
-Foreground monitoring accepts HTTPS webhook, SMTP and mixed routes.
+Foreground monitoring accepts HTTPS webhook, Slack, SMTP and mixed routes.
 Validate site polling/execution policy before monitoring a real cluster.

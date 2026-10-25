@@ -22,3 +22,5 @@ Local MVP completion: [doctor](0068-installed-read-only-doctor.md),
 
 [Portable configuration publication](0072-portable-no-overwrite-configuration-publication.md)
 adds an unsupported-rename fallback without relaxing sync/no-overwrite guarantees.
+
+[Slack incoming webhook rendering](0073-slack-incoming-webhook-rendering.md) adds an explicit version-bound provider without changing generic payloads.

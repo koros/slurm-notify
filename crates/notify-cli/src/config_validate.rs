@@ -204,7 +204,7 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
         aliases.push(name.as_str());
         let kind = text(get(object(value)?, "type")?)?;
         match kind {
-            "webhook" => {
+            "webhook" | "slack" => {
                 let p = fields(
                     value,
                     &[
@@ -438,6 +438,14 @@ mod tests {
         assert!(check(&empty).is_ok());
     }
     #[test]
+    fn accepts_explicit_slack_example_without_changing_generic_shape() {
+        let bytes = include_bytes!("../../../contracts/config/slack-v1.example.json");
+        assert!(validate(bytes).is_ok());
+        let mut source: Json = serde_json::from_slice(bytes).unwrap();
+        source["providers"]["slack"]["unapproved_private_field"] = json!("fixture");
+        rejected(&source, Error::Fields);
+    }
+    #[test]
     fn rejects_missing_unknown_and_wrong_types_at_each_object_boundary() {
         for path in [
             "",
@@ -477,7 +485,7 @@ mod tests {
             ("/monitor/mode", json!("remote")),
             ("/monitor/user_jobs_only", json!(false)),
             ("/monitor/initial_observation", json!("default")),
-            ("/providers/primary/type", json!("slack")),
+            ("/providers/primary/type", json!("unknown_provider")),
             ("/providers/research_email/tls_mode", json!("implicit_tls")),
             ("/providers/research_email/visibility", json!("all")),
         ] {

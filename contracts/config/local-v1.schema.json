@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Slurm Notify local configuration v1",
-  "description": "Structural schema for webhook/required-STARTTLS SMTP configs. Rust additionally enforces strict lexemes/duplicates, byte/depth budgets, relationships, references, protected resources and exact permissions.",
+  "description": "Structural schema for webhook/Slack/required-STARTTLS SMTP configs. Rust additionally enforces strict lexemes/duplicates, byte/depth budgets, relationships, references, protected resources and exact permissions.",
   "type": "object",
   "required": [
     "schema_version",
@@ -131,7 +131,7 @@
             ],
             "properties": {
               "type": {
-                "const": "webhook"
+                "enum": ["webhook", "slack"]
               },
               "url_env": {
                 "type": "string",
@@ -466,7 +466,7 @@
                 ],
                 "properties": {
                   "type": {
-                    "const": "webhook"
+                    "enum": ["webhook", "slack"]
                   },
                   "url_env": {
                     "type": "string",

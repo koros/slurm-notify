@@ -170,7 +170,7 @@ pub(super) fn prepare_draft(
     let providers = object(get(root, "providers").map_err(shape)?).map_err(shape)?;
     for (_, provider) in providers {
         if text(get(object(provider).map_err(shape)?, "type").map_err(shape)?).map_err(shape)?
-            != "webhook"
+            == "smtp"
             && !allow_smtp
         {
             return Err(Error::UnsupportedProvider);
@@ -238,6 +238,9 @@ pub(super) fn prepare_draft(
             &mut lookup,
         )
         .map_err(Error::Resource)?;
+        if text(get(p, "type").map_err(shape)?).map_err(shape)? == "slack" {
+            resources = resources.with_slack();
+        }
         if let Ok(roots) = get(p, "trust_der_files") {
             let paths = list(roots, 1, 32)
                 .map_err(shape)?

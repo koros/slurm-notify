@@ -168,3 +168,16 @@ Exit 1 diagnostics now distinguish:
 Other write errors retain the existing generic diagnostic. A crash between link
 and unlink can leave a two-link file that protected readers reject. Inspect it
 while setup is stopped; never relax permissions/link validation to force acceptance.
+
+## Slack provider addition (2026-10-25)
+
+The existing commands accept explicit Slack providers using the same config grammar.
+Help/start help deliberately name Slack. Init labels Slack with a safe origin and
+`fields=cluster_id,job_identifier,state,observed_at,event_id rendering=plain_text_v1`.
+`test <alias>` previews `type=slack payload=<JSON>` for Slack, including its synthetic
+text; no scheduler/state or automatic retry. Existing exit codes and success text
+are unchanged. The private HTTPS helper receives already rendered bounded JSON;
+its frame grammar is unchanged. The helper additionally accepts exactly four Slack
+fields with disabled formatting/unfurls and a bounded text field ending in the
+matching public event ID; other bodies still require the generic event_id binding.
+See ADR 0073 for persistence/retry compatibility.

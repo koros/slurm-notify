@@ -1788,6 +1788,15 @@ mod https_relay;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
+    https_restart_acceptance(false);
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn installed_slack_delivery_retries_identical_rendering_after_restart() {
+    https_restart_acceptance(true);
+}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn https_restart_acceptance(slack: bool) {
     use std::{
         io::{BufRead, BufReader, Write},
         os::unix::fs::{OpenOptionsExt, PermissionsExt},
@@ -1802,7 +1811,8 @@ fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
             let _ = self.0.wait();
         }
     }
-    let root = std::env::temp_dir().join(format!("slurm-notify-https-{}", std::process::id()));
+    let root =
+        std::env::temp_dir().join(format!("slurm-notify-https-{slack}-{}", std::process::id()));
     std::fs::create_dir(&root).unwrap();
     let root = root.canonicalize().unwrap();
     std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1826,6 +1836,9 @@ fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
     let state = root.join("state/state.sqlite3");
     let config = root.join("config.json");
     source["storage"]["path"] = serde_json::json!(state);
+    if slack {
+        source["providers"]["primary"]["type"] = serde_json::json!("slack");
+    }
     source["providers"]["primary"]["trust_der_files"] = serde_json::json!([trust]);
     source["monitor"]["initial_observation"] = serde_json::json!("emit");
     source["delivery"]["initial_backoff_seconds"] = serde_json::json!(1);
@@ -1914,8 +1927,15 @@ fn installed_https_delivery_retries_frozen_public_frame_after_restart() {
     let received = server.join().unwrap();
     let (id, body) = frozen.unwrap();
     assert_eq!(received.len(), 2);
+    assert_eq!(received[0].1, received[1].1);
     for (headers, payload) in received {
-        assert_eq!(payload, body);
+        if slack {
+            let rendered: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+            assert_eq!(rendered["mrkdwn"], false);
+            assert_eq!(rendered["text"], format!("Slurm Notify: COMPLETED\nCluster: research-cluster\nJob: 1\nObserved: {}\nEvent: {id}",serde_json::from_slice::<serde_json::Value>(&body).unwrap()["observed_at"].as_str().unwrap()));
+        } else {
+            assert_eq!(payload, body);
+        }
         assert!(headers
             .to_ascii_lowercase()
             .contains(&format!("idempotency-key: {id}\r\n")));
@@ -2075,14 +2095,28 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
             .write_all(bytes)
             .unwrap();
     };
-    for status in ["503 Service Unavailable", "204 No Content"] {
-        let (der, port, server) = https_relay::start_statuses(vec![status]);
+    for (kind, status) in [
+        ("webhook", "503 Service Unavailable"),
+        ("webhook", "204 No Content"),
+        ("slack", "400 Bad Request"),
+        ("slack", "429 Too Many Requests"),
+        ("slack", "200 OK"),
+    ] {
+        let (der, port, server) =
+            https_relay::start_with_authorization(vec![status], kind != "slack");
         write(&trust, &der);
         let mut source: serde_json::Value = serde_json::from_slice(include_bytes!(
             "../../../docs/proposals/examples/local-webhook-config.json"
         ))
         .unwrap();
         source["storage"]["path"] = serde_json::json!(state);
+        source["providers"]["primary"]["type"] = serde_json::json!(kind);
+        if kind == "slack" {
+            source["providers"]["primary"]
+                .as_object_mut()
+                .unwrap()
+                .remove("authorization_env");
+        }
         source["providers"]["primary"]["trust_der_files"] = serde_json::json!([trust]);
         write(&config, &serde_json::to_vec(&source).unwrap());
         let run = |alias: &str| {
@@ -2106,26 +2140,44 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
         let result = run("primary");
         assert_eq!(
             result.status.code(),
-            Some(if status.starts_with("204") { 0 } else { 1 })
+            Some(if status.starts_with("204") || status.starts_with("200") {
+                0
+            } else {
+                1
+            })
         );
         let text = String::from_utf8(result.stdout).unwrap();
         let preview = text
             .lines()
             .next()
             .unwrap()
-            .strip_prefix("Synthetic test: provider=primary type=webhook payload=")
+            .strip_prefix(&format!(
+                "Synthetic test: provider=primary type={kind} payload="
+            ))
             .unwrap();
         let preview: serde_json::Value = serde_json::from_str(preview).unwrap();
-        assert_eq!(preview["event_type"], "TEST");
-        assert_eq!(preview.as_object().unwrap().len(), 4);
-        assert_eq!(preview["schema_version"], "1.0");
-        assert_eq!(
-            preview["message"],
-            "Synthetic Slurm Notify test; no scheduler data."
-        );
-        assert_eq!(preview["event_id"].as_str().unwrap().len(), 36);
-        assert!(preview.get("job").is_none());
-        if status.starts_with("204") {
+        if kind == "slack" {
+            assert!(preview["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("Slurm Notify test\n"));
+            assert!(preview["text"]
+                .as_str()
+                .unwrap()
+                .contains("no scheduler data"));
+            assert_eq!(preview["mrkdwn"], false);
+        } else {
+            assert_eq!(preview["event_type"], "TEST");
+            assert_eq!(preview.as_object().unwrap().len(), 4);
+            assert_eq!(preview["schema_version"], "1.0");
+            assert_eq!(
+                preview["message"],
+                "Synthetic Slurm Notify test; no scheduler data."
+            );
+            assert_eq!(preview["event_id"].as_str().unwrap().len(), 36);
+            assert!(preview.get("job").is_none());
+        }
+        if status.starts_with("204") || status.starts_with("200") {
             assert!(text.ends_with(
                 std::str::from_utf8(include_bytes!("../../../contracts/cli/test-success.stdout"))
                     .unwrap()
@@ -2465,6 +2517,7 @@ fn relocated_mvp_setup_doctor_and_mixed_delivery_recover_without_smtp_replay() {
     ))
     .unwrap();
     source["storage"]["path"] = serde_json::json!(state);
+    source["providers"]["primary"]["type"] = serde_json::json!("slack");
     source["monitor"]["initial_observation"] = serde_json::json!("emit");
     source["delivery"]["initial_backoff_seconds"] = serde_json::json!(1);
     source["delivery"]["jitter_seconds"] = serde_json::json!(0);
@@ -2504,6 +2557,9 @@ fn relocated_mvp_setup_doctor_and_mixed_delivery_recover_without_smtp_replay() {
     let initialized = terminal::run(cmd, input.as_bytes());
     assert_eq!(initialized.status.code(), Some(0));
     assert!(initialized.stderr.is_empty());
+    let review = String::from_utf8(initialized.stdout).unwrap();
+    assert!(review.contains("Slack: alias=primary"));
+    assert!(review.contains("rendering=plain_text_v1"));
     assert!(!state.exists());
     expect(run().args(["config","validate","--config"]).arg(&config).output().unwrap(),0,b"Configuration valid: schema_version=1 cluster=research-cluster destinations=2 smtp_permissions=approved\n",b"");
     expect(
@@ -2582,8 +2638,16 @@ fn relocated_mvp_setup_doctor_and_mixed_delivery_recover_without_smtp_replay() {
     assert_eq!(smtp_server.join().unwrap(), mail);
     let requests = http_server.join().unwrap();
     assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].1, requests[1].1);
     for (headers, body) in requests {
-        assert_eq!(body, json);
+        let rendered: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(rendered["mrkdwn"], false);
+        assert!(rendered["text"].as_str().unwrap().contains(&id));
+        assert!(rendered["text"].as_str().unwrap().contains("Job: 1"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&json).unwrap()["job"]["id"],
+            "1"
+        );
         assert!(headers
             .to_ascii_lowercase()
             .contains(&format!("idempotency-key: {id}\r\n")));

@@ -32,6 +32,7 @@ pub(super) enum SyntheticRequest {
     Webhook {
         request: crate::webhook_resolution::PublicRequest,
         preview: String,
+        kind: &'static str,
     },
     Smtp {
         frame: Zeroizing<Vec<u8>>,
@@ -107,7 +108,14 @@ impl Plan {
                     .resources
                     .synthetic_request(id, &payload)
                     .map_err(|_| Error::Config)?,
-                preview: String::from_utf8(payload).map_err(|_| Error::Config)?,
+                preview: String::from_utf8(
+                    webhook
+                        .resources
+                        .wire_payload(&payload)
+                        .map_err(|_| Error::Config)?,
+                )
+                .map_err(|_| Error::Config)?,
+                kind: webhook.resources.kind(),
             });
         }
         let smtp = self

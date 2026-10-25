@@ -156,3 +156,5 @@ and commit identity. Startup may migrate older supported schema versions; do not
 assume an older binary can read a migrated store. Restore a compatible closed
 backup for rollback. Historical status refuses migration/repair. No public release
 or installation/upgrade support promise is implied by this source-build workflow.
+
+For Slack incoming webhook setup and the complete HPC flow, see [Slack](slack.md).

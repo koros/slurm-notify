@@ -10,7 +10,8 @@ the design handoff; no release has been published.
 - Fall back to atomic no-overwrite hard-link configuration publication when a
   filesystem rejects no-replace rename flags. Preserve sync, ownership and
   single-link requirements; distinguish failed write stages without private details.
-  Unsupported-operation/race/recovery tests are synthetic; GPFS acceptance is pending.
+  Unsupported-operation/race/recovery tests are synthetic; the operator subsequently
+  confirmed protected configuration creation and validation on GPFS.
 
 - Reject HTTP-only webhook resources before foreground state creation.
 
@@ -23,6 +24,12 @@ the design handoff; no release has been published.
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Explicit `slack` HTTPS provider with deterministic plain text lifecycle/test
+  messages, allowlisted disclosure, protected URL references, version-bound pending
+  work and durable retry/restart tests. No dependency or default changes.
+  Add a Slack configuration example and HPC setup guide. Installed real-provider
+  acceptance remains pending.
 
 - Verify a relocated local MVP workflow through interactive setup, validation,
   doctor, mixed verified HTTPS/SMTP partial completion and restart without SMTP

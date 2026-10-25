@@ -13,6 +13,12 @@ pub(super) fn start() -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
 pub(super) fn start_statuses(
     statuses: Vec<&'static str>,
 ) -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
+    start_with_authorization(statuses, true)
+}
+pub(super) fn start_with_authorization(
+    statuses: Vec<&'static str>,
+    authorization: bool,
+) -> (Vec<u8>, u16, thread::JoinHandle<Requests>) {
     let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let root = cert.cert.der().to_vec();
     let config = Arc::new(
@@ -70,7 +76,11 @@ pub(super) fn start_statuses(
             }
             assert!(headers.starts_with("POST /hook HTTP/1.1\r\n"));
             let lower = headers.to_ascii_lowercase();
-            assert!(lower.contains("authorization: bearer fixture\r\n"));
+            if authorization {
+                assert!(lower.contains("authorization: bearer fixture\r\n"));
+            } else {
+                assert!(!lower.contains("authorization:"));
+            }
             let length: usize = lower
                 .lines()
                 .find_map(|line| line.strip_prefix("content-length: "))

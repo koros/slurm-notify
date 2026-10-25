@@ -29,9 +29,11 @@ setup and relocated workflow acceptance. The
 
 ## Remaining support and release gates
 
-A GPFS setup failure without a published file is under acceptance: the
-[portable publication fallback](../adr/0072-portable-no-overwrite-configuration-publication.md)
-is locally tested, but must be retried on the HPC. Sync failures remain fatal.
+The operator confirmed protected configuration creation and validation on GPFS
+with the [portable publication fallback](../adr/0072-portable-no-overwrite-configuration-publication.md).
+Gmail SMTP connectivity failed before authentication. A separate Python Slack test
+posted successfully from the HPC; the installed Slack adapter now needs operator
+acceptance. See [Slack setup](../operations/slack.md). Sync failures remain fatal.
 
 1. Obtain explicit authorization and site policy for real-cluster/provider
    acceptance. Establish Slurm/accounting/job-identity/timezone baselines from
@@ -44,8 +46,10 @@ is locally tested, but must be retried on the HPC. Sync failures remain fatal.
    explicit authorization and acceptance of the exact installation artifacts.
 
 See [the acceptance checklist](../operations/support-and-acceptance.md).
-Slack/Teams-specific integrations, log monitoring, remote SSH and background service
-installation are outside the implemented local MVP. No release is published.
+Slack incoming webhook rendering is implemented as an explicit extension
+([ADR 0073](../adr/0073-slack-incoming-webhook-rendering.md)); Teams-specific
+integrations, log monitoring, remote SSH and background service installation remain
+outside the implemented local MVP. No release is published.
 
 ## Validation
 

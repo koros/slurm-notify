@@ -37,6 +37,13 @@ class DraftValidationTests(unittest.TestCase):
         empty['delivery']['smtp_permissions'] = []
         self.assertEqual(validate(json.dumps(empty).encode(), MANIFEST)['routes'], [])
 
+    def test_slack_uses_https_provider_shape_and_bounds(self):
+        value = copy.deepcopy(MIXED)
+        value['providers']['primary']['type'] = 'slack'
+        self.assertEqual(validate(json.dumps(value).encode(), MANIFEST)['providers']['primary']['type'], 'slack')
+        value['providers']['primary']['request_timeout_seconds'] = 31
+        self.assert_invalid(value, 'Range')
+
     def test_byte_budget_utf8_bom_trailing_and_static_errors(self):
         good = json.dumps(MIXED).encode()
         maximum = MANIFEST['structural_limits']['config_bytes']

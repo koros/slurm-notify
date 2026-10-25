@@ -32,7 +32,9 @@ pub(super) fn serve(input: impl Read, output: impl Write) -> Result<(), Error> {
             }
             let payload: serde_json::Value =
                 serde_json::from_slice(&fields[3]).map_err(|_| Error::InvalidInput)?;
-            if payload.get("event_id").and_then(serde_json::Value::as_str) != Some(id) {
+            if payload.get("event_id").and_then(serde_json::Value::as_str) != Some(id)
+                && !crate::slack_message::valid_wire(&payload, id)
+            {
                 return Err(Error::InvalidInput);
             }
             let millis = text(4)?;
