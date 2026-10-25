@@ -1,6 +1,6 @@
 # Product readiness assessment
 
-Assessment after controlled installed Slack adapter and relocated mixed workflow acceptance.
+Assessment after controlled detailed Slack, cluster preflight and relocated mixed workflow acceptance.
 The private OS/runtime lifecycle and continuous owned sessions are also tested.
 Historical increments remain in the implementation history; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
@@ -28,15 +28,15 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest implementation milestone passed 426 private Rust tests plus twenty installed CLI acceptance tests
+The latest implementation milestone passed 433 private Rust tests plus twenty installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
-custom process acceptance, eight SQLite tests, six hook tests and 12 draft-config
-Python tests. Rust line coverage was 97.15% (26,785/27,571); the gate is 90%.
+custom process acceptance, eight SQLite tests, six hook tests and 13 draft-config
+Python tests. Rust line coverage was 97.11% (27,396/28,212); the gate is 90%.
 The optimized build and help baseline smoke check also passed. Hosted checks are verified separately from these local results.
 
 | Capability | Current evidence | Remaining gap |
 | --- | --- | --- |
-| Slack incoming webhook | Explicit provider, allowlisted plain text rendering, synthetic test and identical HTTPS retries after restart; relocated mixed setup/doctor workflow | Installed synthetic HPC Slack test confirmed by operator; real scheduler acceptance pending |
+| Slack incoming webhook | Status icons, opt-in accounting details/names, per-destination frozen v6 messages, rollback and identical retries; installed cluster mismatch rejected before state opens | Operator confirmed v1 synthetic delivery and array-task completion alerts; v2 details/icons need HPC acceptance |
 | Protected resources | Installed validation and webhook/SMTP monitoring reuse protected configuration/trust snapshots and exact SMTP permissions | Bounded synchronous account lookup |
 | State ownership | Installed status and foreground runs enforce exclusive ownership; signal shutdown releases state | Live status access and installation acceptance |
 | Routing and recovery | Public event transactions, mixed admission, blocked-work preservation and restart recovery are tested | Authorized real-provider acceptance |
@@ -77,9 +77,11 @@ filesystem startup remain synchronous. Delivery is at least once and can duplica
 a provider-accepted request whose local completion was lost. Historical status
 requires the foreground owner to stop; live queue inspection is not implemented.
 
-The operator confirmed GPFS configuration creation/validation after the publication
-fallback. Gmail SMTP connectivity timed out before authentication; a separate
-Python Slack test and the installed synthetic Slack test both posted successfully.
-Doctor passes with a short PATH; first foreground monitoring stopped without a
-checkpoint. The next operator retry needs the new static stage/category diagnostics;
-its cause is unproven. See [ADR 0072](../adr/0072-portable-no-overwrite-configuration-publication.md).
+The operator confirmed GPFS configuration creation/validation, installed synthetic
+Slack delivery, healthy monitoring and completed array-task Slack notifications
+after matching Slurm ClusterName. Local startup preflight now catches mismatches
+when sibling scontrol is available, with accounting validation as fallback.
+Detailed Slack v2 has controlled acceptance; its next HPC test remains pending.
+Old v1 rendering and generic webhook/SMTP contracts remain intact. New v6 state
+requires a closed backup before opting in; old binaries cannot read it. Names are
+optional and remain in immutable protected frames for the lifetime of the ledger.

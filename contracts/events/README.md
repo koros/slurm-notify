@@ -98,3 +98,14 @@ Only existing allowlisted fields are used. Text is capped at 4000 bytes; canonic
 and rendered bytes must each fit the destination payload cap. Rendering is stable
 for a frozen frame and bound to a versioned destination revision; changing that
 revision blocks pending work. Slack may duplicate messages after lost acknowledgements.
+
+## Opt-in Slack rendering v2
+
+V2 retains the four-field JSON shape and final Event line. It adds status icons
+(✅ completed, ❌ failed, ⏱️ timeout and distinct other states), separates allocation
+and array-task IDs, optionally adds an escaped job name, and includes reported
+duration, allocation exit status:signal and validated UTC start/end times. Unknown
+values are explicit. Generic lifecycle JSON and Slack v1 text remain unchanged.
+The complete per-destination v2 JSON is frozen transactionally in schema v6; retries
+do not refresh accounting metadata. Renderer/name choices bind the destination
+revision. See ADR 0074.

@@ -162,7 +162,10 @@ def validate(data, manifest):
         kind = provider.get('type')
         if kind in ['webhook', 'slack']:
             object_fields(provider, ['type', 'url_env', 'request_timeout_seconds',
-                                     'payload_limit_bytes'], ['authorization_env', 'trust_der_files'])
+                                     'payload_limit_bytes'], ['authorization_env', 'trust_der_files', 'include_job_details', 'include_job_name'])
+            for option in ['include_job_details', 'include_job_name']:
+                if option in provider and (kind != 'slack' or not isinstance(provider[option], bool)):
+                    fail('Policy')
             if 'trust_der_files' in provider:
                 roots = members(provider['trust_der_files'], 32)
                 for root in roots:

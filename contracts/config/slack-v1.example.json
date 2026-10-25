@@ -22,7 +22,9 @@
       "type": "slack",
       "url_env": "SLURM_NOTIFY_SLACK_WEBHOOK_URL",
       "request_timeout_seconds": 10,
-      "payload_limit_bytes": 16384
+      "payload_limit_bytes": 16384,
+      "include_job_details": true,
+      "include_job_name": false
     }
   },
   "routes": [

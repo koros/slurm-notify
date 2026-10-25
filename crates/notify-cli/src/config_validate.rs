@@ -213,8 +213,20 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
                         "request_timeout_seconds",
                         "payload_limit_bytes",
                     ],
-                    &["authorization_env", "trust_der_files"],
+                    &[
+                        "authorization_env",
+                        "trust_der_files",
+                        "include_job_details",
+                        "include_job_name",
+                    ],
                 )?;
+                for option in ["include_job_details", "include_job_name"] {
+                    if let Ok(value) = get(p, option) {
+                        if kind != "slack" || !matches!(value, Value::Bool(_)) {
+                            return Err(Error::Policy);
+                        }
+                    }
+                }
                 env(get(p, "url_env")?)?;
                 if let Ok(auth) = get(p, "authorization_env") {
                     env(auth)?;

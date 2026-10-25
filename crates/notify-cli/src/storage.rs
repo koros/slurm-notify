@@ -144,6 +144,7 @@ struct SmtpPlan<'a> {
 pub(super) struct PublicRoute<'a> {
     pub(super) destination: &'a str,
     pub(super) revision: &'a str,
+    pub(super) slack: Option<crate::job_enrichment::SlackOptions>,
 }
 // No Debug/Clone: payload contains private user-selected cluster/job metadata.
 pub(super) struct PublicFrame {
@@ -183,11 +184,23 @@ fn public_revision(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn event_details<'a>(
+    candidate: &'a crate::lifecycle::Reconciler,
+    event: &Event<'_>,
+) -> Option<&'a crate::lifecycle::JobDetails> {
+    candidate.details.get(&crate::lifecycle::Identity {
+        cluster: event.job.cluster.into(),
+        job: event.job.id.into(),
+        submit: event.job.submitted.into(),
+        start: event.job.started.into(),
+    })
+}
 fn freeze_public_event(
     tx: &rusqlite::Transaction<'_>,
     event: &Event<'_>,
     routes: &[PublicRoute<'_>],
     observed_at: i64,
+    details: Option<&crate::lifecycle::JobDetails>,
     random: &mut impl FnMut() -> Result<[u8; 16], ()>,
 ) -> Result<(), StorageError> {
     if routes.is_empty() {
@@ -196,6 +209,12 @@ fn freeze_public_event(
     let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version == 4 {
         tx.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))?;
+    }
+    if routes.iter().any(|route| route.slack.is_some()) {
+        let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version == 5 {
+            tx.execute_batch(include_str!("../../notify-storage/migrations/0006.sql"))?;
+        }
     }
     let mut id = None;
     for _ in 0..8 {
@@ -226,6 +245,18 @@ fn freeze_public_event(
             "INSERT INTO public_event_routes VALUES (?1,?2,?3)",
             params![event.id, route.destination, route.revision],
         )?;
+        if let Some(options) = route.slack {
+            let wire = crate::job_enrichment::render(&payload, details, options.include_job_name)
+                .map_err(|_| StorageError::InvalidInput)?;
+            if wire.len() > options.payload_limit || payload.len() > options.payload_limit {
+                return Err(StorageError::InvalidInput);
+            }
+            let hash = ring::digest::digest(&ring::digest::SHA256, &wire);
+            tx.execute(
+                "INSERT INTO slack_event_frames VALUES (?1,?2,?3,?4)",
+                params![event.id, route.destination, wire, hash.as_ref()],
+            )?;
+        }
     }
     let hash = ring::digest::digest(&ring::digest::SHA256, &payload);
     tx.execute(
@@ -294,7 +325,7 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1..=5 => {}
+            1..=6 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
@@ -988,9 +1019,45 @@ impl Store {
                     return Ok(());
                 }
                 let routes = selected.get(event.id).ok_or(StorageError::InvalidInput)?;
-                freeze_public_event(tx, event, routes, context.2, &mut random)
+                freeze_public_event(
+                    tx,
+                    event,
+                    routes,
+                    context.2,
+                    event_details(candidate, event),
+                    &mut random,
+                )
             },
         )
+    }
+    pub(super) fn slack_delivery(
+        &self,
+        internal_id: &str,
+        destination: &str,
+        revision: &str,
+    ) -> Result<Option<PublicFrame>, StorageError> {
+        let Some(base) = self.public_delivery(internal_id, destination, revision)? else {
+            return Ok(None);
+        };
+        let version: i64 = self
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version < 6 {
+            return Err(StorageError::Conflict);
+        }
+        let row=self.db.query_row("SELECT CASE WHEN length(payload) BETWEEN 1 AND 16384 THEN payload ELSE NULL END,CASE WHEN length(sha256)=32 THEN sha256 ELSE NULL END FROM slack_event_frames WHERE internal_event_id=?1 AND destination=?2",params![internal_id,destination],|r|Ok((r.get::<_,Vec<u8>>(0)?,r.get::<_,Vec<u8>>(1)?))).optional()?;
+        let (payload, hash) = row.ok_or(StorageError::Conflict)?;
+        if ring::digest::digest(&ring::digest::SHA256, &payload).as_ref() != hash {
+            return Err(StorageError::Conflict);
+        }
+        let value = serde_json::from_slice(&payload).map_err(|_| StorageError::Conflict)?;
+        if !crate::slack_message::valid_wire(&value, &base.id) {
+            return Err(StorageError::Conflict);
+        }
+        Ok(Some(PublicFrame {
+            id: base.id,
+            payload,
+        }))
     }
     pub(super) fn public_delivery(
         &self,
@@ -1128,6 +1195,7 @@ impl Store {
             return Err(StorageError::InvalidInput);
         }
         let mut random = crate::public_event::random;
+        let candidate = preparation.candidate;
         self.persist_prepared_using(
             preparation,
             (Some(revisions.rendering), Some(revisions.providers)),
@@ -1139,7 +1207,14 @@ impl Store {
                     .copied()
                     .filter(|route| event.destinations.contains(&route.destination))
                     .collect();
-                freeze_public_event(tx, event, &routes, context.2, &mut random)
+                freeze_public_event(
+                    tx,
+                    event,
+                    &routes,
+                    context.2,
+                    event_details(candidate, event),
+                    &mut random,
+                )
             },
         )
     }
@@ -1738,10 +1813,12 @@ pub(super) mod tests {
                 |_| {
                     vec![
                         PublicRoute {
+                            slack: None,
                             destination: "a",
                             revision: &revision,
                         },
                         PublicRoute {
+                            slack: None,
                             destination: "b",
                             revision: &revision,
                         },
@@ -1790,6 +1867,7 @@ pub(super) mod tests {
                 ("cluster", "1970-01-01T00:00:40", 40),
                 |_| {
                     vec![PublicRoute {
+                        slack: None,
                         destination: "new",
                         revision: &changed,
                     }]
@@ -1848,6 +1926,7 @@ pub(super) mod tests {
                 ("cluster", "1970-01-01T00:00:50", 50),
                 |_| {
                     vec![PublicRoute {
+                        slack: None,
                         destination: "a",
                         revision: &revision,
                     }]
@@ -1885,6 +1964,7 @@ pub(super) mod tests {
                 ("cluster", "window", 10),
                 |_| {
                     vec![PublicRoute {
+                        slack: None,
                         destination: "a",
                         revision: &revision,
                     }]
@@ -1933,6 +2013,7 @@ pub(super) mod tests {
                 &events,
                 ("cluster", "window", 10),
                 |_| vec![PublicRoute {
+                    slack: None,
                     destination: "a",
                     revision: &revision
                 }],
@@ -1949,6 +2030,7 @@ pub(super) mod tests {
                 &events,
                 ("cluster", "window", 10),
                 |_| vec![PublicRoute {
+                    slack: None,
                     destination: "a",
                     revision: &revision
                 }],
@@ -1970,6 +2052,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&one, &events, ("cluster", "window", 10), |_| {
                 vec![PublicRoute {
+                    slack: None,
                     destination: "a",
                     revision: &revision,
                 }]
@@ -2024,6 +2107,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&restored, &events, ("cluster", "window-3", 30), |_| {
                 vec![PublicRoute {
+                    slack: None,
                     destination: "new",
                     revision: &revision,
                 }]
@@ -2048,10 +2132,12 @@ pub(super) mod tests {
                 ("cluster", "window-4", 40),
                 |_| vec![
                     PublicRoute {
+                        slack: None,
                         destination: "new",
                         revision: &revision
                     },
                     PublicRoute {
+                        slack: None,
                         destination: "new",
                         revision: &revision
                     }
@@ -2068,6 +2154,7 @@ pub(super) mod tests {
         legacy
             .persist_public_webhooks(&candidate, &events, ("cluster", "window-2", 20), |_| {
                 vec![PublicRoute {
+                    slack: None,
                     destination: "old",
                     revision: &revision,
                 }]
@@ -2088,6 +2175,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![PublicRoute {
+                    slack: None,
                     destination: "a",
                     revision: &revision,
                 }]
@@ -2726,7 +2814,7 @@ pub(super) mod tests {
     fn future_version_is_not_reset() {
         let directory = Directory::new();
         let store = open(&directory);
-        store.db.pragma_update(None, "user_version", 6).unwrap();
+        store.db.pragma_update(None, "user_version", 99).unwrap();
         drop(store);
         assert!(matches!(
             Store::open(&directory.path(), Duration::from_millis(50)),
@@ -2736,7 +2824,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            99
         );
     }
 
@@ -2873,6 +2961,7 @@ pub(super) mod tests {
             .collect();
         let revision = "a".repeat(64);
         let valid = PublicRoute {
+            slack: None,
             destination: "plain",
             revision: &revision,
         };
@@ -2880,14 +2969,17 @@ pub(super) mod tests {
             vec![],
             vec![valid, valid],
             vec![PublicRoute {
+                slack: None,
                 destination: "smtp",
                 revision: &revision,
             }],
             vec![PublicRoute {
+                slack: None,
                 destination: "missing",
                 revision: &revision,
             }],
             vec![PublicRoute {
+                slack: None,
                 destination: "plain",
                 revision: "bad",
             }],
@@ -2946,6 +3038,7 @@ pub(super) mod tests {
                 ("cluster", "window-1", 10),
                 &selected,
                 &[PublicRoute {
+                    slack: None,
                     destination: "plain",
                     revision: &revision,
                 }],

@@ -151,6 +151,7 @@ pub(super) enum StageError {
     Time,
     Policy,
     DispatchBlocked,
+    ClusterIdentity,
 }
 
 #[derive(Debug, Default)]
@@ -875,11 +876,19 @@ impl Cycles {
         let poll = poll(self, store, now, &context);
         let stop = matches!(
             &poll,
-            Err(Error::Storage(_) | Error::Window(_) | Error::Poll(DurablePollError::Storage(_)))
+            Err(Error::Storage(_)
+                | Error::Window(_)
+                | Error::Poll(DurablePollError::Storage(_))
+                | Error::Poll(DurablePollError::Poll(
+                    super::scheduler::PollError::ClusterMismatch
+                )))
         );
         report.poll = Some(poll.map_err(|error| match error {
             Error::Storage(_) | Error::Poll(DurablePollError::Storage(_)) => StageError::Storage,
             Error::Window(_) => StageError::Time,
+            Error::Poll(DurablePollError::Poll(super::scheduler::PollError::ClusterMismatch)) => {
+                StageError::ClusterIdentity
+            }
             _ => StageError::Poll,
         }));
         if stop {

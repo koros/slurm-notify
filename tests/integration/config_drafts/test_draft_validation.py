@@ -44,6 +44,15 @@ class DraftValidationTests(unittest.TestCase):
         value['providers']['primary']['request_timeout_seconds'] = 31
         self.assert_invalid(value, 'Range')
 
+    def test_detail_options_are_slack_only_and_boolean(self):
+        value = copy.deepcopy(MIXED)
+        value['providers']['primary']['include_job_name'] = True
+        self.assert_invalid(value, 'Policy')
+        value['providers']['primary']['type'] = 'slack'
+        self.assertEqual(validate(json.dumps(value).encode(), MANIFEST)['schema_version'], 1)
+        value['providers']['primary']['include_job_name'] = 'true'
+        self.assert_invalid(value, 'Policy')
+
     def test_byte_budget_utf8_bom_trailing_and_static_errors(self):
         good = json.dumps(MIXED).encode()
         maximum = MANIFEST['structural_limits']['config_bytes']

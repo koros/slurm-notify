@@ -165,6 +165,7 @@ fn active_command(program: &std::path::Path, user: &str) -> Command {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum PollError {
     InvalidRequest,
+    ClusterMismatch,
     Active(QueryError),
     Accounting(QueryError),
     Parse(super::lifecycle::ParseError),
@@ -229,6 +230,13 @@ pub(super) fn poll_with(
         .arg("--format=Cluster,JobID,User,Submit,Start,State%32,ExitCode");
     let accounting_output =
         query(&mut accounting, remaining, request.output_limit).map_err(PollError::Accounting)?;
+    if crate::lifecycle::parse_accounting(&accounting_output, request.user)
+        .map_err(PollError::Parse)?
+        .iter()
+        .any(|record| record.cluster() != request.cluster)
+    {
+        return Err(PollError::ClusterMismatch);
+    }
     reconciler
         .observe_snapshot(
             &active_output,
@@ -307,6 +315,32 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn cluster_mismatch_is_explicit_and_never_mutates_reconciler() {
+        let mut reconciler = super::super::lifecycle::Reconciler::with_capacity(10);
+        let request = PollRequest {
+            active_program: std::path::Path::new("/fixture/squeue"),
+            accounting_program: std::path::Path::new("/fixture/sacct"),
+            cluster: "configured",
+            user: "alice",
+            history_start: "2026-10-25T10:00:00",
+            history_end: "2026-10-25T11:00:00",
+            timeout: Duration::from_secs(1),
+            output_limit: 4096,
+            emit_discovered: true,
+        };
+        let error = poll_with(&request, &mut reconciler, |command, _, _| {
+            Ok(if command.get_program() == "/fixture/squeue" {
+                "".into()
+            } else {
+                "actual|1|alice|s|a|COMPLETED|0:0".into()
+            })
+        })
+        .unwrap_err();
+        assert_eq!(error, PollError::ClusterMismatch);
+        assert!(reconciler.latest.is_empty());
+        assert!(reconciler.emitted.is_empty());
+    }
     #[test]
     fn durable_lifecycle_restores_deduplication_and_checkpoint_after_reopen() {
         let directory = super::super::storage::tests::Directory::new();

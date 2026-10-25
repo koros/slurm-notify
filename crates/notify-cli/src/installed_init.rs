@@ -43,7 +43,10 @@ fn review(bytes: &[u8]) -> Result<Review, Error> {
                 .ok_or(Error::Input)?
                 .1;
             if provider["type"] == "slack" {
-                summary.push_str(&format!("Slack: alias={alias} origin={origin} fields=cluster_id,job_identifier,state,observed_at,event_id rendering=plain_text_v1\n"));
+                if provider["include_job_details"] == true || provider["include_job_name"] == true {
+                    summary.push_str(&format!("Slack detail disclosure: alias={alias} fields=duration,exit_status_and_signal,started_at,finished_at job_name={} retention=state_lifetime rendering=plain_text_v2\n",if provider["include_job_name"]==true {"included"} else {"hidden"}));
+                }
+                summary.push_str(&format!("Slack: alias={alias} origin={origin} fields=cluster_id,job_identifier,state,observed_at,event_id rendering={}\n",if provider["include_job_details"]==true || provider["include_job_name"]==true {"plain_text_v2"} else {"plain_text_v1"}));
             } else {
                 summary.push_str(&format!("Webhook: alias={alias} origin={origin} fields=schema_version,event_id,source,cluster_id,event_type,severity,observed_at,occurred_at,job.id,job.array_task_id,job.submitted_at,job.started_at,job.state\n"));
             }

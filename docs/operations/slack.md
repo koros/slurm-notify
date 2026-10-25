@@ -21,21 +21,27 @@ export SLURM_NOTIFY_SLACK_WEBHOOK_URL
 ```
 
 Create a fresh protected draft and separate state path. This leaves Gmail resources
-available for later use. Run from the repository root; change the cluster label if
-needed. The label is your stable local identifier, not automatic cluster discovery.
+available for later use. Run from the repository root. Discover Slurm ClusterName
+first; it is a scheduler identity and may differ from the login hostname. Do not use a freely chosen label.
 
 ```bash
+export SN_SLURM_CLUSTER="$(timeout 10s scontrol show config | awk '$1 == "ClusterName" {print tolower($3)}')"
+printf 'Slurm cluster: %s\n' "$SN_SLURM_CLUSTER"
+# If no single name was printed, stop and check your Slurm environment.
 umask 077
 mkdir -p "$HOME/.config/slurm-notify"
 chmod 700 "$HOME/.config/slurm-notify"
 SN_BASE="$(cd "$HOME/.config/slurm-notify" && pwd -P)"
 export SN_SLACK_DIR="$(mktemp -d "$SN_BASE/slack-XXXXXX")"
 python3 - <<'PY'
-import json, os
+import json, os, re
 from pathlib import Path
 root = Path(os.environ['SN_SLACK_DIR'])
 source = json.loads(Path('contracts/config/slack-v1.example.json').read_text())
-source['monitor']['cluster_id'] = 'uop-hpc'
+cluster = os.environ['SN_SLURM_CLUSTER']
+if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', cluster):
+    raise SystemExit('Expected one valid Slurm ClusterName; no draft written.')
+source['monitor']['cluster_id'] = cluster
 source['storage']['path'] = str(root / 'state' / 'state.sqlite3')
 draft = root / 'draft.json'
 with draft.open('x') as stream:
@@ -70,12 +76,16 @@ After validating the site's scheduler polling/execution policy, run:
 
 The terminal must stay open; Ctrl-C stops monitoring. Defaults poll every 60 seconds,
 suppress initial existing job observations, and route terminal lifecycle events.
-Doctor probes scheduler versions but cannot determine site policy. Test a newly
+Doctor probes scheduler versions and checks local identity when sibling scontrol
+is available; it cannot determine site policy. Test a newly
 submitted job only when permitted by that policy. Reload the URL and directory
 variables in new shells; do not start multiple owners for the same state path.
 
-Notifications disclose cluster label, job/array identifier, state, observation time
-and opaque event ID. They omit job names/scripts/logs/user names. Messages disable
+The current example enables detailed notifications: state icons, cluster identity,
+separate allocation/array-task IDs, duration, allocation exit status:signal, validated
+UTC start/end times, observation time and event ID. Unknown values say unavailable.
+Job names are hidden unless explicitly enabled. Scripts, logs and user names are
+not included. Messages disable
 Markdown/unfurls. The canonical event and rendered request must each fit the configured
 payload byte limit; Slack text additionally has a 4000-byte cap, with no truncation.
 
@@ -87,8 +97,8 @@ work; do not edit a provider type over a pending outbox to bypass that guard.
 
 ## Troubleshooting first monitoring startup
 
-Doctor probes `squeue --version` and `sacct --version`; it cannot establish access to
-job/accounting queries. A successful synthetic Slack test establishes provider
+Doctor probes Slurm versions and optionally reads ClusterName through scontrol
+beside canonical squeue. It does not query job/accounting data or prove access. A successful synthetic Slack test establishes provider
 delivery, not scheduler compatibility or permission.
 
 Command discovery currently accepts at most 4096 PATH bytes and 64 absolute entries.
@@ -109,3 +119,66 @@ does not prove permission denial. Updated builds print safe `stage`/`reason` tok
 before the final runtime message. Share those tokens, exit code and historical
 status rather than credentials, raw scheduler output or database contents. The
 `policy` category describes an application validation check, not site authorization.
+
+## Upgrade existing Slack alerts to details and icons
+
+Existing configs keep v1 rendering until opted in. Stop monitoring with Ctrl-C,
+then run status. Drain pending deliveries with the old configuration first:
+queued/due/retrying must be zero and the sample must not be truncated. Changing
+renderer or name disclosure over pending work blocks it rather than reinterpreting it.
+
+Take a closed backup (monitor stopped, no other owner):
+
+```bash
+umask 077
+SN_BACKUP_DIR="$(mktemp -d "$SN_SLACK_DIR/before-details-XXXXXX")"
+cp -p "$SN_SLACK_DIR/config.json" "$SN_BACKUP_DIR/config.json"
+cp -a "$SN_SLACK_DIR/state" "$SN_BACKUP_DIR/state"
+printf 'Closed backup: %s\n' "$SN_BACKUP_DIR"
+```
+
+Create a new protected draft from the working config. The following explicitly opts
+in to names; set `include_job_name` to `False` to keep names hidden. Names remain
+in immutable protected state/backups for the ledger's lifetime, even after outbox
+retention cleanup. They are never added to generic webhook or SMTP messages.
+
+```bash
+python3 - <<'PY'
+import json, os
+from pathlib import Path
+root = Path(os.environ['SN_SLACK_DIR'])
+source = json.loads((root / 'config.json').read_text())
+source['providers']['slack']['include_job_details'] = True
+source['providers']['slack']['include_job_name'] = True
+with (root / 'details-draft.json').open('x') as stream:
+    json.dump(source, stream, indent=2)
+    stream.write('\n')
+(root / 'details-draft.json').chmod(0o600)
+print('Draft path:', root / 'details-draft.json')
+PY
+./target/release/slurm-notify init --config "$SN_SLACK_DIR/details-config.json"
+```
+
+Enter the printed absolute draft path, review the fields/name disclosure/retention,
+and type yes. Keep the working cluster identity and state path. From now on use
+the newly reviewed `details-config.json`:
+
+```bash
+PATH=/usr/bin:/bin ./target/release/slurm-notify doctor --config "$SN_SLACK_DIR/details-config.json"
+PATH=/usr/bin:/bin ./target/release/slurm-notify start --foreground --config "$SN_SLACK_DIR/details-config.json"
+```
+
+The first selected detailed event transaction upgrades state to schema v6 and
+freezes the per-destination Slack JSON. Old alerts are not rewritten or resent.
+Old binaries reject v6: downgrade requires stopping and restoring the closed backup
+and its configuration. An older checkpoint can replay subsequent alerts. Never
+lower user_version manually or copy a live SQLite database.
+
+Details come from the existing bounded local current-user accounting query with
+UTC/C locale enforced. ExitCode describes the allocation script, not necessarily
+all steps. Names are bounded and Slack special characters escaped. Unknown optional
+values show unavailable; newline-ambiguous scheduler records remain parse failures.
+Memory/partition statistics, array summaries and rich footer layouts are later work.
+
+Unknown accounting details remain unavailable in the frozen alert; a retry does
+not refresh them. Later accounting availability does not rewrite an earlier alert.

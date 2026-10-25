@@ -33,6 +33,7 @@ fn stage_reason(error: crate::polling_cycle::StageError) -> &'static str {
         StageError::Time => "time",
         StageError::Policy => "policy",
         StageError::DispatchBlocked => "dispatch_blocked",
+        StageError::ClusterIdentity => "cluster_identity",
     }
 }
 fn fatal_stage(report: &crate::polling_cycle::TickReport) -> Option<(&'static str, &'static str)> {
@@ -49,7 +50,10 @@ fn fatal_stage(report: &crate::polling_cycle::TickReport) -> Option<(&'static st
         (always
             || matches!(
                 error,
-                StageError::Storage | StageError::Time | StageError::Policy
+                StageError::Storage
+                    | StageError::Time
+                    | StageError::Policy
+                    | StageError::ClusterIdentity
             ))
         .then_some((stage, stage_reason(error)))
     })
@@ -130,6 +134,23 @@ pub(super) fn run(path: &Path) -> u8 {
         }
     };
     let timeout = plan.query_timeout();
+    if let Err(error) =
+        crate::cluster_probe::check(&active, plan.cluster(), timeout, plan.output_limit() / 2)
+    {
+        eprintln!(
+            "{}",
+            if error == crate::cluster_probe::Error::Mismatch {
+                crate::cluster_probe::MISMATCH
+            } else {
+                "Slurm cluster identity probe failed; no monitoring state was opened."
+            }
+        );
+        return if error == crate::cluster_probe::Error::Mismatch {
+            2
+        } else {
+            1
+        };
+    }
     let cycles =
         crate::polling_cycle::Cycles::new(POLL_BATCH).expect("fixed valid internal poll batch");
     let mut session =
@@ -164,6 +185,9 @@ pub(super) fn run(path: &Path) -> u8 {
         }
         if let Some((stage, reason)) = fatal_stage(&report) {
             eprintln!("Foreground failure: stage={stage} reason={reason}.");
+            if reason == "cluster_identity" {
+                eprintln!("Configured monitor.cluster_id must match Slurm ClusterName; inspect scontrol show config and correct the configuration while stopped. State was not committed for this poll.");
+            }
             return Err(Error::Cycle);
         }
         if report.poll.as_ref().is_some_and(Result::is_err) {
@@ -211,6 +235,8 @@ mod tests {
         assert_eq!(fatal_stage(&report), Some(("delivery", "policy")));
         report.poll = Some(Err(StageError::Storage));
         assert_eq!(fatal_stage(&report), Some(("poll", "storage")));
+        report.poll = Some(Err(StageError::ClusterIdentity));
+        assert_eq!(fatal_stage(&report), Some(("poll", "cluster_identity")));
         report.preflight = Some(Err(StageError::Capacity));
         assert_eq!(fatal_stage(&report), Some(("preflight", "capacity")));
         assert_eq!(stage_error(Some(&Ok::<_, StageError>(()))), None);

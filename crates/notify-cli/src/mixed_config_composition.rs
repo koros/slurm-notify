@@ -164,6 +164,12 @@ impl Plan {
         }
         Ok(())
     }
+    pub(super) fn cluster(&self) -> &str {
+        self.common.observation.cluster()
+    }
+    pub(super) fn output_limit(&self) -> usize {
+        self.common.controls.output_limit
+    }
     pub(super) fn query_timeout(&self) -> Duration {
         self.common.controls.query_timeout
     }
@@ -591,6 +597,23 @@ impl Plan {
                     }
                 });
         }
+        let details = self
+            .common
+            .webhooks
+            .iter()
+            .any(|w| w.resources.slack_options().is_some());
+        let names_enabled = self.common.webhooks.iter().any(|w| {
+            w.resources
+                .slack_options()
+                .is_some_and(|o| o.include_job_name)
+        });
+        let mut query = query;
+        let query = |command: &mut std::process::Command, timeout, limit| {
+            if details {
+                crate::job_enrichment::accounting_command(command, names_enabled);
+            }
+            query(command, timeout, limit)
+        };
         let mut names: Vec<_> = self
             .common
             .webhooks

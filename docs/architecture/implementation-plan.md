@@ -31,11 +31,13 @@ setup and relocated workflow acceptance. The
 
 The operator confirmed protected configuration creation and validation on GPFS
 with the [portable publication fallback](../adr/0072-portable-no-overwrite-configuration-publication.md).
-Gmail SMTP connectivity failed before authentication. Both the separate Python
-Slack test and installed Rust synthetic test posted successfully from the HPC. Doctor passes with a short per-command PATH,
-but foreground monitoring stops before a recorded checkpoint. Static stage/category
-diagnostics now support the next operator retry; real scheduler acceptance remains
-pending. See [Slack setup](../operations/slack.md). Sync failures remain fatal.
+Gmail SMTP connectivity failed before authentication. The operator confirmed
+installed synthetic Slack delivery, healthy monitoring after correcting cluster
+identity, and completed array-task notifications. Local cluster preflight now
+rejects mismatches explicitly; detailed Slack rendering and v6 frozen-message state
+have controlled tests and need the next HPC acceptance. The short per-command PATH
+workaround remains documented. See [Slack setup/upgrade](../operations/slack.md).
+Sync failures remain fatal. No supported deployment/release is implied.
 
 1. Obtain explicit authorization and site policy for real-cluster/provider
    acceptance. Establish Slurm/accounting/job-identity/timezone baselines from

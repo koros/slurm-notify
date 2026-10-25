@@ -86,6 +86,8 @@ mod smtp_poll;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod storage;
 
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod job_enrichment;
 mod slack_message;
 mod webhook;
 
@@ -151,6 +153,8 @@ mod smtp_submit_frame;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod smtp_submit_dispatch;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod cluster_probe;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod config_create;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -228,6 +232,7 @@ fn main() -> std::process::ExitCode {
                         3,
                         "SMTP delivery permission is not approved for the current profile.",
                     ),
+                    installed_doctor::Error::ClusterMismatch => (2, crate::cluster_probe::MISMATCH),
                     installed_doctor::Error::Programs => (
                         2,
                         "Required Slurm executables unavailable in absolute PATH directories.",

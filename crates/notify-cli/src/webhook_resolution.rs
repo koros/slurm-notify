@@ -22,6 +22,7 @@ pub(super) struct Resources {
     public_https: bool,
     trust: Option<crate::trust_snapshot::Trust>,
     slack: bool,
+    details: Option<crate::job_enrichment::SlackOptions>,
 }
 // Owned secret-stdin request; constructed only from a checked frozen delivery.
 // No Debug/Clone and no endpoint/header/payload command arguments.
@@ -49,6 +50,27 @@ impl Resources {
         self.slack = true;
         self
     }
+    pub(super) fn with_details(mut self, include_job_name: bool) -> Self {
+        self.revision = crate::config_reference::reference(
+            b"slack-render-v2\0",
+            &[
+                &self.revision,
+                if include_job_name {
+                    "names"
+                } else {
+                    "no_names"
+                },
+            ],
+        );
+        self.details = Some(crate::job_enrichment::SlackOptions {
+            include_job_name,
+            payload_limit: self.payload_limit,
+        });
+        self
+    }
+    pub(super) fn slack_options(&self) -> Option<crate::job_enrichment::SlackOptions> {
+        self.details
+    }
     pub(super) fn kind(&self) -> &'static str {
         if self.slack {
             "slack"
@@ -57,7 +79,10 @@ impl Resources {
         }
     }
     pub(super) fn wire_payload(&self, payload: &[u8]) -> Result<Vec<u8>, Error> {
-        let bytes = if self.slack {
+        let bytes = if let Some(options) = self.details {
+            crate::job_enrichment::render(payload, None, options.include_job_name)
+                .map_err(|_| Error::Request)?
+        } else if self.slack {
             crate::slack_message::render(payload).map_err(|_| Error::Request)?
         } else {
             payload.to_vec()
@@ -117,17 +142,25 @@ impl Resources {
     ) -> Result<PublicRequest, crate::supervised_provider::Diagnostic> {
         let invalid = crate::supervised_provider::Diagnostic::InvalidInput;
         let revision = self.public_revision().ok_or(invalid)?;
-        let frozen = store
-            .public_delivery(&item.event_id, &item.destination, revision)
-            .map_err(|_| invalid)?
-            .ok_or(invalid)?;
-        if !self.accepts_public_payload(&frozen.payload) {
+        let frozen = if self.details.is_some() {
+            store.slack_delivery(&item.event_id, &item.destination, revision)
+        } else {
+            store.public_delivery(&item.event_id, &item.destination, revision)
+        }
+        .map_err(|_| invalid)?
+        .ok_or(invalid)?;
+        if (self.details.is_none() && !self.accepts_public_payload(&frozen.payload))
+            || frozen.payload.len() > self.payload_limit
+        {
             return Err(invalid);
         }
         Ok(PublicRequest {
-            frame: self
-                .frame(&frozen.id, &frozen.payload)
-                .map_err(|_| invalid)?,
+            frame: if self.details.is_some() {
+                self.frame_wire(&frozen.id, &frozen.payload)
+            } else {
+                self.frame(&frozen.id, &frozen.payload)
+            }
+            .map_err(|_| invalid)?,
             timeout: self.timeout,
         })
     }
@@ -148,6 +181,12 @@ impl Resources {
             return Err(Error::Request);
         }
         let payload = self.wire_payload(payload)?;
+        self.frame_wire(event_id, &payload)
+    }
+    fn frame_wire(&self, event_id: &str, payload: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
+        if payload.len() > self.payload_limit {
+            return Err(Error::Request);
+        }
         let millis = self.timeout.as_millis().to_string();
         let mut fields: Vec<&[u8]> = vec![
             &self.endpoint,
@@ -156,7 +195,7 @@ impl Resources {
                 .map(|bytes| bytes.as_slice())
                 .unwrap_or_default(),
             event_id.as_bytes(),
-            &payload,
+            payload,
             millis.as_bytes(),
         ];
         let roots = self
@@ -230,6 +269,7 @@ pub(super) fn resolve(
         public_https,
         trust: None,
         slack: false,
+        details: None,
     })
 }
 
@@ -354,12 +394,105 @@ mod tests {
         store
             .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![crate::storage::PublicRoute {
+                    slack: None,
                     destination: "primary",
                     revision: resources.public_revision().unwrap(),
                 }]
             })
             .unwrap();
         store.due_deliveries("cluster", 10, 10).unwrap().remove(0)
+    }
+    #[test]
+    fn detailed_slack_freezes_per_destination_and_survives_restart_without_name_leakage() {
+        let d = crate::storage::tests::Directory::new();
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let rich = public_resources("https://fixture.invalid/hook", 16384)
+            .with_slack()
+            .with_details(true);
+        let generic = public_resources("https://fixture.invalid/other", 16384);
+        let mut candidate = crate::lifecycle::Reconciler::with_capacity(10);
+        let events=candidate.observe_snapshot("","cluster|123_2|alice|2026-10-25T10:00:00|2026-10-25T10:01:00|FAILED|2:0|754|2026-10-25T10:13:34|private-fixture-name","cluster","alice",true).unwrap();
+        store
+            .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
+                vec![
+                    crate::storage::PublicRoute {
+                        destination: "rich",
+                        revision: rich.public_revision().unwrap(),
+                        slack: rich.slack_options(),
+                    },
+                    crate::storage::PublicRoute {
+                        destination: "generic",
+                        revision: generic.public_revision().unwrap(),
+                        slack: None,
+                    },
+                ]
+            })
+            .unwrap();
+        let items = store.due_deliveries("cluster", 10, 10).unwrap();
+        let item = items.iter().find(|i| i.destination == "rich").unwrap();
+        let frozen = store
+            .slack_delivery(&item.event_id, "rich", rich.public_revision().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&frozen.payload).contains("private-fixture-name"));
+        let ordinary = store
+            .public_delivery(
+                &item.event_id,
+                "generic",
+                generic.public_revision().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&ordinary.payload).contains("private-fixture-name"));
+        assert!(public_resources("https://fixture.invalid/hook", 16384)
+            .with_slack()
+            .with_details(false)
+            .prepare_public(&store, item)
+            .is_err());
+        let bytes = rich.prepare_public(&store, item).unwrap().frame;
+        drop(store);
+        let reopened = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        assert_eq!(rich.prepare_public(&reopened, item).unwrap().frame, bytes);
+    }
+    #[test]
+    fn oversized_detail_render_rolls_back_schema_and_poll() {
+        let d = crate::storage::tests::Directory::new();
+        let mut store = crate::storage::Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut candidate = crate::lifecycle::Reconciler::with_capacity(10);
+        let events = candidate
+            .observe_snapshot(
+                "",
+                "cluster|1|alice|s|a|COMPLETED|0:0",
+                "cluster",
+                "alice",
+                true,
+            )
+            .unwrap();
+        let revision = "a".repeat(64);
+        let result =
+            store.persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
+                vec![crate::storage::PublicRoute {
+                    destination: "rich",
+                    revision: &revision,
+                    slack: Some(crate::job_enrichment::SlackOptions {
+                        include_job_name: false,
+                        payload_limit: 1,
+                    }),
+                }]
+            });
+        assert!(result.is_err());
+        assert!(store.due_deliveries("cluster", 10, 10).unwrap().is_empty());
+        assert!(store.restore("cluster", 10).unwrap().1.is_none());
+        let db = rusqlite::Connection::open_with_flags(
+            d.path(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
     }
     #[test]
     fn pending_slack_cannot_be_reinterpreted_as_generic_webhook() {

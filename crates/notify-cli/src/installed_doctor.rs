@@ -6,6 +6,7 @@ pub(super) enum Error {
     Permission,
     Programs,
     Probe,
+    ClusterMismatch,
 }
 pub(super) fn run(path: &Path) -> Result<String, Error> {
     let snapshot = config_snapshot::read(path).map_err(|_| Error::Config)?;
@@ -21,7 +22,7 @@ pub(super) fn run(path: &Path) -> Result<String, Error> {
     // Each runner bounds stdout and stderr independently; reserve half the total
     // output budget for each stream and share that budget across both probes.
     let mut remaining = draft.controls.output_limit;
-    for program in [active, accounting] {
+    for program in [&active, &accounting] {
         let timeout = deadline
             .checked_duration_since(Instant::now())
             .filter(|duration| !duration.is_zero())
@@ -45,5 +46,23 @@ pub(super) fn run(path: &Path) -> Result<String, Error> {
             .checked_sub(limit + output.len())
             .ok_or(Error::Probe)?;
     }
+    let root = crate::config_validate::object(&draft.value).map_err(|_| Error::Config)?;
+    let monitor = crate::config_validate::object(
+        crate::config_validate::get(root, "monitor").map_err(|_| Error::Config)?,
+    )
+    .map_err(|_| Error::Config)?;
+    let cluster = crate::config_validate::text(
+        crate::config_validate::get(monitor, "cluster_id").map_err(|_| Error::Config)?,
+    )
+    .map_err(|_| Error::Config)?;
+    let timeout = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or(Error::Probe)?;
+    crate::cluster_probe::check(&active, cluster, timeout, remaining / 2).map_err(|error| {
+        match error {
+            crate::cluster_probe::Error::Mismatch => Error::ClusterMismatch,
+            _ => Error::Probe,
+        }
+    })?;
     Ok(include_str!("../../../contracts/cli/doctor-success.stdout").into())
 }

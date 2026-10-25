@@ -79,6 +79,7 @@ pub(super) struct Record {
     identity: Identity,
     state: State,
     exit_code: String,
+    details: JobDetails,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,6 +88,27 @@ pub(super) struct ParseError {
     reason: &'static str,
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(super) struct JobDetails {
+    pub(super) name: Option<String>,
+    pub(super) elapsed_seconds: Option<u64>,
+    pub(super) started_at: Option<String>,
+    pub(super) finished_at: Option<String>,
+    pub(super) exit_code: Option<String>,
+}
+impl std::fmt::Debug for JobDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JobDetails(redacted)")
+    }
+}
+fn utc_time(value: &str) -> Option<String> {
+    crate::state_timestamp::valid(value).then(|| format!("{value}Z"))
+}
+impl Record {
+    pub(super) fn cluster(&self) -> &str {
+        &self.identity.cluster
+    }
+}
 // Synthetic accounting format: Cluster|JobID|User|Submit|Start|State|ExitCode.
 // Reject an entire malformed snapshot instead of interpreting missing rows as exits.
 pub(super) fn parse_accounting(input: &str, user: &str) -> Result<Vec<Record>, ParseError> {
@@ -95,12 +117,12 @@ pub(super) fn parse_accounting(input: &str, user: &str) -> Result<Vec<Record>, P
         if line.trim().is_empty() {
             continue;
         }
-        let fields: Vec<_> = line.split('|').map(str::trim).collect();
+        let fields: Vec<_> = line.splitn(10, '|').map(str::trim).collect();
         let error = |reason| ParseError {
             line: index + 1,
             reason,
         };
-        if fields.len() != 7 {
+        if !matches!(fields.len(), 7 | 9 | 10) {
             return Err(error("expected seven accounting fields"));
         }
         if fields[2] != user {
@@ -152,8 +174,24 @@ pub(super) fn parse_accounting(input: &str, user: &str) -> Result<Vec<Record>, P
                 submit: fields[3].to_owned(),
                 start: start.to_owned(),
             },
-            state,
+            state: state.clone(),
             exit_code: fields[6].to_owned(),
+            details: JobDetails {
+                name: fields
+                    .get(9)
+                    .filter(|name| {
+                        !name.is_empty() && name.len() <= 512 && !name.chars().any(char::is_control)
+                    })
+                    .map(|name| name.to_string()),
+                elapsed_seconds: fields.get(7).and_then(|v| v.parse::<u64>().ok()),
+                started_at: if state == State::Pending {
+                    None
+                } else {
+                    utc_time(start)
+                },
+                finished_at: fields.get(8).and_then(|v| utc_time(v)),
+                exit_code: state.terminal().then(|| fields[6].to_owned()),
+            },
         });
     }
     Ok(records)
@@ -188,6 +226,7 @@ pub(super) fn parse_active(
     let mut records = parse_accounting(&normalized, user)?;
     for record in &mut records {
         record.exit_code.clear();
+        record.details.exit_code = None;
     }
     Ok(records)
 }
@@ -203,6 +242,7 @@ pub(super) struct Reconciler {
     // Candidate state is persisted by the private storage pipeline; retention is future work.
     pub(super) latest: HashMap<Identity, State>,
     pub(super) emitted: HashSet<Event>,
+    pub(super) details: HashMap<Identity, JobDetails>,
     capacity: Option<(usize, usize)>,
 }
 
@@ -252,7 +292,16 @@ impl Reconciler {
             }
         }
         let mut candidate = self.clone();
+        candidate.details.clear();
         let events = candidate.observe(&records, emit_discovered);
+        for record in &records {
+            if candidate.latest.get(&record.identity) == Some(&record.state) {
+                candidate
+                    .details
+                    .entry(record.identity.clone())
+                    .or_insert_with(|| record.details.clone());
+            }
+        }
         if let Some((identities, events)) = self.capacity {
             if candidate.latest.len() > identities || candidate.emitted.len() > events {
                 return Err(ParseError {
@@ -329,6 +378,21 @@ mod tests {
         .remove(0)
     }
 
+    #[test]
+    fn optional_accounting_details_keep_terminal_values_and_unknowns() {
+        let mut reconciler = Reconciler::with_capacity(10);
+        let events=reconciler.observe_snapshot("1|alice|2026-10-25T10:00:00|2026-10-25T10:01:00|RUNNING","cluster|1|alice|2026-10-25T10:00:00|2026-10-25T10:01:00|COMPLETED|0:0|754|2026-10-25T10:13:34|name|with|pipes","cluster","alice",true).unwrap();
+        let details = reconciler.details.get(&events[0].identity).unwrap();
+        assert_eq!(details.name.as_deref(), Some("name|with|pipes"));
+        assert_eq!(details.elapsed_seconds, Some(754));
+        assert_eq!(details.finished_at.as_deref(), Some("2026-10-25T10:13:34Z"));
+        assert_eq!(details.exit_code.as_deref(), Some("0:0"));
+        let records =
+            parse_accounting("cluster|2|alice|s|a|RUNNING|0:0|Unknown|Unknown", "alice").unwrap();
+        assert_eq!(records[0].details.elapsed_seconds, None);
+        assert_eq!(records[0].details.exit_code, None);
+        assert_eq!(records[0].details.started_at, None);
+    }
     #[test]
     fn capacity_failure_is_atomic_and_preserves_deduplication() {
         let mut r = Reconciler::with_capacity(1);

@@ -74,7 +74,23 @@ impl Plan {
             emit_discovered: self.observation.emit_discovered(),
         };
         let mut candidate = reconciler.clone();
-        let events = crate::scheduler::poll_with(&request, &mut candidate, query)
+        let details = self
+            .webhooks
+            .iter()
+            .any(|w| w.resources.slack_options().is_some());
+        let names = self.webhooks.iter().any(|w| {
+            w.resources
+                .slack_options()
+                .is_some_and(|o| o.include_job_name)
+        });
+        let mut query = query;
+        let events =
+            crate::scheduler::poll_with(&request, &mut candidate, |command, timeout, limit| {
+                if details {
+                    crate::job_enrichment::accounting_command(command, names);
+                }
+                query(command, timeout, limit)
+            })
             .map_err(crate::scheduler::DurablePollError::Poll)?;
         // UUID strings have fixed encoded width, so this admission render matches
         // the eventual payload size without allocating an identity before commit.
@@ -108,6 +124,11 @@ impl Plan {
                         .destinations(&event.state)
                         .into_iter()
                         .map(|destination| crate::storage::PublicRoute {
+                            slack: self
+                                .webhooks
+                                .iter()
+                                .find(|w| w.alias.as_str() == destination)
+                                .and_then(|w| w.resources.slack_options()),
                             destination,
                             revision: bindings[destination],
                         })
@@ -240,6 +261,10 @@ pub(super) fn prepare_draft(
         .map_err(Error::Resource)?;
         if text(get(p, "type").map_err(shape)?).map_err(shape)? == "slack" {
             resources = resources.with_slack();
+            let enabled = |key| matches!(get(p, key), Ok(crate::config_decode::Value::Bool(true)));
+            if enabled("include_job_details") || enabled("include_job_name") {
+                resources = resources.with_details(enabled("include_job_name"));
+            }
         }
         if let Ok(roots) = get(p, "trust_der_files") {
             let paths = list(roots, 1, 32)

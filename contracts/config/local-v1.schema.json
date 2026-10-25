@@ -131,7 +131,10 @@
             ],
             "properties": {
               "type": {
-                "enum": ["webhook", "slack"]
+                "enum": [
+                  "webhook",
+                  "slack"
+                ]
               },
               "url_env": {
                 "type": "string",
@@ -166,9 +169,42 @@
                   "maxLength": 4096,
                   "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
                 }
+              },
+              "include_job_details": {
+                "type": "boolean"
+              },
+              "include_job_name": {
+                "type": "boolean"
               }
             },
-            "additionalProperties": false
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "webhook"
+                    }
+                  }
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "include_job_details"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "include_job_name"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
           },
           {
             "type": "object",
@@ -466,7 +502,10 @@
                 ],
                 "properties": {
                   "type": {
-                    "enum": ["webhook", "slack"]
+                    "enum": [
+                      "webhook",
+                      "slack"
+                    ]
                   },
                   "url_env": {
                     "type": "string",
@@ -501,9 +540,42 @@
                       "maxLength": 4096,
                       "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
                     }
+                  },
+                  "include_job_details": {
+                    "type": "boolean"
+                  },
+                  "include_job_name": {
+                    "type": "boolean"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "type": {
+                          "const": "webhook"
+                        }
+                      }
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "include_job_details"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "include_job_name"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

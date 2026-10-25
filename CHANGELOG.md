@@ -7,6 +7,10 @@ the design handoff; no release has been published.
 
 ### Fixed
 
+- Detect local Slurm ClusterName mismatches before state acquisition when sibling
+  scontrol is available; reject mismatching accounting snapshots explicitly before
+  persistence. Setup now discovers scheduler identity instead of using a host label.
+
 - Report bounded static foreground failure stages and categories before the final
   runtime error, without raw job, provider or filesystem diagnostics. Preserve
   fatal/retry classification, state recovery and exit codes. Document a per-command
@@ -29,6 +33,13 @@ the design handoff; no release has been published.
   termination. Runtime ownership/deadline behavior is unchanged.
 
 ### Added
+
+- Opt-in detailed Slack alerts with status icons (including ✅ completed), duration,
+  allocation exit status/signal, validated start/end times, separate array-task
+  labels and optional job names. Freeze destination-specific JSON in schema v6
+  for identical retries. Existing Slack v1, generic webhook and SMTP formats remain
+  unchanged. Document closed backup/downgrade and state-lifetime name retention.
+  No dependency or polling-default changes.
 
 - Explicit `slack` HTTPS provider with deterministic plain text lifecycle/test
   messages, allowlisted disclosure, protected URL references, version-bound pending

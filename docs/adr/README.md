@@ -24,3 +24,8 @@ Local MVP completion: [doctor](0068-installed-read-only-doctor.md),
 adds an unsupported-rename fallback without relaxing sync/no-overwrite guarantees.
 
 [Slack incoming webhook rendering](0073-slack-incoming-webhook-rendering.md) adds an explicit version-bound provider without changing generic payloads.
+
+[Detailed frozen Slack deliveries](0074-detailed-slack-frozen-deliveries.md) adds
+opt-in accounting fields and transactional v6 state;
+[local cluster identity preflight](0075-local-cluster-identity-preflight.md)
+prevents hostname/ClusterName confusion before monitoring state is opened.

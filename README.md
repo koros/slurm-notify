@@ -17,7 +17,8 @@ It includes interactive `init`, `config validate`, `doctor`, explicit provider
 acceptance covers webhook, SMTP and mixed delivery, verified TLS, signals and
 durable restart from a relocated executable.
 
-For Slack incoming webhooks, use the [HPC Slack setup guide](docs/operations/slack.md).
+Slack supports opt-in job details and names, status icons and frozen-message
+recovery. For Slack incoming webhooks, use the [HPC Slack setup guide](docs/operations/slack.md).
 
 Start with the [getting-started guide](docs/operations/getting-started.md).
 The [CLI contract](contracts/cli/README.md) and

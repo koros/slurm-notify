@@ -1838,6 +1838,8 @@ fn https_restart_acceptance(slack: bool) {
     source["storage"]["path"] = serde_json::json!(state);
     if slack {
         source["providers"]["primary"]["type"] = serde_json::json!("slack");
+        source["providers"]["primary"]["include_job_details"] = serde_json::json!(true);
+        source["providers"]["primary"]["include_job_name"] = serde_json::json!(true);
     }
     source["providers"]["primary"]["trust_der_files"] = serde_json::json!([trust]);
     source["monitor"]["initial_observation"] = serde_json::json!("emit");
@@ -1845,7 +1847,60 @@ fn https_restart_acceptance(slack: bool) {
     source["delivery"]["jitter_seconds"] = serde_json::json!(0);
     write(&config, &serde_json::to_vec(&source).unwrap(), 0o600);
     for (name,body) in [("squeue","#!/bin/sh\nexit 0\n"),("sacct","#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|s|a|COMPLETED|0:0\\n' \"$user\"\n")] {write(&root.join(name),body.as_bytes(),0o700);}
+    if slack {
+        std::fs::write(
+            root.join("squeue"),
+            b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'slurm fixture\\n'; fi\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("sacct"),b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'slurm fixture\\n'; exit 0; fi\ncase \"$*\" in *JobName%256*) ;; *) exit 7;; esac\nfor arg in \"$@\"; do case \"$arg\" in --user=*) user=${arg#--user=};; esac; done\nprintf 'research-cluster|1|%s|2026-10-25T10:00:00|2026-10-25T10:01:00|COMPLETED|0:0|754|2026-10-25T10:13:34|sweep<&>\\n' \"$user\"\n").unwrap();
+    }
     expect(command().args(["config","validate","--config"]).arg(&config).env("SLURM_NOTIFY_WEBHOOK_URL",format!("https://127.0.0.1:{port}/hook")).env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION","Bearer fixture").output().unwrap(),0,b"Configuration valid: schema_version=1 cluster=research-cluster destinations=1 smtp_permissions=not_applicable\n",b"");
+    if slack {
+        write(
+            &root.join("scontrol"),
+            b"#!/bin/sh\nprintf 'ClusterName = research-cluster\\n'\n",
+            0o700,
+        );
+        source["monitor"]["cluster_id"] = serde_json::json!("wrong-label");
+        std::fs::write(&config, serde_json::to_vec(&source).unwrap()).unwrap();
+        let mut doctor = command();
+        doctor
+            .args(["doctor", "--config"])
+            .arg(&config)
+            .env("PATH", &root)
+            .env(
+                "SLURM_NOTIFY_WEBHOOK_URL",
+                format!("https://127.0.0.1:{port}/hook"),
+            )
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture");
+        let result = terminal::run(doctor, b"");
+        assert_eq!(
+            result.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("cluster identity mismatch"));
+        let mut cmd = command();
+        cmd.args(["start", "--foreground", "--config"])
+            .arg(&config)
+            .env("PATH", &root)
+            .env(
+                "SLURM_NOTIFY_WEBHOOK_URL",
+                format!("https://127.0.0.1:{port}/hook"),
+            )
+            .env("SLURM_NOTIFY_WEBHOOK_AUTHORIZATION", "Bearer fixture");
+        let result = terminal::run(cmd, b"");
+        assert_eq!(result.status.code(), Some(2));
+        let diagnostic = String::from_utf8(result.stderr).unwrap();
+        assert!(diagnostic.contains("monitor.cluster_id must match the local ClusterName"));
+        assert!(!state.exists());
+        source["monitor"]["cluster_id"] = serde_json::json!("research-cluster");
+        std::fs::write(&config, serde_json::to_vec(&source).unwrap()).unwrap();
+    }
     let mut frozen = None;
     for run in 0..3 {
         let mut child = Reap(
@@ -1932,13 +1987,29 @@ fn https_restart_acceptance(slack: bool) {
         if slack {
             let rendered: serde_json::Value = serde_json::from_slice(&payload).unwrap();
             assert_eq!(rendered["mrkdwn"], false);
-            assert_eq!(rendered["text"], format!("Slurm Notify: COMPLETED\nCluster: research-cluster\nJob: 1\nObserved: {}\nEvent: {id}",serde_json::from_slice::<serde_json::Value>(&body).unwrap()["observed_at"].as_str().unwrap()));
+            let text = rendered["text"].as_str().unwrap();
+            assert!(text.contains("Name: sweep&lt;&amp;&gt;"));
+            assert!(text.contains("Duration: 12m 34s"));
+            assert!(text.contains("Exit code (status:signal): 0:0"));
+            assert!(text.contains("Finished: 2026-10-25T10:13:34Z"));
+            assert!(text.ends_with(&format!("Event: {id}")));
         } else {
             assert_eq!(payload, body);
         }
         assert!(headers
             .to_ascii_lowercase()
             .contains(&format!("idempotency-key: {id}\r\n")));
+    }
+    if slack {
+        let result = command()
+            .args(["status", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(0));
+        assert!(String::from_utf8(result.stdout)
+            .unwrap()
+            .contains("delivered=1"));
     }
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1977,7 +2048,7 @@ fn doctor_checks_resources_and_bounded_probes_without_state_or_provider_activity
     ))
     .unwrap();
     source["storage"]["path"] = serde_json::json!(state);
-    source["monitor"]["query_timeout_seconds"] = serde_json::json!(3);
+    source["monitor"]["query_timeout_seconds"] = serde_json::json!(5);
     source["monitor"]["command_output_limit_bytes"] = serde_json::json!(1024);
     let write = |path: &std::path::Path, bytes: &[u8], mode| {
         std::fs::OpenOptions::new()

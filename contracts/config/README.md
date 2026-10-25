@@ -71,3 +71,20 @@ actual Slack JSON. A versioned destination revision prevents reinterpreting pend
 webhook work as Slack or vice versa. Existing generic/SMTP baselines are unchanged.
 See [ADR 0073](../../docs/adr/0073-slack-incoming-webhook-rendering.md) and
 [setup](../../docs/operations/slack.md).
+
+### Detailed Slack and cluster identity
+
+Slack-only booleans `include_job_details` and `include_job_name` default to false.
+Either true selects v2 with status icons, duration, allocation exit status:signal,
+validated UTC start/end times and separate allocation/array-task labels. Names
+also imply details. The new example enables details while keeping names hidden.
+Unknown values remain unavailable. Name disclosure is per destination, not inherited
+by generic webhook, SMTP or other Slack routes. Renderer/disclosure choices bind
+the destination revision; drain pending work before changing them. Opted-in names
+persist in immutable protected state/backups for its lifetime, even after outbox
+cleanup. See ADR 0074 and the Slack upgrade guide for v6 backup/downgrade requirements.
+
+`monitor.cluster_id` must match Slurm accounting Cluster, not a hostname or display
+label. Setup discovers ClusterName; doctor/start optionally verify it via sibling
+scontrol before state acquisition. Every accounting snapshot rejects mismatches
+before reconciliation/persistence. Namespaces are never renamed automatically.

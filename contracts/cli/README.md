@@ -198,3 +198,23 @@ Scheduling errors add `Foreground scheduling failure: reason=<reason>.` with
 `policy`, `clock`, `clock_regressed`, `deadline_overflow`, `wait`, `no_progress`,
 `wake_limit` or `cycle`. Exit codes, cancellation and recovery behavior are unchanged.
 No error objects, private reports, URLs, scheduler output or config values are formatted.
+
+## Cluster preflight and detailed Slack
+
+Doctor/start optionally run canonical sibling `scontrol show config` as a bounded
+read-only configuration probe. Doctor shares its total probe deadline and remaining
+output budget; start uses its configured query budget before state acquisition.
+SLURM_CLUSTERS is cleared for the local probe; site configuration remains available.
+Absence skips it; an unsafe/failing/malformed probe exits 1. A mismatch exits 2:
+
+```text
+Slurm cluster identity mismatch; monitor.cluster_id must match the local ClusterName from scontrol show config. No monitoring state was opened.
+```
+
+Doctor success/help baselines otherwise remain unchanged. Missing sibling scontrol
+does not establish identity. Accounting mismatch is fatal with
+`stage=poll reason=cluster_identity` and a static correction hint before poll commit.
+
+Init reviews detailed fields, name inclusion and state-lifetime retention when
+v2 is enabled. Existing v1 previews remain unchanged; synthetic tests contain no
+real scheduler data. No new CLI flags. See ADRs 0074/0075 for persistence/compatibility.
