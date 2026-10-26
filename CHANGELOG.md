@@ -10,7 +10,7 @@ the design handoff; no release has been published.
 - Review Dependabot updates: serde_json 1.0.154, zeroize 1.9.1,
   email-encoding 0.4.2 and idna_adapter 1.2.2 (ICU4X 2.4). Retain Rust 1.88.0,
   strict ASCII endpoint inputs, exact destination binding and scalar Base64 features.
-- Update the SHA-pinned tool installer to 2.87.30 in coverage and dependency CI;
+- Update the SHA-pinned tool installer to 2.87.31 in coverage and dependency CI;
   keep cargo-llvm-cov 0.6.21, cargo-deny 0.20.2 and checksum/no-fallback settings.
 
 ### Fixed

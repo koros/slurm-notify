@@ -10,7 +10,7 @@ Public CLI/config/event/persistence contracts and operational defaults are uncha
 | [14](https://github.com/koros/slurm-notify/pull/14) | zeroize 1.8.1 → 1.9.1 | Requires Rust 1.85; Zeroizing Debug becomes opaque; retain secret-owning buffers and static diagnostics |
 | [15](https://github.com/koros/slurm-notify/pull/15) | email-encoding 0.4.1 → 0.4.2 | Requires Rust 1.85, uses Base64 0.23; existing frozen SMTP rendering and recovery checks must pass |
 | [13](https://github.com/koros/slurm-notify/pull/13) | idna_adapter 1.1.0 → 1.2.2 | Switches Unicode backend to ICU4X; resolved ICU 2.4 requires Rust 1.88 and adds Unicode data/derive dependencies |
-| [17](https://github.com/koros/slurm-notify/pull/17) | taiki-e/install-action 2.87.27 → 2.87.30 | Verified upstream commit a4d3f3f761dcd95cce1b72cb61cb6d1963438177; installer runtime/action definition and the two selected tool manifests unchanged |
+| [17](https://github.com/koros/slurm-notify/pull/17) | taiki-e/install-action 2.87.27 → 2.87.31 | Verified upstream commit 1e29709c0ec63babbe8f266397a465f29a825f91; installer runtime/action definition and the two selected tool manifests unchanged |
 
 ## Boundaries and dependency growth
 
@@ -43,7 +43,7 @@ Upstream references: [serde_json releases](https://github.com/serde-rs/json/rele
 [zeroize changelog](https://github.com/RustCrypto/utils/blob/zeroize-v1.9.1/zeroize/CHANGELOG.md),
 [email-encoding manifest](https://github.com/lettre/email-encoding/blob/v0.4.2/Cargo.toml),
 [idna_adapter manifest](https://github.com/hsivonen/idna_adapter/blob/v1.2.2/Cargo.toml),
-[installer comparison](https://github.com/taiki-e/install-action/compare/ab6895351a88b908e96a4697860d4ffea5e57dbe...a4d3f3f761dcd95cce1b72cb61cb6d1963438177).
+[installer comparison](https://github.com/taiki-e/install-action/compare/ab6895351a88b908e96a4697860d4ffea5e57dbe...1e29709c0ec63babbe8f266397a465f29a825f91).
 
 ## Validation
 
@@ -55,3 +55,16 @@ advisory/license/source checks, Actionlint, strict rustdoc, optimized build and
 help/version baseline smoke pass. Contract
 baselines remain unchanged. Hosted checks must independently verify both platforms
 and pinned tool installation; older PR runs alone do not prove this integration.
+
+
+Dependabot advanced PR 17 to 2.87.31 after the initial 2.87.30 integration. The
+additional reviewed diff only updates tool catalogs and its changelog; the runtime,
+action definition and selected tool manifests remain unchanged.
+
+The initial hosted integration passed all application tests but failed merging one
+corrupt LLVM profile. The same failure appears in the earlier October 24 PR 13 run,
+before these updates were integrated. The clean integration rerun passed both
+platforms, coverage, reporting and artifact publication. It retains strict profile merging,
+the complete test suite and the unchanged 90% threshold; no profile exclusions or
+failure suppression are introduced. This transient instrumentation issue remains
+a coverage-tooling reliability concern, not a proven dependency API incompatibility.

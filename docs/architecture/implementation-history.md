@@ -3892,3 +3892,12 @@ helpers, 29 CLI/provider-codec checks, custom process acceptance and 27 Python t
 Coverage passed at 97.11% (27,425/28,242); audit/license/source checks, Actionlint
 and strict rustdoc also passed. See the [compatibility review](../operations/dependabot-review-2026-10-26.md)
 for dependency footprint and upstream references. Hosted results are checked separately.
+
+
+### Follow-up: installer PR advanced to 2.87.31
+
+After the initial dependency integration, Dependabot closed the four Rust PRs and
+advanced PR 17 to installer 2.87.31. Reviewed and adopted its verified full tag SHA;
+only tool catalogs/changelog change, with no runtime or selected-tool manifest changes.
+An initial hosted coverage merge hit a corrupt profile, also seen in an older PR 13
+run; strict merging and the 90% gate are retained. Hosted reruns are verified separately.
