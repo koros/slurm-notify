@@ -29,3 +29,6 @@ adds an unsupported-rename fallback without relaxing sync/no-overwrite guarantee
 opt-in accounting fields and transactional v6 state;
 [local cluster identity preflight](0075-local-cluster-identity-preflight.md)
 prevents hostname/ClusterName confusion before monitoring state is opened.
+
+[Shared presentation and Slack Block Kit](0076-slack-block-kit-presentation.md)
+adds a private reusable content model and version-bound detailed Slack layout.

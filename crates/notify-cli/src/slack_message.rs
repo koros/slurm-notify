@@ -51,7 +51,9 @@ pub(super) fn render(payload: &[u8]) -> Result<Vec<u8>, ()> {
 // unless the body is exactly the bounded Slack shape.
 pub(super) fn valid_wire(value: &Value, id: &str) -> bool {
     crate::public_event::valid_id(id)
-        && value.as_object().is_some_and(|object| object.len() == 4)
+        && value.as_object().is_some_and(|object| {
+            object.len() == 4 || (object.len() == 5 && crate::slack_blocks::valid_wire(value))
+        })
         && ["mrkdwn", "unfurl_links", "unfurl_media"]
             .iter()
             .all(|key| value.get(key) == Some(&Value::Bool(false)))

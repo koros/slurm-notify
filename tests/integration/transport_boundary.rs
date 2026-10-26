@@ -14,6 +14,8 @@ mod delivery;
 mod job_enrichment;
 #[path = "../../crates/notify-cli/src/lifecycle.rs"]
 mod lifecycle;
+#[path = "../../crates/notify-cli/src/notification_presentation.rs"]
+mod notification_presentation;
 #[path = "../../crates/notify-cli/src/provider_frame.rs"]
 mod provider_frame;
 #[path = "../../crates/notify-cli/src/provider_outcome.rs"]
@@ -26,6 +28,8 @@ mod public_event;
 mod rendering_fingerprint;
 #[path = "../../crates/notify-cli/src/scheduler.rs"]
 mod scheduler;
+#[path = "../../crates/notify-cli/src/slack_blocks.rs"]
+mod slack_blocks;
 #[path = "../../crates/notify-cli/src/slack_message.rs"]
 mod slack_message;
 #[path = "../../crates/notify-cli/src/smtp_address.rs"]

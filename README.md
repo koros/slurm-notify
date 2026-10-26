@@ -25,7 +25,7 @@ compiler, not a declared minimum supported Rust version.
 A detailed Slack alert can look like this (synthetic values):
 
 ```text
-✅ Slurm Notify: COMPLETED
+✅ Job completed
 Job: 123456 · Array task: 2
 Cluster: research-cluster
 Duration: 5m 0s
@@ -36,7 +36,8 @@ Observed: 2026-10-25T11:36:00Z
 Event: evt_482417c0689d4bccb07011e02307198a
 ```
 
-Slack details are opt-in; names require a separate opt-in and remain in protected
+Detailed Slack uses a structured header, paired fields and a compact footer, with
+a complete plain-text fallback. Slack details are opt-in; names require a separate opt-in and remain in protected
 state/backups for the ledger's lifetime. Missing details say unavailable. Email and
 generic webhooks use their own minimal payloads. See the [Slack guide](docs/operations/slack.md)
 for setup, disclosure controls and upgrades from the original message format.

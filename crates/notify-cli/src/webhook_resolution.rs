@@ -52,7 +52,7 @@ impl Resources {
     }
     pub(super) fn with_details(mut self, include_job_name: bool) -> Self {
         self.revision = crate::config_reference::reference(
-            b"slack-render-v2\0",
+            b"slack-render-v3\0",
             &[
                 &self.revision,
                 if include_job_name {
@@ -359,6 +359,21 @@ mod tests {
         assert!(public_resources("https://fixture.invalid/hook", 16384)
             .with_trust(&[path])
             .is_err());
+    }
+    #[test]
+    fn detailed_v2_pending_work_cannot_switch_to_blocks() {
+        let directory = crate::storage::tests::Directory::new();
+        let mut store =
+            crate::storage::Store::open(&directory.path(), Duration::from_millis(50)).unwrap();
+        let mut old = public_resources("https://fixture.invalid/hook", 16384).with_slack();
+        old.revision =
+            crate::config_reference::reference(b"slack-render-v2\0", &[&old.revision, "no_names"]);
+        let item = public_seed(&mut store, &old, "1");
+        let current = public_resources("https://fixture.invalid/hook", 16384)
+            .with_slack()
+            .with_details(false);
+        assert_ne!(old.public_revision(), current.public_revision());
+        assert!(current.prepare_public(&store, &item).is_err());
     }
     fn public_resources(url: &str, limit: usize) -> Resources {
         resolve(

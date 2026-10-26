@@ -99,7 +99,7 @@ and rendered bytes must each fit the destination payload cap. Rendering is stabl
 for a frozen frame and bound to a versioned destination revision; changing that
 revision blocks pending work. Slack may duplicate messages after lost acknowledgements.
 
-## Opt-in Slack rendering v2
+## Opt-in Slack rendering v2 (historical)
 
 V2 retains the four-field JSON shape and final Event line. It adds status icons
 (✅ completed, ❌ failed, ⏱️ timeout and distinct other states), separates allocation
@@ -109,3 +109,19 @@ values are explicit. Generic lifecycle JSON and Slack v1 text remain unchanged.
 The complete per-destination v2 JSON is frozen transactionally in schema v6; retries
 do not refresh accounting metadata. Renderer/name choices bind the destination
 revision. See ADR 0074.
+
+## Opt-in Slack rendering v3
+
+Detailed Slack now uses `slack-v3.schema.json`: the four existing properties plus
+`blocks`. A readable status/icon header, paired plain-text fields and a context
+footer show the same information as the complete top-level text. Observed time
+and the full event ID remain available. Started messages omit finish time and exit
+status. Names stay separately opt-in; unavailable details remain explicit. Synthetic
+tests use the same layout without scheduler data. No Markdown, links, actions or
+unfurls are enabled. Rust additionally enforces UTF-8 byte limits and exact equality
+between block content and fallback, including the matching final event ID.
+
+New detailed work binds `slack-render-v3`; v2 is historical. Existing schema v6
+storage freezes complete per-destination bytes. Drain old pending deliveries with
+the old binary/config before upgrading; no database migration or new config field.
+Minimal v1 and generic webhook/SMTP contracts are unchanged. See ADR 0076.

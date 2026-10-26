@@ -1988,6 +1988,12 @@ fn https_restart_acceptance(slack: bool) {
             let rendered: serde_json::Value = serde_json::from_slice(&payload).unwrap();
             assert_eq!(rendered["mrkdwn"], false);
             let text = rendered["text"].as_str().unwrap();
+            assert_eq!(rendered["blocks"][0]["text"]["text"], "✅ Job completed");
+            assert_eq!(rendered["blocks"][1]["fields"][0]["type"], "plain_text");
+            assert_eq!(
+                rendered["blocks"][2]["elements"][1]["text"],
+                format!("Event: {id}")
+            );
             assert!(text.contains("Name: sweep&lt;&amp;&gt;"));
             assert!(text.contains("Duration: 12m 34s"));
             assert!(text.contains("Exit code (status:signal): 0:0"));
@@ -2172,7 +2178,10 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
         ("slack", "400 Bad Request"),
         ("slack", "429 Too Many Requests"),
         ("slack", "200 OK"),
+        ("slack_blocks", "200 OK"),
     ] {
+        let detailed = kind == "slack_blocks";
+        let kind = if detailed { "slack" } else { kind };
         let (der, port, server) =
             https_relay::start_with_authorization(vec![status], kind != "slack");
         write(&trust, &der);
@@ -2182,6 +2191,9 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
         .unwrap();
         source["storage"]["path"] = serde_json::json!(state);
         source["providers"]["primary"]["type"] = serde_json::json!(kind);
+        if detailed {
+            source["providers"]["primary"]["include_job_details"] = serde_json::json!(true);
+        }
         if kind == "slack" {
             source["providers"]["primary"]
                 .as_object_mut()
@@ -2228,10 +2240,18 @@ fn explicit_provider_tests_send_once_without_scheduler_or_state() {
             .unwrap();
         let preview: serde_json::Value = serde_json::from_str(preview).unwrap();
         if kind == "slack" {
-            assert!(preview["text"]
-                .as_str()
-                .unwrap()
-                .starts_with("Slurm Notify test\n"));
+            assert!(preview["text"].as_str().unwrap().starts_with(if detailed {
+                "🧪 Slurm Notify test\n"
+            } else {
+                "Slurm Notify test\n"
+            }));
+            if detailed {
+                assert_eq!(preview["blocks"][0]["text"]["text"], "🧪 Slurm Notify test");
+                assert!(preview["blocks"][1]["fields"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no scheduler data"));
+            }
             assert!(preview["text"]
                 .as_str()
                 .unwrap()

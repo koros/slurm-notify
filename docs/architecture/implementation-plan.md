@@ -57,6 +57,29 @@ Slack incoming webhook rendering is implemented as an explicit extension
 integrations, log monitoring, remote SSH and background service installation remain
 outside the implemented local MVP. No release is published.
 
+## Notification presentation milestone
+
+Tracking: [GitHub milestone 1](https://github.com/koros/slurm-notify/milestone/1).
+
+Adopt a private shared presentation model (heading, fields, context and complete
+plain-text fallback), with explicit platform renderers. Preserve per-destination
+privacy choices, frozen retries, payload budgets and generic webhook contracts.
+
+- [x] Introduce the private presentation model and Slack Block Kit v3 renderer for
+  opted-in detailed messages, including synthetic tests and readable lifecycle headings.
+- [x] Keep original minimal Slack v1 and generic webhook/SMTP bytes unchanged;
+  bind v3 to a new revision and reject switching pending work from older renderers.
+- [x] Complete controlled full-suite, restart and 90% coverage acceptance
+  (97.17% Rust line coverage locally).
+- [ ] Operator acceptance of the new layout on the HPC after draining older work.
+- [ ] Discord: review exact config/contract, implement embeds and explicit mention
+  suppression, provider acknowledgement/rate limits, privacy and restart acceptance.
+- [ ] Teams: review Workflow setup/authentication/ownership and exact config/contract,
+  implement Adaptive Cards, provider acknowledgement/rate limits and restart acceptance.
+
+Discord and Teams are planned; this milestone adds no provider support for them.
+See [ADR 0076](../adr/0076-slack-block-kit-presentation.md).
+
 ## Validation
 
 `sh scripts/check.sh` is the shared local/CI suite; staged and pre-push hooks must pass.

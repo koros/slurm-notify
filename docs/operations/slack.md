@@ -63,7 +63,7 @@ enter `yes`. Initialization sends nothing. Run validation and one synthetic test
 ```
 
 Expect a synthetic JSON preview, successful acknowledgement and a channel message
-starting `Slurm Notify test`. Failure does not retry automatically; acceptance may
+headed `🧪 Slurm Notify test` when details are enabled (otherwise `Slurm Notify test`). Failure does not retry automatically; acceptance may
 be unknown, so inspect the channel before repeating. Do not share the webhook URL.
 The installed client uses bundled public TLS roots and direct HTTPS, without proxy
 environment variables; Python connectivity alone does not prove this path works.
@@ -121,7 +121,23 @@ before the final runtime message. Share those tokens, exit code and historical
 status rather than credentials, raw scheduler output or database contents. The
 `policy` category describes an application validation check, not site authorization.
 
-## Upgrade existing Slack alerts to details and icons
+## Detailed Block Kit layout and upgrades
+
+Detailed messages now show a readable status heading (for example, ✅ Job completed),
+paired detail fields and a small observation/event footer. The complete fallback
+contains the same information. Started alerts omit finish time and exit status.
+The full event ID stays visible. Names remain separately opt-in and are escaped;
+no Markdown, links or actions are added. This layout is renderer v3, not a new
+provider/config type. See [ADR 0076](../adr/0076-slack-block-kit-presentation.md).
+
+**Already using detailed v2?** Drain pending work with the previous binary and
+configuration before rebuilding/upgrading, stop monitoring and take the closed
+backup below. New binaries deliberately refuse pending v2 renderer bindings; do
+not reset the database or edit revisions. The same drain requirement applies
+before downgrading from v3. Stored schema remains v6. Layout acceptance on a real
+HPC remains pending; controlled tests cannot establish its appearance in your client.
+
+## Enable details and icons from minimal Slack
 
 Existing configs keep v1 rendering until opted in. Stop monitoring with Ctrl-C,
 then run status. Drain pending deliveries with the old configuration first:

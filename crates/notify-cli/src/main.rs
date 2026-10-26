@@ -88,6 +88,8 @@ mod storage;
 
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod job_enrichment;
+mod notification_presentation;
+mod slack_blocks;
 mod slack_message;
 mod webhook;
 

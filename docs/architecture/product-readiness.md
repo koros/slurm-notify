@@ -1,11 +1,17 @@
 # Product readiness assessment
 
-Assessment after controlled detailed Slack, cluster preflight and relocated mixed workflow acceptance.
+Assessment after controlled Slack Block Kit, detailed delivery, cluster preflight
+and relocated mixed workflow acceptance.
 The private OS/runtime lifecycle and continuous owned sessions are also tested.
 Historical increments remain in the implementation history; this assessment groups
 current evidence by capability and identifies the remaining activation gates.
 
 ## Verified prototype
+
+- Private shared presentation content and detailed Slack Block Kit v3, including
+  all lifecycle headings, synthetic delivery, full fallback, plain-text-only blocks,
+  revision guards and byte-identical replay after restart. HPC layout acceptance
+  remains pending; Discord and Teams are planned.
 
 - Synthetic Slurm command parsing, bounded subprocess execution, lifecycle
   reconciliation and durable poll/checkpoint recovery.

@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slurm Notify detailed Slack Block Kit rendering v3",
+  "$comment": "Rust additionally enforces UTF-8 byte limits, canonical blocks equivalent to the complete fallback and the matching final event ID. Historical v1/v2 remain separate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "text",
+    "mrkdwn",
+    "unfurl_links",
+    "unfurl_media",
+    "blocks"
+  ],
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "mrkdwn": {
+      "const": false
+    },
+    "unfurl_links": {
+      "const": false
+    },
+    "unfurl_media": {
+      "const": false
+    },
+    "blocks": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text"
+          ],
+          "properties": {
+            "type": {
+              "const": "header"
+            },
+            "text": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text",
+                "emoji"
+              ],
+              "properties": {
+                "type": {
+                  "const": "plain_text"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 150
+                },
+                "emoji": {
+                  "const": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "fields"
+          ],
+          "properties": {
+            "type": {
+              "const": "section"
+            },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "text",
+                  "emoji"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "plain_text"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "emoji": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "elements"
+          ],
+          "properties": {
+            "type": {
+              "const": "context"
+            },
+            "elements": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "text",
+                  "emoji"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "plain_text"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "emoji": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "items": false
+    }
+  }
+}

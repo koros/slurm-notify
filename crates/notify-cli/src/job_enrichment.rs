@@ -43,9 +43,14 @@ pub(super) fn render(
     details: Option<&crate::lifecycle::JobDetails>,
     names: bool,
 ) -> Result<Vec<u8>, ()> {
-    let mut value: serde_json::Value = serde_json::from_slice(payload).map_err(|_| ())?;
+    let value: serde_json::Value = serde_json::from_slice(payload).map_err(|_| ())?;
     if value["event_type"] == "TEST" {
-        return crate::slack_message::render(payload);
+        crate::slack_message::render(payload)?;
+        return crate::slack_blocks::render(&crate::notification_presentation::Notification {
+            heading: "🧪 Slurm Notify test".into(),
+            fields: vec!["Synthetic Slurm Notify test; no scheduler data.".into()],
+            context: vec![format!("Event: {}", value["event_id"].as_str().ok_or(())?)],
+        });
     }
     // Validate the base frame before using its allowlisted fields.
     crate::slack_message::render(payload)?;
@@ -53,18 +58,19 @@ pub(super) fn render(
     let details = details.unwrap_or(&default);
     let field = |key: &str| value.get(key).and_then(serde_json::Value::as_str).ok_or(());
     let state = value["job"]["state"].as_str().ok_or(())?;
-    let icon = match state {
-        "COMPLETED" => "✅",
-        "FAILED" => "❌",
-        "TIMEOUT" => "⏱️",
-        "CANCELLED" => "🚫",
-        "OUT_OF_MEMORY" => "🧠",
-        "NODE_FAIL" | "BOOT_FAIL" => "⚠️",
-        "DEADLINE" => "📅",
-        "RUNNING" => "▶️",
+    let title = match state {
+        "COMPLETED" => "✅ Job completed",
+        "FAILED" => "❌ Job failed",
+        "TIMEOUT" => "⏱️ Job exceeded its time limit",
+        "CANCELLED" => "🚫 Job cancelled",
+        "OUT_OF_MEMORY" => "🧠 Job ran out of memory",
+        "NODE_FAIL" => "⚠️ Job stopped: node failure",
+        "BOOT_FAIL" => "⚠️ Job could not launch: boot failure",
+        "DEADLINE" => "📅 Job terminated: deadline reached",
+        "RUNNING" => "▶️ Job started",
         _ => return Err(()),
     };
-    let mut text = format!("{icon} Slurm Notify: {state}");
+    let mut fields = Vec::new();
     if names {
         let name = details.name.as_deref().unwrap_or("unavailable");
         if name.len() > 512 || name.chars().any(char::is_control) {
@@ -74,14 +80,15 @@ pub(super) fn render(
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
-        text.push_str(&format!("\nName: {name}"));
+        fields.push(format!("Name: {name}"));
     }
     let job = value["job"]["id"].as_str().ok_or(())?;
-    text.push_str(&format!("\nJob: {job}"));
+    let mut identity = format!("Job: {job}");
     if let Some(task) = value["job"]["array_task_id"].as_str() {
-        text.push_str(&format!(" · Array task: {task}"));
+        identity.push_str(&format!(" · Array task: {task}"));
     }
-    text.push_str(&format!("\nCluster: {}", field("cluster_id")?));
+    fields.push(identity);
+    fields.push(format!("Cluster: {}", field("cluster_id")?));
     let duration = details
         .elapsed_seconds
         .map(|seconds| {
@@ -93,30 +100,31 @@ pub(super) fn render(
             }
         })
         .unwrap_or_else(|| "unavailable".into());
-    text.push_str(&format!(
-        "\nDuration: {duration}\nExit code (status:signal): {}",
-        details.exit_code.as_deref().unwrap_or("unavailable")
-    ));
-    for (label, time) in [
-        ("Started", &details.started_at),
-        ("Finished", &details.finished_at),
-    ] {
-        text.push_str(&format!(
-            "\n{label}: {}",
-            time.as_deref().unwrap_or("unavailable")
+    fields.push(format!("Duration: {duration}"));
+    if state != "RUNNING" {
+        fields.push(format!(
+            "Exit code (status:signal): {}",
+            details.exit_code.as_deref().unwrap_or("unavailable")
         ));
     }
-    text.push_str(&format!(
-        "\nObserved: {}\nEvent: {}",
-        field("observed_at")?,
-        field("event_id")?
+    fields.push(format!(
+        "Started: {}",
+        details.started_at.as_deref().unwrap_or("unavailable")
     ));
-    if text.len() > 4000 {
-        return Err(());
+    if state != "RUNNING" {
+        fields.push(format!(
+            "Finished: {}",
+            details.finished_at.as_deref().unwrap_or("unavailable")
+        ));
     }
-    value =
-        serde_json::json!({"text":text,"mrkdwn":false,"unfurl_links":false,"unfurl_media":false});
-    serde_json::to_vec(&value).map_err(|_| ())
+    crate::slack_blocks::render(&crate::notification_presentation::Notification {
+        heading: title.into(),
+        fields,
+        context: vec![
+            format!("Observed: {}", field("observed_at")?),
+            format!("Event: {}", field("event_id")?),
+        ],
+    })
 }
 
 #[cfg(test)]
@@ -139,14 +147,14 @@ mod tests {
         assert!(
             String::from_utf8(render(&completed, Some(&details), false).unwrap())
                 .unwrap()
-                .contains("✅ Slurm Notify: COMPLETED")
+                .contains("✅ Job completed")
         );
         let hidden = render(&payload, Some(&details), false).unwrap();
         assert!(!String::from_utf8(hidden).unwrap().contains("sweep"));
         let shown = render(&payload, Some(&details), true).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&shown).unwrap();
         let text = value["text"].as_str().unwrap();
-        assert!(text.starts_with("❌ Slurm Notify: FAILED"));
+        assert!(text.starts_with("❌ Job failed"));
         assert!(text.contains("Name: sweep&lt;&amp;&gt;"));
         assert!(text.contains("Job: 123 · Array task: 2"));
         assert!(text.contains("Duration: 12m 34s"));

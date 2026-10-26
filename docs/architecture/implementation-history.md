@@ -3901,3 +3901,20 @@ advanced PR 17 to installer 2.87.31. Reviewed and adopted its verified full tag 
 only tool catalogs/changelog change, with no runtime or selected-tool manifest changes.
 An initial hosted coverage merge hit a corrupt profile, also seen in an older PR 13
 run; strict merging and the 90% gate are retained. Hosted reruns are verified separately.
+
+## 2026-10-26: shared presentation and Slack Block Kit v3
+
+Added a private presentation model and detailed Slack Block Kit renderer, with
+readable lifecycle headings, paired plain-text fields, a compact observed/event
+footer and complete fallback. Started events omit exit/finish fields; names keep
+the separate opt-in. Minimal Slack v1, generic webhook and SMTP bytes are unchanged.
+Detailed revisions advance to v3 and reject pending v2 work; existing schema v6
+freezes full rich payloads without migration. Documented drain/backup upgrade steps
+and a milestone for later Discord/Teams adapters, neither implemented here.
+
+Shared checks passed: 437 Rust tests (five helper entries intentionally ignored),
+29 CLI tests, controlled process boundaries, Python tests and build/smoke checks.
+Coverage passed at 97.17% Rust lines (27,616/28,419), above the 90% gate. Controlled
+acceptance covers all lifecycle states, synthetic HTTPS preview/send, forged blocks,
+privacy, changed revisions and identical Slack retry bytes across restart. Real
+HPC layout acceptance and hosted CI are separate gates. No real provider was contacted.
