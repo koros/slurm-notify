@@ -679,6 +679,38 @@ mod tests {
         .unwrap();
     }
     #[test]
+    fn hostname_normalization_preserves_exact_endpoint_binding() {
+        for (endpoint, origin) in [
+            (
+                "https://EXAMPLE.invalid:443/hook?token=fixture",
+                "https://example.invalid",
+            ),
+            (
+                "https://xn--bcher-kva.invalid/hook",
+                "https://xn--bcher-kva.invalid",
+            ),
+        ] {
+            let resources = public_resources(endpoint, 1024);
+            assert_eq!(resources.safe_origin().as_deref(), Some(origin));
+            let revision = resources.public_revision().unwrap().to_owned();
+            assert_eq!(
+                public_resources(endpoint, 1024).public_revision(),
+                Some(revision.as_str())
+            );
+            assert_ne!(
+                public_resources(&format!("{endpoint}x"), 1024).public_revision(),
+                Some(revision.as_str())
+            );
+            let frame = resources.into_frame("fixture", b"{}").unwrap();
+            transport::serve(frame.as_slice(), std::io::sink(), frame.len(), |fields| {
+                assert_eq!(fields[0], endpoint.as_bytes());
+                Ok(crate::delivery::ProviderOutcome::Delivered)
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn preflight_rejects_references_and_policy_without_lookup() {
         for (url, auth) in [("1URL", None), ("URL", Some("BAD-NAME"))] {
             assert!(matches!(
@@ -707,6 +739,9 @@ mod tests {
             b"".to_vec(),
             vec![b'x'; 4097],
             vec![0xff],
+            "https://bücher.invalid/".as_bytes().to_vec(),
+            b"https://xn--example-.invalid/".to_vec(),
+            b"https://example.invalid.xn--/".to_vec(),
             b"http://remote.invalid/".to_vec(),
             b"https://user:fixture@fixture.invalid/".to_vec(),
             b"https://fixture.invalid/#fragment".to_vec(),

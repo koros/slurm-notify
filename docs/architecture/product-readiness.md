@@ -28,10 +28,10 @@ the bound supervised SMTP path remains blocked.
 
 ## Evidence and limits
 
-The latest repository-hygiene/TLS dependency validation passed 433 private Rust tests plus twenty installed CLI acceptance tests
+The latest Dependabot compatibility validation passed 434 private Rust tests plus twenty installed CLI acceptance tests
 and nine provider-codec checks and five ignored child helpers,
 custom process acceptance, eight SQLite tests, six hook tests and 13 draft-config
-Python tests. Rust line coverage was 97.12% (27,399/28,212); the gate is 90%.
+Python tests. Rust line coverage was 97.11% (27,425/28,242); the gate is 90%.
 The optimized build and help baseline smoke check also passed. Hosted checks are verified separately from these local results.
 
 | Capability | Current evidence | Remaining gap |

@@ -5,11 +5,18 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+### Changed
+
+- Review Dependabot updates: serde_json 1.0.154, zeroize 1.9.1,
+  email-encoding 0.4.2 and idna_adapter 1.2.2 (ICU4X 2.4). Retain Rust 1.88.0,
+  strict ASCII endpoint inputs, exact destination binding and scalar Base64 features.
+- Update the SHA-pinned tool installer to 2.87.30 in coverage and dependency CI;
+  keep cargo-llvm-cov 0.6.21, cargo-deny 0.20.2 and checksum/no-fallback settings.
+
 ### Fixed
 
 - Update rustls to 0.23.46, rustls-webpki to 0.103.16 and certificate roots to
   1.0.10 to address current RustSec TLS/session and distrusted-certificate advisories.
-
 
 - Detect local Slurm ClusterName mismatches before state acquisition when sibling
   scontrol is available; reject mismatching accounting snapshots explicitly before

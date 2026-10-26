@@ -3874,3 +3874,21 @@ while shared/coverage builds ran concurrently; it passed in isolation and in the
 coverage suite. Complete shared checks were rerun sequentially. Workflow validation,
 changed-document link checks, rustdoc and optimized CLI help/version smoke passed.
 External service publication and hosted workflow results must be checked separately.
+
+
+## 2026-10-26 Dependabot compatibility updates
+
+Reviewed PRs 12–15 and 17 against current main and Rust 1.88.0. Updated serde_json,
+zeroize, email-encoding, the ICU-backed idna_adapter and both SHA-pinned installer
+uses. The resolved ICU 2.4 data/derive graph requires the existing Rust 1.88 compiler;
+no development toolchain change or supported MSRV declaration was made. Base64
+0.23 remains std/alloc only. Public contracts, payloads, database schemas, TLS
+requirements and pending-resource bindings remain unchanged.
+
+Added synthetic endpoint-normalization acceptance for exact owned bytes, safe
+origins and revision changes, plus malformed A-label/non-ASCII rejection before
+authorization lookup. Full shared checks passed: 434 private Rust tests, five ignored
+helpers, 29 CLI/provider-codec checks, custom process acceptance and 27 Python tests.
+Coverage passed at 97.11% (27,425/28,242); audit/license/source checks, Actionlint
+and strict rustdoc also passed. See the [compatibility review](../operations/dependabot-review-2026-10-26.md)
+for dependency footprint and upstream references. Hosted results are checked separately.
