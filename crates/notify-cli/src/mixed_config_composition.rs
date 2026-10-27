@@ -3498,4 +3498,131 @@ mod tests {
             )))
             .is_ok());
     }
+    #[test]
+    fn api_email_smtp_slack_and_webhook_routes_freeze_together_and_remain_isolated_after_restart() {
+        let d = crate::storage::tests::Directory::new();
+        let mut v = fixture(&d);
+        let slack: Value = serde_json::from_str(include_str!(
+            "../../../contracts/config/slack-v1.example.json"
+        ))
+        .unwrap();
+        v["providers"]["slack"] = slack["providers"]["slack"].clone();
+        v["providers"]["slack"]["include_job_details"] = json!(false);
+        let api: Value = serde_json::from_str(include_str!(
+            "../../../contracts/config/sendgrid-v1.example.json"
+        ))
+        .unwrap();
+        v["providers"]["api"] = api["providers"]["primary"].clone();
+        let gmail: Value = serde_json::from_str(include_str!(
+            "../../../contracts/config/gmail-api-v1.example.json"
+        ))
+        .unwrap();
+        v["providers"]["gmail"] = gmail["providers"]["primary"].clone();
+        v["delivery"]["api_email_permissions"] = json!([]);
+        v["routes"] = json!([{"events":["JOB_COMPLETED"],"send_to":["primary","research_email","slack","api","gmail"]}]);
+        let build = |v: &Value| {
+            prepare(
+                &serde_json::to_vec(v).unwrap(),
+                |_| Ok(Zeroizing::new(b"alice".to_vec())),
+                |name, _| {
+                    Ok(Zeroizing::new(if name.contains("SLACK") {
+                        b"https://hooks.slack.com/services/Tfixture/Bfixture/fake".to_vec()
+                    } else if name.ends_with("_URL") {
+                        b"https://fixture.invalid/hook".to_vec()
+                    } else {
+                        b"Bearer fixture".to_vec()
+                    }))
+                },
+            )
+            .unwrap()
+        };
+        let initial = build(&v);
+        v["delivery"]["smtp_permissions"]=json!(initial.revisions().iter().map(|(alias,rendering,provider)|json!({"cluster_id":"research-cluster","destination":alias,"rendering_revision":rendering,"provider_revision":provider})).collect::<Vec<_>>());
+        v["delivery"]["api_email_permissions"]=json!(initial.api_revisions().iter().map(|(alias,rendering,provider)|json!({"cluster_id":"research-cluster","destination":alias,"rendering_revision":rendering,"provider_revision":provider})).collect::<Vec<_>>());
+        let plan = build(&v);
+        assert!(plan.api_permissions_approved());
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let mut reconciler = Reconciler::with_capacity(10);
+        plan.poll_public_with(
+            config_composition::PollInput {
+                active_program: Path::new("squeue"),
+                accounting_program: Path::new("sacct"),
+                history_start: "2026-10-10T00:00:00",
+                history_end: "2026-10-11T00:00:00",
+                observed_at: 10,
+            },
+            &mut reconciler,
+            &mut store,
+            |command, _, _| {
+                Ok(if command.get_program() == "squeue" {
+                    ""
+                } else {
+                    "research-cluster|1|alice|s|a|COMPLETED|0:0"
+                }
+                .into())
+            },
+        )
+        .unwrap();
+        let due = store.due_deliveries("research-cluster", 10, 10).unwrap();
+        assert_eq!(due.len(), 5);
+        let id = &due[0].event_id;
+        assert!(due.iter().all(|item| &item.event_id == id));
+        assert!(store.frozen_smtp(id, "research_email").unwrap().is_some());
+        let mut bodies = Vec::new();
+        for alias in ["api", "gmail"] {
+            let r = plan
+                .common
+                .webhooks
+                .iter()
+                .find(|w| w.alias.as_str() == alias)
+                .unwrap()
+                .resources
+                .email()
+                .unwrap();
+            bodies.push((
+                alias,
+                store
+                    .email_delivery(id, alias, r.revision(), &r.profile)
+                    .unwrap()
+                    .body
+                    .to_vec(),
+            ));
+            let wrong = due.iter().find(|i| i.destination == "slack").unwrap();
+            assert!(matches!(
+                r.prepare(&store, wrong, |_, _| panic!(
+                    "credential access before route guard"
+                )),
+                Err(crate::supervised_provider::Diagnostic::InvalidInput)
+            ));
+        }
+        drop(store);
+        let store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let plan = build(&v);
+        for (alias, bytes) in bodies {
+            let r = plan
+                .common
+                .webhooks
+                .iter()
+                .find(|w| w.alias.as_str() == alias)
+                .unwrap()
+                .resources
+                .email()
+                .unwrap();
+            assert_eq!(
+                store
+                    .email_delivery(id, alias, r.revision(), &r.profile)
+                    .unwrap()
+                    .body
+                    .as_slice(),
+                bytes
+            );
+        }
+        assert_eq!(
+            store
+                .due_deliveries("research-cluster", 10, 10)
+                .unwrap()
+                .len(),
+            5
+        );
+    }
 }

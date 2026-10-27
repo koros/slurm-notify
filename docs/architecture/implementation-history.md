@@ -4000,3 +4000,12 @@ The operator guide and acceptance matrix distinguish this controlled evidence fr
 pending real workstation consent, refresh/reauthorization, inbox/spam receipt and
 intended-node job/backup/restore acceptance. No live provider send, credential
 access, Slurm test, release or supported-platform acceptance was performed here.
+
+## 2026-10-27: cross-provider frozen-route compatibility
+
+A combined synthetic poll now explicitly exercises SMTP, Slack, generic webhook,
+SendGrid and Gmail routes together. All five retain one internal event identity,
+SMTP and API-specific frozen content, separate revision guards and identical API
+bytes after reopening. Cross-provider preparation fails before credential lookup.
+This adds controlled composition evidence without a provider account or live send;
+real operator receipt and deployment backup/restore gates remain pending.
