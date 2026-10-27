@@ -181,6 +181,7 @@ pub(super) fn send(
 }
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
     use super::*;
     #[test]
     fn credentials_expiry_and_trust_fail_closed() {

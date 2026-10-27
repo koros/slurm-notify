@@ -244,3 +244,75 @@ fn provider_pauses_persist_isolate_and_resume_without_resetting_attempts() {
         )
         .is_err());
 }
+
+#[test]
+fn worker_pauses_api_destinations_and_keeps_unrelated_delivery_live() {
+    use crate::delivery::{deliver_due_checked, CheckedHooks, ProviderOutcome, RetryPolicy};
+    for preflight in [true, false] {
+        let d = tests::Directory::new();
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        let p = profile("sendgrid");
+        let items = seed(&mut store, &p).unwrap();
+        let email = items.iter().find(|i| i.destination == "email").unwrap();
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_seconds: 5,
+            max_delay_seconds: 30,
+            jitter_seconds: 0,
+            jitter_seed: 1,
+        };
+        let mut calls = Vec::new();
+        let report = deliver_due_checked(
+            &mut store,
+            "cluster",
+            0,
+            10,
+            policy,
+            CheckedHooks {
+                authorize: |_: &Store, item: &DueDelivery| {
+                    if preflight && item.destination == "email" {
+                        Err(crate::supervised_provider::Diagnostic::EmailCredentials)
+                    } else {
+                        Ok(())
+                    }
+                },
+                send: |item: &DueDelivery, ()| {
+                    calls.push(item.destination.clone());
+                    Ok(if item.destination == "email" {
+                        ProviderOutcome::PauseAuthentication
+                    } else {
+                        ProviderOutcome::Delivered
+                    })
+                },
+                clock: || Some(1),
+                cancelled: || false,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.delivered, 1);
+        assert_eq!(report.retrying, usize::from(!preflight));
+        assert_eq!(calls.contains(&"email".into()), !preflight);
+        assert!(store.due_deliveries("cluster", 100, 10).unwrap().is_empty());
+        let attempts: i64 = store
+            .db
+            .query_row(
+                "SELECT count(*) FROM delivery_attempts WHERE event_id=?1 AND destination='email'",
+                [&email.event_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, i64::from(!preflight));
+        drop(store);
+        let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+        assert!(store
+            .email_pause("cluster", "email", &p.revision())
+            .unwrap()
+            .is_some());
+        assert!(store
+            .resume_email("cluster", "email", &p.revision())
+            .unwrap());
+        let pending = store.due_deliveries("cluster", 100, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempt_number, if preflight { 1 } else { 2 });
+    }
+}

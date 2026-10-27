@@ -30,6 +30,8 @@ pub(super) enum Diagnostic {
     SmtpUpgradeMissing,
     SmtpUpgradeTemporary,
     SmtpUpgradePermanent,
+    EmailCredentials,
+    EmailPermission,
     InvalidInput,
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     UnsupportedPlatform,
@@ -73,6 +75,11 @@ pub(super) fn classify(result: Result<ProviderOutcome, transport::Error>) -> Rep
             Some(ProviderOutcome::Delivered),
             Diagnostic::Acknowledged,
             Acceptance::Accepted,
+        ),
+        Ok(outcome @ (ProviderOutcome::PauseAuthentication | ProviderOutcome::PausePolicy)) => (
+            Some(outcome),
+            Diagnostic::Acknowledged,
+            Acceptance::Rejected,
         ),
         Ok(ProviderOutcome::Rejected) => (
             Some(ProviderOutcome::Rejected),
@@ -127,6 +134,8 @@ mod tests {
         for (outcome, acceptance) in [
             (ProviderOutcome::Delivered, Acceptance::Accepted),
             (ProviderOutcome::Rejected, Acceptance::Rejected),
+            (ProviderOutcome::PauseAuthentication, Acceptance::Rejected),
+            (ProviderOutcome::PausePolicy, Acceptance::Rejected),
             (ProviderOutcome::Retry, Acceptance::Unknown),
             (ProviderOutcome::RetryAfter(60), Acceptance::Unknown),
         ] {

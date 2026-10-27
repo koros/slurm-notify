@@ -210,24 +210,26 @@ where
 
 // Public webhooks never use the legacy ordinary-destination bypass. Both kinds
 // authorize against frozen storage before sending or retiring exhausted work.
-pub(super) struct PublicMixedHooks<'a, R, S, H, C, X> {
+pub(super) struct PublicMixedHooks<'a, R, S, H, C, X, L> {
+    pub(super) email_lookup: L,
     pub(super) smtp: Hooks<'a, R, S, C, X>,
     pub(super) webhooks: &'a [crate::config_composition::Webhook],
     pub(super) helper: H,
 }
 enum PublicContext {
     Smtp(Box<Context>),
-    Webhook(crate::webhook_resolution::PublicRequest),
+    Webhook(crate::http_destination::Request),
 }
-pub(super) fn deliver_due_public_mixed<R, S, H, C, X>(
+pub(super) fn deliver_due_public_mixed<R, S, H, C, X, L>(
     store: &mut Store,
     cluster: &str,
     now: i64,
     limit: usize,
     policy: RetryPolicy,
-    mut mixed: PublicMixedHooks<'_, R, S, H, C, X>,
+    mut mixed: PublicMixedHooks<'_, R, S, H, C, X, L>,
 ) -> Result<BatchReport, BatchFailure>
 where
+    L: FnMut(&str, usize) -> Result<zeroize::Zeroizing<Vec<u8>>, ()>,
     R: FnMut(&Descriptor) -> Result<Resolved, Error>,
     S: FnMut(
         &DueDelivery,
@@ -262,7 +264,7 @@ where
                     }
                     webhook
                         .resources
-                        .prepare_public(store, item)
+                        .prepare_public(store, item, &mut mixed.email_lookup)
                         .map(PublicContext::Webhook)
                 } else {
                     authorize(store, item, cluster, hooks.permissions, &mut hooks.resolve)

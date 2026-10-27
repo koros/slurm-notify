@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 pub(super) enum Error {
     Invalid,
     Permission,
+    ApiPermission,
 }
 
 pub(super) fn validate(path: &Path) -> Result<String, Error> {
@@ -36,6 +37,7 @@ fn validate_content(
         .map_err(|_| Error::Invalid)?;
     let delivery = get(root, "delivery").map_err(|_| Error::Invalid)?;
     let mut smtp = false;
+    let mut api = false;
     for (name, value) in providers {
         let provider = object(value).map_err(|_| Error::Invalid)?;
         if text(get(provider, "type").map_err(|_| Error::Invalid)?).map_err(|_| Error::Invalid)?
@@ -43,6 +45,23 @@ fn validate_content(
         {
             crate::installed_smtp::validate(name, value, cluster, delivery, &mut lookup)?;
             smtp = true;
+            continue;
+        }
+        #[cfg(any(test, target_os = "linux", target_os = "macos"))]
+        if matches!(
+            text(get(provider, "type").map_err(|_| Error::Invalid)?).map_err(|_| Error::Invalid)?,
+            "sendgrid" | "mailgun"
+        ) {
+            let resource = crate::email_resources::Resources::new(value, delivery, cluster, name)
+                .map_err(|_| Error::Invalid)?;
+            if !resource.approved() {
+                return Err(Error::ApiPermission);
+            }
+            let key = lookup(&resource.profile.credential)?;
+            if key.is_empty() || key.len() > 4096 || !key.iter().all(|b| (33..=126).contains(b)) {
+                return Err(Error::Invalid);
+            }
+            api = true;
             continue;
         }
         if let Ok(roots) = get(provider, "trust_der_files") {
@@ -81,7 +100,7 @@ fn validate_content(
         object(get(root, "monitor").map_err(|_| Error::Invalid)?).map_err(|_| Error::Invalid)?;
     let cluster = text(get(monitor, "cluster_id").map_err(|_| Error::Invalid)?)
         .map_err(|_| Error::Invalid)?;
-    Ok(format!("Configuration valid: schema_version=1 cluster={cluster} destinations={} smtp_permissions={}\n", providers.len(), if smtp { "approved" } else { "not_applicable" }))
+    Ok(format!("Configuration valid: schema_version=1 cluster={cluster} destinations={} smtp_permissions={}{}\n", providers.len(), if smtp { "approved" } else { "not_applicable" },if api {" api_email_permissions=approved"}else{""}))
 }
 fn read_env(name: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
     let value = std::env::var_os(name).ok_or(Error::Invalid)?;

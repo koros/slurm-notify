@@ -90,13 +90,11 @@ OAuth refresh/account binding and provider pause/resume are explicit design work
 The first increment implements an explicit supervised `email test --profile`
 boundary for all three providers, shared deterministic codecs and exact acceptance
 classification ([ADR 0077](../adr/0077-explicit-https-email-test-boundary.md)).
-Normal monitoring configs still reject API-email providers; durable freezing,
-permissions, pause/resume and OAuth refresh remain to implement. Existing SMTP,
-webhook and Slack behavior remains unchanged. The
-[issue-linked roadmap](https-email-delivery-roadmap.md) tracks five workstreams:
-contracts/foundation, SendGrid, Mailgun, experimental Gmail API and compatibility
-acceptance. The next increment is exact contract review; the Gmail probe is
-independent. Review the plan before coding.
+SendGrid/Mailgun monitoring now uses transactional frozen requests (ADR 0078),
+exact API-email enrollment, configured tests, isolated durable pauses and explicit
+existing-only recovery (ADR 0079). The next increment is Gmail's protected OAuth
+lifecycle; real account receipt remains an independent operator gate. The
+[issue-linked roadmap](https-email-delivery-roadmap.md) tracks remaining acceptance.
 
 ## Validation
 

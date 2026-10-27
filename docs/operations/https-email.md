@@ -1,10 +1,10 @@
-# Experimental HTTPS email tests
+# HTTPS email delivery (prototype)
 
 The installed `email test` command sends one synthetic email through SendGrid,
 Mailgun or Gmail API over verified HTTPS. It does not monitor jobs, create state,
-refresh OAuth tokens or retry automatically. Normal monitor configs still reject
-these provider types. See the [roadmap](../architecture/https-email-delivery-roadmap.md)
-for the durable adapter work still required.
+refresh OAuth tokens or retry automatically. SendGrid and Mailgun also support
+enrolled foreground monitoring. Gmail API remains a separate one-shot test until
+OAuth lifecycle acceptance. See the [roadmap](../architecture/https-email-delivery-roadmap.md).
 
 ## Before sending
 
@@ -92,3 +92,55 @@ this command.
 Ordinary tests use controlled TLS/API fixtures and fake credentials. Operator
 receipt from a real provider is still pending and must be recorded per tested
 node/account/region. Keep this experiment separate from real scheduler monitoring.
+
+## SendGrid and Mailgun foreground monitoring
+
+Start with `sendgrid-v1.example.json` or `mailgun-v1.example.json` from
+[the config examples](../../contracts/config/README.md). These are full monitoring
+drafts, distinct from standalone test profiles. Set the real Slurm cluster name,
+private state path, sender, recipient and API-key environment reference. The
+account_identity is an operator-assigned label; it does not authenticate the key's
+account. Mailgun's domain and region must match your provider account.
+
+Protect the draft as mode 0600 in a user-owned 0700 directory. Leave
+api_email_permissions empty initially. Run:
+
+```bash
+./target/release/slurm-notify init --config /absolute/private/email-config.json
+# Enter the protected draft path and review the displayed addresses/disclosure.
+./target/release/slurm-notify config validate --config /absolute/private/email-config.json
+./target/release/slurm-notify test primary --config /absolute/private/email-config.json
+./target/release/slurm-notify doctor --config /absolute/private/email-config.json
+# After checking site polling/execution policy:
+./target/release/slurm-notify start --foreground --config /absolute/private/email-config.json
+```
+
+Load the referenced sending key before validation/test/start. Enrollment itself
+needs no API key and sends nothing. `init` displays private addresses and account
+metadata for review: keep that terminal output out of public logs/screenshots.
+Optional trust files replace bundled public roots; verification remains required.
+
+Only current-user jobs and explicitly routed events are monitored. Minimal emails
+include state, job identifier, cluster, observation time and stable public event
+ID. No job name or Slack enrichment is automatically disclosed. Frozen requests
+contain addresses/content and persist in private state for its lifetime; protect
+backups too. SMTP approval does not authorize API-email disclosure.
+
+Missing credentials, authentication failures and provider-policy refusals pause
+only the affected API destination. Stop the monitor, correct the cause, inspect
+historical status and explicitly clear the pause before restarting:
+
+```bash
+./target/release/slurm-notify status --config /absolute/private/email-config.json
+./target/release/slurm-notify provider resume primary --config /absolute/private/email-config.json
+```
+
+Recovery needs the exact enrolled profile and stopped existing schema-v7 state.
+It sends nothing and preserves attempts, due times and exact frozen requests.
+Changing a recipient/domain/account/trust profile cannot silently reroute pending
+mail. Re-enroll changed settings into a new protected config and retain old state
+for deliberate disposition; do not edit database rows to force compatibility.
+Retries can duplicate a remotely accepted message after an acknowledgement or
+local commit failure. A stable Message-ID helps investigation, not guaranteed
+provider deduplication. Check manual inbox receipt before claiming deployment
+acceptance. SendGrid/Mailgun real-account acceptance is still pending.

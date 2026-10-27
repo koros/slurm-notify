@@ -18,7 +18,7 @@ pub(super) enum Error {
 // No Debug/Clone; config/resource metadata remains in zeroizing owners.
 pub(super) struct Webhook {
     pub(super) alias: Zeroizing<String>,
-    pub(super) resources: webhook_resolution::Resources,
+    pub(super) resources: crate::http_destination::Resources,
 }
 pub(super) struct Plan {
     pub(super) observation: observation_mapping::Plan,
@@ -124,7 +124,11 @@ impl Plan {
                         .destinations(&event.state)
                         .into_iter()
                         .map(|destination| crate::storage::PublicRoute {
-                            email: None,
+                            email: self
+                                .webhooks
+                                .iter()
+                                .find(|w| w.alias.as_str() == destination)
+                                .and_then(|w| w.resources.email_profile()),
                             slack: self
                                 .webhooks
                                 .iter()
@@ -243,6 +247,24 @@ pub(super) fn prepare_draft(
         if text(get(p, "type").map_err(shape)?).map_err(shape)? == "smtp" {
             continue;
         }
+        let kind = text(get(p, "type").map_err(shape)?).map_err(shape)?;
+        if matches!(kind, "sendgrid" | "mailgun") {
+            let resource = crate::email_resources::Resources::new(
+                provider,
+                get(root, "delivery").map_err(shape)?,
+                observation.cluster(),
+                alias,
+            )
+            .map_err(|_| Error::Shape)?;
+            webhooks.push(Webhook {
+                alias: Zeroizing::new(alias.to_string()),
+                resources: crate::http_destination::Resources::Email(resource),
+            });
+            continue;
+        }
+        if !matches!(kind, "webhook" | "slack") {
+            return Err(Error::UnsupportedProvider);
+        }
         let integer = |key| match get(p, key).map_err(shape)? {
             crate::config_decode::Value::Integer(n) => Ok(*n),
             _ => Err(Error::Shape),
@@ -278,7 +300,7 @@ pub(super) fn prepare_draft(
         }
         webhooks.push(Webhook {
             alias: Zeroizing::new(alias.to_string()),
-            resources,
+            resources: resources.into(),
         });
     }
     let storage = object(get(root, "storage").map_err(shape)?).map_err(shape)?;

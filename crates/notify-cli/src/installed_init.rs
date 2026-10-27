@@ -14,6 +14,7 @@ pub(super) enum Error {
 struct Review {
     bytes: Zeroizing<Vec<u8>>,
     summary: String,
+    api_enrollment: bool,
 }
 fn review(bytes: &[u8]) -> Result<Review, Error> {
     crate::config_validate::validate(bytes).map_err(|_| Error::Input)?;
@@ -36,6 +37,17 @@ fn review(bytes: &[u8]) -> Result<Review, Error> {
     let mut summary=format!("Configuration review: schema_version=1 cluster={cluster} initial_observation={policy} destinations={} routes={}\n",providers.len(),source["routes"].as_array().ok_or(Error::Input)?.len());
     summary.push_str("Initial observation suppress avoids catch-up alerts; emit can notify selected existing history.\n");
     for (alias, provider) in providers {
+        if provider["type"] == "sendgrid" || provider["type"] == "mailgun" {
+            summary.push_str(&format!("API email: alias={alias} provider={} sender={} recipient={} account_identity={} fields=state,job_identifier,cluster_id,observed_at,event_id retention=state_lifetime\n",provider["type"].as_str().ok_or(Error::Input)?,provider["sender"].as_str().ok_or(Error::Input)?,provider["recipient"].as_str().ok_or(Error::Input)?,provider["account_identity"].as_str().ok_or(Error::Input)?));
+            if provider["type"] == "mailgun" {
+                summary.push_str(&format!(
+                    "Mailgun routing: domain={} region={}\n",
+                    provider["domain"].as_str().ok_or(Error::Input)?,
+                    provider["region"].as_str().ok_or(Error::Input)?
+                ));
+            }
+            continue;
+        }
         if provider["type"] != "smtp" {
             let origin = &origins
                 .iter()
@@ -67,10 +79,22 @@ fn review(bytes: &[u8]) -> Result<Review, Error> {
         }
         source["delivery"]["smtp_permissions"]=serde_json::json!(revisions.iter().map(|(alias,rendering,provider)|serde_json::json!({"cluster_id":cluster,"destination":alias,"rendering_revision":rendering,"provider_revision":provider})).collect::<Vec<_>>());
     }
+    let api = plan.api_revisions();
+    if !api.is_empty() {
+        summary.push_str("Only these current API-email pairs will be enrolled; SMTP permissions do not authorize API email.\n");
+        for (alias, rendering, provider) in &api {
+            summary.push_str(&format!("API email permission: alias={alias} rendering_revision={rendering} provider_revision={provider}\n"));
+        }
+        source["delivery"]["api_email_permissions"]=serde_json::json!(api.iter().map(|(alias,rendering,provider)|serde_json::json!({"cluster_id":cluster,"destination":alias,"rendering_revision":rendering,"provider_revision":provider})).collect::<Vec<_>>());
+    }
     let mut bytes = Zeroizing::new(serde_json::to_vec_pretty(&source).map_err(|_| Error::Input)?);
     bytes.push(b'\n');
     crate::config_validate::validate(&bytes).map_err(|_| Error::Input)?;
-    Ok(Review { bytes, summary })
+    Ok(Review {
+        bytes,
+        summary,
+        api_enrollment: !api.is_empty(),
+    })
 }
 fn line(input: &mut impl BufRead, limit: usize) -> Result<Zeroizing<Vec<u8>>, Error> {
     let mut bytes = Zeroizing::new(Vec::new());
@@ -103,7 +127,11 @@ pub(super) fn run(path: &Path) -> Result<(), Error> {
     let review = review(snapshot.bytes())?;
     print!("{}", review.summary);
     println!("No provider test or monitoring will run. Validate site polling/execution policy before start.");
-    println!("Type yes to enroll the displayed SMTP pairs and create the new configuration; anything else cancels.");
+    if review.api_enrollment {
+        println!("Type yes to enroll the displayed provider pairs and create the new configuration; anything else cancels.");
+    } else {
+        println!("Type yes to enroll the displayed SMTP pairs and create the new configuration; anything else cancels.");
+    }
     std::io::stdout().flush().map_err(|_| Error::Input)?;
     if line(&mut input, 16)?.as_slice() != b"yes" {
         println!("Configuration creation cancelled; no file was written.");
@@ -126,5 +154,29 @@ mod tests {
         assert!(line(&mut &b"long\n"[..], 3).is_err());
         assert!(line(&mut &b""[..], 3).is_err());
         assert!(review(b"{\"private\":\"fixture\"}").is_err());
+    }
+}
+
+#[cfg(test)]
+mod api_tests {
+    #[test]
+    fn api_review_enrolls_only_current_pairs_without_api_key_lookup() {
+        for kind in ["sendgrid", "mailgun"] {
+            let bytes =
+                std::fs::read(format!("../../contracts/config/{kind}-v1.example.json")).unwrap();
+            let reviewed = super::review(&bytes).unwrap();
+            assert!(reviewed.api_enrollment);
+            assert!(reviewed.summary.contains("API email permission:"));
+            let v: serde_json::Value = serde_json::from_slice(&reviewed.bytes).unwrap();
+            assert_eq!(
+                v["delivery"]["api_email_permissions"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            let again = super::review(&reviewed.bytes).unwrap();
+            assert_eq!(reviewed.bytes.as_slice(), again.bytes.as_slice());
+        }
     }
 }

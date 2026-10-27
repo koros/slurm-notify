@@ -1,0 +1,4 @@
+Usage: slurm-notify provider resume <provider-name> --config <absolute-path>
+
+Clear an enrolled API email provider pause in stopped existing state.
+No network request is made. Frozen content and attempt budgets are preserved.

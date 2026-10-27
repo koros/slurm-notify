@@ -155,6 +155,7 @@ def validate(data, manifest):
     if not isinstance(providers, dict) or not 1 <= len(providers) <= caps['providers']:
         fail('Structure')
     smtp_names = []
+    api_names = []
     for name, provider in providers.items():
         alias(name)
         if not isinstance(provider, dict):
@@ -174,6 +175,28 @@ def validate(data, manifest):
             env(provider['url_env'])
             if 'authorization_env' in provider:
                 env(provider['authorization_env'])
+        elif kind in ['sendgrid', 'mailgun']:
+            api_names.append(name)
+            required = ['type', 'sender', 'recipient', 'account_identity', 'api_key_env',
+                        'request_timeout_seconds', 'payload_limit_bytes']
+            if kind == 'mailgun':
+                required += ['domain', 'region']
+            object_fields(provider, required, ['trust_der_files'])
+            for field in ['sender', 'recipient']:
+                text(provider[field], r'[^\x00-\x20\x7f-\U0010ffff]+@[^\x00-\x20\x7f-\U0010ffff]+', 254)
+            text(provider['account_identity'], r'[\x21-\x7e]+', 128)
+            env(provider['api_key_env'])
+            bounded_integer(provider['request_timeout_seconds'], {'minimum': 1, 'maximum': 30})
+            bounded_integer(provider['payload_limit_bytes'], {'minimum': 1024, 'maximum': 16384})
+            if kind == 'mailgun':
+                text(provider['domain'], r'[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+', 253)
+                if provider['region'] not in ['us', 'eu']:
+                    fail('Policy')
+            if 'trust_der_files' in provider:
+                roots = members(provider['trust_der_files'], 32)
+                for root in roots:
+                    path(root)
+                distinct(roots)
         elif kind == 'smtp':
             smtp_names.append(name)
             object_fields(provider, ['type', 'relay', 'port', 'tls_mode', 'server_name',
@@ -198,7 +221,7 @@ def validate(data, manifest):
             env(auth['password_env'])
         else:
             fail('Policy')
-        for key, bounds in manifest[('webhook' if kind == 'slack' else kind) + '_integer_ranges'].items():
+        for key, bounds in ({} if kind in ['sendgrid', 'mailgun'] else manifest[('webhook' if kind == 'slack' else kind) + '_integer_ranges']).items():
             bounded_integer(provider[key], bounds)
     events = {'JOB_STARTED', 'JOB_COMPLETED', 'JOB_FAILED', 'JOB_TIMEOUT', 'JOB_CANCELLED',
               'JOB_OUT_OF_MEMORY', 'JOB_NODE_FAILURE', 'JOB_BOOT_FAILURE', 'JOB_DEADLINE'}
@@ -221,6 +244,8 @@ def validate(data, manifest):
     required += ['jitter_seed']
     if smtp_names:
         required += ['prepared_smtp_message_limit', 'smtp_permissions']
+    if api_names:
+        required += ['api_email_permissions']
     object_fields(delivery, required)
     seed = delivery['jitter_seed']
     text(seed, r'0|[1-9][0-9]{0,19}', 20)
@@ -237,6 +262,18 @@ def validate(data, manifest):
         for field in ['rendering_revision', 'provider_revision']:
             text(permission[field], r'[0-9a-f]{64}', 64)
         key = tuple(permission[field] for field in ['cluster_id', 'destination', 'rendering_revision', 'provider_revision'])
+        if key in seen:
+            fail('Duplicate')
+        seen.add(key)
+    seen = set()
+    for permission in members(delivery.get('api_email_permissions', []), 64, allow_empty=True):
+        fields = ['cluster_id', 'destination', 'rendering_revision', 'provider_revision']
+        object_fields(permission, fields)
+        if permission['cluster_id'] != monitor['cluster_id'] or permission['destination'] not in api_names:
+            fail('Reference')
+        for field in ['rendering_revision', 'provider_revision']:
+            text(permission[field], r'[0-9a-f]{64}', 64)
+        key = tuple(permission[field] for field in fields)
         if key in seen:
             fail('Duplicate')
         seen.add(key)

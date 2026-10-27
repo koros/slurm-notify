@@ -5,6 +5,8 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Add enrolled SendGrid/Mailgun foreground routes, immutable supervised API delivery, isolated durable credential/auth/policy pauses, historical pause counts and existing-only explicit recovery. Gmail monitoring stays gated pending OAuth lifecycle acceptance.
+
 ### Changed
 
 - Detailed Slack uses Block Kit v3 with readable status headings, paired plain-text

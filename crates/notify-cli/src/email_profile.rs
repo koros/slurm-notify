@@ -29,9 +29,20 @@ impl Profile {
             return Err(());
         }
         let value = crate::config_decode::decode(bytes).map_err(|_| ())?;
-        let p = object(&value).map_err(|_| ())?;
+        Self::from_value(&value, true)
+    }
+    pub(super) fn from_monitor(value: &Value) -> Result<Self, ()> {
+        let profile = Self::from_value(value, false)?;
+        // Gmail foreground requires the separately reviewed protected refresh lifecycle.
+        if profile.provider == Provider::Gmail {
+            return Err(());
+        }
+        Ok(profile)
+    }
+    fn from_value(value: &Value, standalone: bool) -> Result<Self, ()> {
+        let p = object(value).map_err(|_| ())?;
         let field = |key| text(get(p, key).map_err(|_| ())?).map_err(|_| ());
-        let kind = field("provider")?;
+        let kind = field(if standalone { "provider" } else { "type" })?;
         let provider = match kind {
             "sendgrid" => Provider::SendGrid,
             "mailgun" => Provider::Mailgun,
@@ -39,14 +50,16 @@ impl Profile {
             _ => return Err(()),
         };
         let mut required = vec![
-            "schema_version",
-            "provider",
+            if standalone { "provider" } else { "type" },
             "sender",
             "recipient",
             "account_identity",
             "request_timeout_seconds",
             "payload_limit_bytes",
         ];
+        if standalone {
+            required.push("schema_version");
+        }
         required.push(if provider == Provider::Gmail {
             "credential_file"
         } else {
@@ -62,7 +75,7 @@ impl Profile {
         {
             return Err(());
         }
-        if !matches!(get(p, "schema_version"), Ok(Value::Integer(1))) {
+        if standalone && !matches!(get(p, "schema_version"), Ok(Value::Integer(1))) {
             return Err(());
         }
         let sender = field("sender")?;
@@ -140,6 +153,26 @@ impl Profile {
             payload_limit: limit as usize,
             roots,
         })
+    }
+    pub(super) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, ()> {
+        let mut value = serde_json::json!({"schema_version":1,"provider":self.kind(),"sender":self.sender.as_str(),"recipient":self.recipient.as_str(),"account_identity":self.account.as_str(),"request_timeout_seconds":self.timeout.as_secs(),"payload_limit_bytes":self.payload_limit});
+        value[if self.provider == Provider::Gmail {
+            "credential_file"
+        } else {
+            "api_key_env"
+        }] = serde_json::json!(self.credential.as_str());
+        if self.provider == Provider::Mailgun {
+            value["domain"] = serde_json::json!(self.domain.as_str());
+            value["region"] = serde_json::json!(self.region);
+        }
+        if !self.roots.is_empty() {
+            value["trust_der_files"] = serde_json::json!(self.roots);
+        }
+        let bytes = serde_json::to_vec(&value).map_err(|_| ())?;
+        if bytes.len() > 16384 {
+            return Err(());
+        }
+        Ok(Zeroizing::new(bytes))
     }
     pub(super) fn kind(&self) -> &'static str {
         match self.provider {

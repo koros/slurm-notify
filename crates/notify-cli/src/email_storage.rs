@@ -1,13 +1,11 @@
 //! API-email durable frames and provider-scoped recovery, under the existing store owner.
 use super::*;
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PauseReason {
     Authentication,
     Policy,
     Credentials,
 }
-#[cfg(test)]
 impl PauseReason {
     fn code(self) -> &'static str {
         match self {
@@ -25,7 +23,6 @@ impl PauseReason {
         }
     }
 }
-#[cfg(test)]
 pub(super) fn pause(
     tx: &rusqlite::Transaction<'_>,
     cluster: &str,
@@ -52,9 +49,25 @@ pub(super) fn pause(
     Ok(())
 }
 impl Store {
+    pub(crate) fn email_bound_revision(&self, item: &DueDelivery) -> Result<String, StorageError> {
+        let revision=self.db.query_row("SELECT r.revision FROM public_event_routes r JOIN email_event_frames f USING(internal_event_id,destination) WHERE r.internal_event_id=?1 AND r.destination=?2",params![item.event_id,item.destination],|r|r.get::<_,String>(0)).optional()?.ok_or(StorageError::Conflict)?;
+        if !public_revision(&revision) {
+            return Err(StorageError::Conflict);
+        }
+        Ok(revision)
+    }
+    pub(crate) fn email_paused(&self, item: &DueDelivery) -> Result<bool, StorageError> {
+        let version: i64 = self
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version < 7 {
+            return Ok(false);
+        }
+        self.db.query_row("SELECT EXISTS(SELECT 1 FROM email_provider_pauses WHERE cluster=?1 AND destination=?2)",params![item.event.identity.cluster,item.destination],|r|r.get(0)).map_err(StorageError::from)
+    }
+
     // Revision guard and canonical-frame integrity must pass before materializing
     // the bounded credential-free provider request.
-    #[cfg(test)]
     pub(crate) fn email_delivery(
         &self,
         internal: &str,
@@ -86,7 +99,6 @@ impl Store {
         }
         Ok(request)
     }
-    #[cfg(test)]
     pub(crate) fn pause_email_before_attempt(
         &mut self,
         cluster: &str,
@@ -102,7 +114,6 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    #[cfg(test)]
     pub(crate) fn pause_email_after_attempt(
         &mut self,
         item: &DueDelivery,
@@ -128,7 +139,6 @@ impl Store {
             },
         )
     }
-    #[cfg(test)]
     pub(crate) fn email_pause(
         &self,
         cluster: &str,
@@ -144,7 +154,6 @@ impl Store {
         }
         Ok(Some((PauseReason::parse(&reason)?, at)))
     }
-    #[cfg(test)]
     pub(crate) fn resume_email(
         &mut self,
         cluster: &str,

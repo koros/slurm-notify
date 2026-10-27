@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 #[path = "email_storage.rs"]
-mod email;
+pub(super) mod email;
 const PROVIDER_MIGRATION: &str = include_str!("../../notify-storage/migrations/0004.sql");
 const REVISION_MIGRATION: &str = include_str!("../../notify-storage/migrations/0003.sql");
 const SMTP_MIGRATION: &str = include_str!("../../notify-storage/migrations/0002.sql");
@@ -82,13 +82,6 @@ fn event_id(event: &super::lifecycle::Event) -> String {
 pub(super) struct DueDelivery {
     pub(super) event_id: String,
     pub(super) destination: String,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "retain parsed ledger identity alongside frozen delivery work"
-        )
-    )]
     pub(super) event: super::lifecycle::Event,
     pub(super) attempt_number: i64,
 }
@@ -320,6 +313,32 @@ impl Store {
         let mut store = Self::initialize(db, lock_timeout)?;
         store._owner = Some(owner);
         Ok(store)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn open_existing_private(
+        directory: &Path,
+        timeout: Duration,
+    ) -> Result<Self, StorageError> {
+        let owner =
+            crate::state_path::Guard::inspect(directory).map_err(StorageError::StatePath)?;
+        let db = Connection::open_with_flags(
+            &owner.database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        db.busy_timeout(timeout)?;
+        db.pragma_update(None, "foreign_keys", true)?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version != 7 {
+            return Err(StorageError::UnsupportedVersion);
+        }
+        crate::status_store::query_budget(&db, timeout)?;
+        Ok(Self {
+            db,
+            _owner: Some(owner),
+        })
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

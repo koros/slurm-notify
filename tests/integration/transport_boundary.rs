@@ -12,10 +12,18 @@ mod credential_resolution;
 mod delivery;
 #[path = "../../crates/notify-cli/src/email_content.rs"]
 mod email_content;
+#[path = "../../crates/notify-cli/src/email_http.rs"]
+mod email_http;
 #[path = "../../crates/notify-cli/src/email_profile.rs"]
 mod email_profile;
+#[path = "../../crates/notify-cli/src/email_resources.rs"]
+mod email_resources;
+#[path = "../../crates/notify-cli/src/email_result.rs"]
+mod email_result;
 #[path = "../../crates/notify-cli/src/email_wire.rs"]
 mod email_wire;
+#[path = "../../crates/notify-cli/src/http_destination.rs"]
+mod http_destination;
 #[path = "../../crates/notify-cli/src/job_enrichment.rs"]
 mod job_enrichment;
 #[path = "../../crates/notify-cli/src/lifecycle.rs"]

@@ -6,6 +6,8 @@ pub(super) enum ProviderOutcome {
     // Validated relative delay from a provider; exponential backoff remains a floor.
     RetryAfter(i64),
     Rejected,
+    PauseAuthentication,
+    PausePolicy,
 }
 
 pub(super) fn unix_time() -> Option<i64> {

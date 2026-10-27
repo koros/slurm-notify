@@ -2,7 +2,8 @@
 
 > **Status: implementation started.** The separate experimental
 > `email test --profile` boundary is adopted in [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md).
-> Monitoring, persistence and OAuth lifecycle contracts remain under review.
+> SendGrid/Mailgun monitoring and recovery are adopted in ADRs 0078–0079.
+> Gmail protected OAuth lifecycle remains pending.
 
 Updated: 2026-10-27 · [Roadmap and GitHub tracking](../architecture/https-email-delivery-roadmap.md)
 · [Technical design notes](https-email-delivery-v1-design-notes.md)

@@ -9,6 +9,8 @@ mod email_http;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod email_profile;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_resources;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod email_result;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod email_test;
@@ -26,7 +28,11 @@ mod foreground_session;
 mod foreground_signals;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_wait;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod http_destination;
 mod installed_config;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod installed_email_recovery;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod installed_monitor;
 mod installed_smtp;
@@ -233,6 +239,16 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::from(2);
         }
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if args.len() == 1 && args[0] == "--internal-api-email-v1" {
+        return std::process::ExitCode::from(
+            if email_resources::serve(std::io::stdin(), std::io::stdout()).is_ok() {
+                0
+            } else {
+                2
+            },
+        );
+    }
     if args.len() == 2 && args[0] == "--internal-provider-v1" && args[1] == "webhook" {
         return std::process::ExitCode::from(
             if installed_webhook_helper::serve(std::io::stdin(), std::io::stdout()).is_ok() {
@@ -261,6 +277,33 @@ fn main() -> std::process::ExitCode {
             include_str!("../../../contracts/cli/start-help.stdout")
         );
         return std::process::ExitCode::SUCCESS;
+    }
+    if args == ["provider", "--help"] {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/provider-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if args.len() == 5 && args[0] == "provider" && args[1] == "resume" {
+        let mut target = vec![std::ffi::OsString::from("test")];
+        target.extend_from_slice(&args[2..]);
+        if let Some((path, alias)) = test_target(&target) {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let result = installed_email_recovery::resume(&path, &alias);
+                match result {
+                    Ok(resumed) => {
+                        println!("API email provider recovery: resumed={resumed}. No alert was sent; attempt budgets were preserved.");
+                        return std::process::ExitCode::SUCCESS;
+                    }
+                    Err(()) => {
+                        eprintln!("API email recovery failed; verify enrollment, profile revision and stopped existing state.");
+                        return std::process::ExitCode::from(3);
+                    }
+                }
+            }
+        }
     }
     if let Some(path) = start_path(&args) {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -296,6 +339,10 @@ fn main() -> std::process::ExitCode {
                     installed_doctor::Error::Permission => (
                         3,
                         "SMTP delivery permission is not approved for the current profile.",
+                    ),
+                    installed_doctor::Error::ApiPermission => (
+                        3,
+                        "API email delivery permission is not approved for the current profile.",
                     ),
                     installed_doctor::Error::ClusterMismatch => (2, crate::cluster_probe::MISMATCH),
                     installed_doctor::Error::Programs => (
@@ -334,6 +381,7 @@ fn main() -> std::process::ExitCode {
                 let(code,message)=match error {
                 installed_provider_test::Error::Config=>(2,"Configuration invalid or required resource unavailable."),
                 installed_provider_test::Error::Permission=>(3,"SMTP delivery permission is not approved for the current profile."),
+                installed_provider_test::Error::ApiPermission=>(3,"API email delivery permission is not approved for the current profile."),
                 installed_provider_test::Error::Transport=>(1,"Synthetic test was not acknowledged; acceptance may be unknown. No automatic retry was made."),
             };
                 eprintln!("{message}");
@@ -434,6 +482,10 @@ fn main() -> std::process::ExitCode {
             Err(crate::installed_config::Error::Invalid) => {
                 eprintln!("Configuration invalid or required resource unavailable.");
                 std::process::ExitCode::from(2)
+            }
+            Err(crate::installed_config::Error::ApiPermission) => {
+                eprintln!("API email delivery permission is not approved for the current profile.");
+                std::process::ExitCode::from(3)
             }
             Err(crate::installed_config::Error::Permission) => {
                 eprintln!("SMTP delivery permission is not approved for the current profile.");

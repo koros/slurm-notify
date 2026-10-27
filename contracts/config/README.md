@@ -117,3 +117,13 @@ The metadata-only profile fingerprint includes provider, sender/recipient, accou
 credential reference, Mailgun domain/region and trust references. It does not
 represent enrolled monitoring permission. No new durable storage semantics are
 introduced by this test command.
+
+## API email monitoring drafts
+
+`sendgrid-v1.example.json` and `mailgun-v1.example.json` are full schema-v1
+monitoring drafts. Replace example addresses, cluster, private state path and
+account/key references locally, then use `init` to enroll current API-email pairs.
+An empty api_email_permissions list permits draft review, not delivery.
+See [the operator guide](../../docs/operations/https-email.md) and
+[ADR 0079](../../docs/adr/0079-api-email-enrollment-and-recovery.md).
+Gmail API normal monitoring configs remain rejected pending OAuth lifecycle work.

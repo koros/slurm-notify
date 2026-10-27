@@ -11,8 +11,9 @@ current evidence by capability and identifies the remaining activation gates.
 - Experimental explicit HTTPS email tests for SendGrid, Mailgun and Gmail API with
   fixed verified endpoints, protected resources, deterministic encoders and bounded
   supervised results. Gmail checks live account identity before submission.
-  Controlled TLS/CLI tests only; normal API-email monitoring and OAuth refresh
-  remain unimplemented, and real-provider inbox receipt is not established.
+  SendGrid/Mailgun also have exact enrollment, immutable foreground requests, durable
+  isolated pauses and existing-only recovery. Controlled TLS/CLI/storage/worker
+  acceptance only; Gmail OAuth refresh and real-provider inbox receipt remain pending.
 
 - Private shared presentation content and detailed Slack Block Kit v3, including
   all lifecycle headings, synthetic delivery, full fallback, plain-text-only blocks,

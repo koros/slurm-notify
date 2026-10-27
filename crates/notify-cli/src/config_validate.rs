@@ -198,6 +198,7 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
         return Err(Error::Structure);
     }
     let mut smtp = Vec::new();
+    let mut api_email = Vec::new();
     let mut aliases = Vec::new();
     for (name, value) in providers {
         alias(name)?;
@@ -240,6 +241,17 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
                 }
                 number(get(p, "request_timeout_seconds")?, 1, 30)?;
                 number(get(p, "payload_limit_bytes")?, 1024, 16384)?;
+            }
+            "sendgrid" | "mailgun" => {
+                #[cfg(any(test, target_os = "linux", target_os = "macos"))]
+                {
+                    let profile = crate::email_profile::Profile::from_monitor(value)
+                        .map_err(|_| Error::Policy)?;
+                    profile.encode().map_err(|_| Error::Policy)?;
+                    api_email.push(name.as_str());
+                }
+                #[cfg(not(any(test, target_os = "linux", target_os = "macos")))]
+                return Err(Error::Policy);
             }
             "smtp" => {
                 smtp.push(name.as_str());
@@ -326,7 +338,37 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
     if !smtp.is_empty() {
         required.extend(["prepared_smtp_message_limit", "smtp_permissions"]);
     }
+    if !api_email.is_empty() {
+        required.push("api_email_permissions");
+    }
     let delivery = fields(get(root, "delivery")?, &required, &[])?;
+    if !api_email.is_empty() {
+        let mut seen = std::collections::HashSet::new();
+        for permission in list(get(delivery, "api_email_permissions")?, 0, 64)? {
+            let p = fields(
+                permission,
+                &[
+                    "cluster_id",
+                    "destination",
+                    "rendering_revision",
+                    "provider_revision",
+                ],
+                &[],
+            )?;
+            let c = text(get(p, "cluster_id")?)?;
+            let d = text(get(p, "destination")?)?;
+            alias(c)?;
+            alias(d)?;
+            if c != cluster || !api_email.contains(&d) {
+                return Err(Error::Reference);
+            }
+            let rendering = token(get(p, "rendering_revision")?)?;
+            let provider = token(get(p, "provider_revision")?)?;
+            if !seen.insert((c, d, rendering, provider)) {
+                return Err(Error::Duplicate);
+            }
+        }
+    }
     if !smtp.is_empty() {
         number(get(delivery, "prepared_smtp_message_limit")?, 1, 256)?;
         let mut seen = std::collections::HashSet::new();

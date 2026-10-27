@@ -1,7 +1,7 @@
 # HTTPS email delivery v1 roadmap
 
 > **Implementation in progress.** Experimental one-shot tests are implemented;
-> durable API-email monitoring and OAuth refresh remain gated. Linked issues track
+> SendGrid/Mailgun foreground delivery is implemented; Gmail OAuth refresh remains gated. Linked issues track
 > current progress.
 
 Updated: 2026-10-27. Read the [proposal](../proposals/https-email-delivery-v1.md)
@@ -18,12 +18,11 @@ See the [test guide](../operations/https-email.md).
 
 The next foundation increment ([ADR 0078](../adr/0078-transactional-api-email-storage.md))
 adds transactional v7 request frames and private pause/recovery primitives with
-rollback, integrity, restart, isolation and attempt-count tests. Normal monitoring
-configuration and public recovery commands remain gated.
+rollback, integrity, restart, isolation and attempt-count tests. [ADR 0079](../adr/0079-api-email-enrollment-and-recovery.md) integrates SendGrid/Mailgun
+monitoring, exact enrollment, configured tests and explicit public recovery.
 
 This is partial progress on #18–#25, not completion of those issues:
-operator receipt, normal monitoring config, permission enrollment, runtime pause/resume integration and unattended OAuth still
-require their acceptance gates.
+operator receipt and unattended Gmail OAuth still require their acceptance gates.
 
 ## Milestones
 
@@ -42,7 +41,7 @@ shared foundation, not on SendGrid account availability.
 
 ## Implementation backlog
 
-All items start **planned**. Check the linked issue for live status and its full
+Items began **planned**; the implemented increments above describe current progress. Check the linked issue for live status and its full
 acceptance checklist. A closed task is evidence for its scope only, not a release.
 
 | Issue | Work | Depends on |

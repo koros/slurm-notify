@@ -3955,3 +3955,21 @@ covers three wire formats, immutable data, changed identities, restart replay,
 late schema/preparation rollback and unrelated-route progress. Shared checks passed;
 fresh Rust line coverage is 97.07% (29,115/29,993), above the unchanged 90% gate.
 No real provider/account/cluster or upgrade acceptance is claimed.
+
+## 2026-10-27: enrolled SendGrid/Mailgun monitoring and recovery
+
+ADR 0079 adds explicit API provider config, separate exact permission enrollment,
+configured synthetic tests, typed foreground HTTP dispatch, immutable request
+preparation and durable credential/authentication/policy pauses. Paused routes are
+excluded before batch limits and rechecked within a batch. Historical status adds
+a bounded pause count. Explicit recovery opens only stopped existing schema-v7
+state, checks the enrolled revision and preserves frozen bytes and attempt budgets.
+
+Meaningful tests cover enrollment before secret lookup, disclosure changes,
+canonical/helper frame rejection, frozen requests across reopen, missing-key versus
+submission attempt accounting, unrelated destination progress, active-owner and
+revision refusal, resource-free CLI help and no-send/no-state invalid operations.
+Shared checks passed; the final coverage run passed 455 Rust tests plus 31 CLI
+tests, controlled process acceptance, and the unchanged 90% gate at 96.59% Rust
+line coverage (29,924/30,981). No real API account/inbox acceptance is claimed.
+Gmail API remains explicit one-shot testing pending protected OAuth lifecycle work.

@@ -111,7 +111,7 @@ impl<'a, 'b> ProviderPlan<'a, 'b> {
                     return Err(smtp_poll::Error::InvalidInput);
                 }
                 bindings.push(crate::storage::PublicRoute {
-                    email: None,
+                    email: webhook.resources.email_profile(),
                     slack: webhook.resources.slack_options(),
                     destination,
                     revision: webhook

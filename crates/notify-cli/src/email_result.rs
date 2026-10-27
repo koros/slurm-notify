@@ -147,6 +147,7 @@ pub(super) fn classify(
 }
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
     use super::*;
     #[test]
     fn exact_acceptance_and_strict_acknowledgement() {

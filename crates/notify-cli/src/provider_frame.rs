@@ -122,7 +122,9 @@ pub(super) fn serve_optional(
         ProviderOutcome::Retry => "RETRY\n".to_owned(),
         ProviderOutcome::Rejected => "REJECT\n".to_owned(),
         ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => format!("RETRY_AFTER {seconds}\n"),
-        ProviderOutcome::RetryAfter(_) => return Err(Error::InvalidResult),
+        ProviderOutcome::RetryAfter(_)
+        | ProviderOutcome::PauseAuthentication
+        | ProviderOutcome::PausePolicy => return Err(Error::InvalidResult),
     };
     output.write_all(result.as_bytes()).map_err(|_| Error::Io)?;
     output.flush().map_err(|_| Error::Io)

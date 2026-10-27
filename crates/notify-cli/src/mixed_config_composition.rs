@@ -27,8 +27,14 @@ pub(super) const SMTP_TEST_BODY: &str = "Synthetic Slurm Notify test.\nNo schedu
 pub(super) enum SyntheticError {
     Config,
     Permission,
+    ApiPermission,
 }
 pub(super) enum SyntheticRequest {
+    Email {
+        request: crate::email_resources::Request,
+        kind: &'static str,
+        id: String,
+    },
     Webhook {
         request: crate::webhook_resolution::PublicRequest,
         preview: String,
@@ -102,6 +108,22 @@ impl Plan {
             .iter()
             .find(|webhook| webhook.alias.as_str() == alias)
         {
+            if let Some(email) = webhook.resources.email() {
+                let request = email
+                    .synthetic(id, now, crate::environment_resolution::lookup)
+                    .map_err(|e| {
+                        if e == crate::supervised_provider::Diagnostic::EmailPermission {
+                            Error::ApiPermission
+                        } else {
+                            Error::Config
+                        }
+                    })?;
+                return Ok(Request::Email {
+                    request,
+                    kind: email.profile.kind(),
+                    id: id.into(),
+                });
+            }
             let payload=serde_json::to_vec(&serde_json::json!({"schema_version":"1.0","event_id":id,"event_type":"TEST","message":"Synthetic Slurm Notify test; no scheduler data."})).map_err(|_|Error::Config)?;
             return Ok(Request::Webhook {
                 request: webhook
@@ -219,6 +241,25 @@ impl Plan {
             })
             .collect()
     }
+    pub(super) fn api_permissions_approved(&self) -> bool {
+        self.common
+            .webhooks
+            .iter()
+            .filter_map(|w| w.resources.email())
+            .all(|e| e.approved())
+    }
+    pub(super) fn api_revisions(&self) -> Vec<(&str, &str, &str)> {
+        self.common
+            .webhooks
+            .iter()
+            .filter_map(|w| {
+                w.resources.email().map(|e| {
+                    let (r, p) = e.revisions();
+                    (w.alias.as_str(), r, p)
+                })
+            })
+            .collect()
+    }
     pub(super) fn revisions(&self) -> Vec<(&str, &str, &str)> {
         self.smtp
             .iter()
@@ -290,12 +331,13 @@ impl Plan {
         X: FnMut() -> bool,
     {
         let PublicDeliveryHooks {
-            mut lookup,
+            lookup,
             mut smtp_helper,
             webhook_helper,
             clock,
             cancelled,
         } = hooks;
+        let lookup = std::cell::RefCell::new(lookup);
         smtp_provider_delivery::deliver_due_public_mixed(
             store,
             self.common.observation.cluster(),
@@ -303,12 +345,13 @@ impl Plan {
             self.common.controls.maintenance.delivery_limit,
             self.common.controls.maintenance.retry,
             smtp_provider_delivery::PublicMixedHooks {
+                email_lookup: |key: &str, limit: usize| (lookup.borrow_mut())(key, limit),
                 webhooks: &self.common.webhooks,
                 helper: webhook_helper,
                 smtp: smtp_provider_delivery::Hooks {
                     permissions,
                     resolve: |bound: &Descriptor| {
-                        self.resolve(bound, &mut lookup)
+                        self.resolve(bound, |key, limit| (lookup.borrow_mut())(key, limit))
                             .map_err(|error| match error {
                                 Error::Credentials(_) => smtp_provider_delivery::Error::Credentials,
                                 _ => smtp_provider_delivery::Error::Profile,

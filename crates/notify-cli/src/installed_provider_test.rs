@@ -7,6 +7,7 @@ use std::{io::Write, path::Path};
 pub(super) enum Error {
     Config,
     Permission,
+    ApiPermission,
     Transport,
 }
 pub(super) fn run(path: &Path, alias: &str) -> Result<(), Error> {
@@ -27,9 +28,16 @@ pub(super) fn run(path: &Path, alias: &str) -> Result<(), Error> {
         .map_err(|error| match error {
             crate::mixed_config_composition::SyntheticError::Config => Error::Config,
             crate::mixed_config_composition::SyntheticError::Permission => Error::Permission,
+            crate::mixed_config_composition::SyntheticError::ApiPermission => Error::ApiPermission,
         })?;
     use crate::mixed_config_composition::{SyntheticRequest as Request, SMTP_TEST_BODY};
     let report = match request {
+        Request::Email { request, kind, id } => {
+            println!("Synthetic test: provider={alias} type={kind} subject=Slurm Notify test");
+            println!("Synthetic Slurm Notify test; no scheduler data.\nEvent: {id}");
+            std::io::stdout().flush().map_err(|_| Error::Transport)?;
+            request.supervise(&mut helpers.command(Kind::Webhook))
+        }
         Request::Webhook {
             request,
             preview,

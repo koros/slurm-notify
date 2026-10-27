@@ -2843,3 +2843,60 @@ fn explicit_email_help_and_expired_gmail_test_are_resource_bounded() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn api_email_recovery_help_and_unenrolled_tests_do_not_create_state_or_send() {
+    use std::os::unix::fs::PermissionsExt;
+    expect(
+        command().args(["provider", "--help"]).output().unwrap(),
+        0,
+        include_bytes!("../../../contracts/cli/provider-help.stdout"),
+        b"",
+    );
+    for args in [
+        vec!["provider", "resume"],
+        vec!["provider", "resume", "primary", "--config", "relative"],
+        vec!["provider", "resume", "bad/name", "--config", "/missing"],
+        vec![
+            "provider", "resume", "primary", "--config", "/missing", "extra",
+        ],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    let root = std::env::temp_dir().join(format!("sn-api-recovery-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.join("config.json");
+    let mut value: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../contracts/config/sendgrid-v1.example.json"
+    ))
+    .unwrap();
+    value["storage"]["path"] = serde_json::json!(root.join("state/state.sqlite3"));
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    expect(
+        command()
+            .args(["test", "primary", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap(),
+        3,
+        b"",
+        b"API email delivery permission is not approved for the current profile.\n",
+    );
+    expect(
+        command()
+            .args(["config", "validate", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap(),
+        3,
+        b"",
+        b"API email delivery permission is not approved for the current profile.\n",
+    );
+    expect(command().args(["provider","resume","primary","--config"]).arg(&path).output().unwrap(),3,b"",b"API email recovery failed; verify enrollment, profile revision and stopped existing state.\n");
+    assert!(!root.join("state").exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

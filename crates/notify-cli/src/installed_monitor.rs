@@ -116,6 +116,10 @@ pub(super) fn run(path: &Path) -> u8 {
             )))
         }
     };
+    if !plan.api_permissions_approved() {
+        eprintln!("API email delivery permission is not approved for the current profile.");
+        return 3;
+    }
     if plan.webhook_origins().is_none() {
         return finish(Summary::Startup(StartupReport::classify(
             Error::Preparation,

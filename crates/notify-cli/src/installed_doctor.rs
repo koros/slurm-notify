@@ -4,6 +4,7 @@ use std::{path::Path, process::Command, time::Instant};
 pub(super) enum Error {
     Config,
     Permission,
+    ApiPermission,
     Programs,
     Probe,
     ClusterMismatch,
@@ -13,6 +14,7 @@ pub(super) fn run(path: &Path) -> Result<String, Error> {
     installed_config::validate_bytes(snapshot.bytes()).map_err(|error| match error {
         installed_config::Error::Invalid => Error::Config,
         installed_config::Error::Permission => Error::Permission,
+        installed_config::Error::ApiPermission => Error::ApiPermission,
     })?;
     let draft = config_validate::validate(snapshot.bytes()).map_err(|_| Error::Config)?;
     let (active, accounting) = installed_monitor::programs().ok_or(Error::Programs)?;

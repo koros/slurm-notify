@@ -227,3 +227,5 @@ It is not a normal monitoring provider/config command. See
 [email help baseline](email-help.stdout) and [ADR 0077](../../docs/adr/0077-explicit-https-email-test-boundary.md).
 Exit codes: 0 API-accepted; 1 refused/not-submitted/unknown; 2 invalid profile,
 resources or grammar. No scheduler, state, token refresh or automatic retry.
+
+`provider --help` is resource-free. `provider resume <alias> --config <absolute-path>` clears an exact enrolled API-email pause in stopped existing schema-v7 state without sends, credential lookup or retry-budget reset. See ADR 0079.

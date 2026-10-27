@@ -95,7 +95,34 @@ fn inspect_at(path: &Path, now: i64) -> Result<String, Error> {
     let age = age
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown".into());
-    Ok(format!("Historical state: cluster={cluster}\nProcess health: unknown\nCheckpoint: age_seconds={age} stale={stale}\nQueue sample: queued={} due={} retrying={} failed={} delivered={} sampled={} truncated={}\nCapacity sample: jobs={} events={} jobs_over_limit={} events_over_limit={}\nRetention sample: cleanup_eligible={} completion_unproven={}\n", health.pending, health.due, health.retrying, health.failed, health.delivered, health.destinations_sampled, health.destinations_truncated, health.jobs_sampled, health.events_sampled, health.jobs_over_capacity, health.events_over_capacity, health.cleanup_eligible, health.completion_unproven))
+    let mut output = format!("Historical state: cluster={cluster}\nProcess health: unknown\nCheckpoint: age_seconds={age} stale={stale}\nQueue sample: queued={} due={} retrying={} failed={} delivered={} sampled={} truncated={}\nCapacity sample: jobs={} events={} jobs_over_limit={} events_over_limit={}\nRetention sample: cleanup_eligible={} completion_unproven={}\n", health.pending, health.due, health.retrying, health.failed, health.delivered, health.destinations_sampled, health.destinations_truncated, health.jobs_sampled, health.events_sampled, health.jobs_over_capacity, health.events_over_capacity, health.cleanup_eligible, health.completion_unproven);
+    let providers =
+        object(get(root, "providers").map_err(|_| Error::Config)?).map_err(|_| Error::Config)?;
+    let api = providers.iter().any(|(_, p)| {
+        object(p)
+            .ok()
+            .and_then(|p| get(p, "type").ok())
+            .and_then(|v| text(v).ok())
+            .is_some_and(|kind| matches!(kind, "sendgrid" | "mailgun"))
+    });
+    if api {
+        let version: i64 = status
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| Error::Database)?;
+        let limit = number(maintenance, "health_sample_limit")? as i64;
+        let count: i64 = if version == 7 {
+            status.db.query_row("SELECT count(*) FROM (SELECT 1 FROM email_provider_pauses WHERE cluster=?1 LIMIT ?2)",rusqlite::params![cluster,limit+1],|r|r.get(0)).map_err(|_| Error::Database)?
+        } else {
+            0
+        };
+        output.push_str(&format!(
+            "API email pauses: sampled={} truncated={}\n",
+            count.min(limit),
+            count > limit
+        ));
+    }
+    Ok(output)
 }
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub(super) fn inspect(_: &Path) -> Result<String, Error> {

@@ -270,7 +270,28 @@ where
             if (hooks.cancelled)() {
                 return Err(WorkerError::Cancelled);
             }
-            let context = (hooks.authorize)(store, &item).map_err(WorkerError::DispatchBlocked)?;
+            if store.email_paused(&item).map_err(WorkerError::Storage)? {
+                continue;
+            }
+            let context = match (hooks.authorize)(store, &item) {
+                Ok(context) => context,
+                Err(super::supervised_provider::Diagnostic::EmailCredentials) => {
+                    let revision = store
+                        .email_bound_revision(&item)
+                        .map_err(WorkerError::Storage)?;
+                    store
+                        .pause_email_before_attempt(
+                            cluster,
+                            &item.destination,
+                            &revision,
+                            super::storage::email::PauseReason::Credentials,
+                            previous_completion,
+                        )
+                        .map_err(WorkerError::Storage)?;
+                    continue;
+                }
+                Err(error) => return Err(WorkerError::DispatchBlocked(error)),
+            };
             if item.attempt_number > i64::from(policy.max_attempts) {
                 store
                     .retire_exhausted(&item, policy.max_attempts)
@@ -285,9 +306,34 @@ where
                 .filter(|time| *time >= previous_completion)
                 .ok_or(WorkerError::InvalidTime)?;
             previous_completion = completed_at;
+            if matches!(
+                provider,
+                ProviderOutcome::PauseAuthentication | ProviderOutcome::PausePolicy
+            ) {
+                let revision = store
+                    .email_bound_revision(&item)
+                    .map_err(WorkerError::Storage)?;
+                let reason = if provider == ProviderOutcome::PauseAuthentication {
+                    super::storage::email::PauseReason::Authentication
+                } else {
+                    super::storage::email::PauseReason::Policy
+                };
+                let next = completed_at
+                    .checked_add(policy.delay(item.attempt_number))
+                    .ok_or(WorkerError::InvalidPolicy)?;
+                store
+                    .pause_email_after_attempt(&item, &revision, reason, completed_at, next)
+                    .map_err(WorkerError::Storage)?;
+                uncertain = false;
+                report.retrying += 1;
+                continue;
+            }
             let (outcome, retry_at) = match provider {
                 ProviderOutcome::Delivered => (DeliveryOutcome::Success, None),
                 ProviderOutcome::Rejected => (DeliveryOutcome::TerminalFailure, None),
+                ProviderOutcome::PauseAuthentication | ProviderOutcome::PausePolicy => {
+                    unreachable!("API pauses committed above")
+                }
                 retry @ (ProviderOutcome::Retry | ProviderOutcome::RetryAfter(_)) => {
                     let hint = match retry {
                         ProviderOutcome::RetryAfter(seconds) if seconds >= 0 => seconds,
