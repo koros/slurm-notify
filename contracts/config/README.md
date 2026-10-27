@@ -92,14 +92,16 @@ before reconciliation/persistence. Namespaces are never renamed automatically.
 ## Standalone HTTPS email test profiles
 
 These profiles belong to `email test --profile`, not the normal monitoring config.
-The normal config's provider map still rejects SendGrid/Mailgun/Gmail API types.
+Use the separate full monitoring examples below for normal providers; standalone
+profile syntax is not a nested provider object.
 See [ADR 0077](../../docs/adr/0077-explicit-https-email-test-boundary.md) and the
 [operator guide](../../docs/operations/https-email.md). All budgets are explicit;
 no example address/account is a usable credential.
 
 - [SendGrid example](email-sendgrid-test-v1.example.json)
 - [Mailgun example](email-mailgun-test-v1.example.json)
-- [Gmail API example](email-gmail-test-v1.example.json)
+- [Gmail API short-lived probe](email-gmail-test-v1.example.json)
+- [Gmail API offline-grant profile](email-gmail-offline-test-v1.example.json)
 
 Required common keys: schema_version=1, provider, sender, recipient,
 account_identity, request_timeout_seconds (1–30), payload_limit_bytes (1024–16384).
@@ -120,10 +122,13 @@ introduced by this test command.
 
 ## API email monitoring drafts
 
-`sendgrid-v1.example.json` and `mailgun-v1.example.json` are full schema-v1
+`sendgrid-v1.example.json`, `mailgun-v1.example.json` and `gmail-api-v1.example.json` are full schema-v1
 monitoring drafts. Replace example addresses, cluster, private state path and
 account/key references locally, then use `init` to enroll current API-email pairs.
 An empty api_email_permissions list permits draft review, not delivery.
 See [the operator guide](../../docs/operations/https-email.md) and
 [ADR 0079](../../docs/adr/0079-api-email-enrollment-and-recovery.md).
-Gmail API normal monitoring configs remain rejected pending OAuth lifecycle work.
+`gmail-api-v1.example.json` adds experimental foreground Gmail with a mandatory
+oauth_client_id and versioned offline grant; see ADR 0081.
+
+Standalone Gmail profiles may opt into a versioned offline grant with oauth_client_id. The protected schema and explicit no-send refresh boundary are specified in [ADR 0080](../../docs/adr/0080-protected-gmail-offline-grant-preflight.md). Original two-field short-lived probe credentials remain compatible.

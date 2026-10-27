@@ -5,6 +5,9 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Add separate protected Gmail offline-grant preflight, bounded verified refresh/identity checks, credential-level locking and atomic token rotation, plus a workstation-only official-library consent helper. Experimental Gmail foreground uses separate no-send preflight and one-POST dispatch, durable provider cooldowns (lazy schema v8), explicit pause recovery and cancellation before submission. Live-provider acceptance remains pending.
+- Bind API-email enrollment to explicit timeout and payload budgets as well as account, destination and trust metadata.
+
 - Add enrolled SendGrid/Mailgun foreground routes, immutable supervised API delivery, isolated durable credential/auth/policy pauses, historical pause counts and existing-only explicit recovery. Gmail monitoring stays gated pending OAuth lifecycle acceptance.
 
 ### Changed

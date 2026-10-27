@@ -41,3 +41,7 @@ immutable v7 request frames and privately tested provider-scoped pause/recovery
 primitives before normal API-email monitoring is enabled.
 
 - [0079: API email enrollment and recovery](0079-api-email-enrollment-and-recovery.md)
+
+- [0080: protected Gmail offline-grant preflight](0080-protected-gmail-offline-grant-preflight.md)
+
+- [0081: Gmail foreground preflight and cooldowns](0081-gmail-foreground-preflight-and-cooldown.md)

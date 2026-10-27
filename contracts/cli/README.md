@@ -229,3 +229,5 @@ Exit codes: 0 API-accepted; 1 refused/not-submitted/unknown; 2 invalid profile,
 resources or grammar. No scheduler, state, token refresh or automatic retry.
 
 `provider --help` is resource-free. `provider resume <alias> --config <absolute-path>` clears an exact enrolled API-email pause in stopped existing schema-v7 state without sends, credential lookup or retry-budget reset. See ADR 0079.
+
+`email auth --help` is resource-free. `email auth refresh --profile <absolute-path>` performs bounded protected Gmail credential preflight without any email submission or state access. Its three exit classes and separate consent helper are documented in the HTTPS email operator guide.

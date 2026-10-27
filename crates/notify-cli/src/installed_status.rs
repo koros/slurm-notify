@@ -103,7 +103,7 @@ fn inspect_at(path: &Path, now: i64) -> Result<String, Error> {
             .ok()
             .and_then(|p| get(p, "type").ok())
             .and_then(|v| text(v).ok())
-            .is_some_and(|kind| matches!(kind, "sendgrid" | "mailgun"))
+            .is_some_and(|kind| matches!(kind, "sendgrid" | "mailgun" | "gmail_api"))
     });
     if api {
         let version: i64 = status
@@ -111,7 +111,7 @@ fn inspect_at(path: &Path, now: i64) -> Result<String, Error> {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| Error::Database)?;
         let limit = number(maintenance, "health_sample_limit")? as i64;
-        let count: i64 = if version == 7 {
+        let count: i64 = if version >= 7 {
             status.db.query_row("SELECT count(*) FROM (SELECT 1 FROM email_provider_pauses WHERE cluster=?1 LIMIT ?2)",rusqlite::params![cluster,limit+1],|r|r.get(0)).map_err(|_| Error::Database)?
         } else {
             0
@@ -120,6 +120,16 @@ fn inspect_at(path: &Path, now: i64) -> Result<String, Error> {
             "API email pauses: sampled={} truncated={}\n",
             count.min(limit),
             count > limit
+        ));
+        let cooldowns: i64 = if version >= 8 {
+            status.db.query_row("SELECT count(*) FROM (SELECT 1 FROM email_provider_cooldowns WHERE cluster=?1 AND retry_at>?2 LIMIT ?3)",rusqlite::params![cluster,now,limit+1],|r|r.get(0)).map_err(|_|Error::Database)?
+        } else {
+            0
+        };
+        output.push_str(&format!(
+            "API email cooldowns: sampled={} truncated={}\n",
+            cooldowns.min(limit),
+            cooldowns > limit
         ));
     }
     Ok(output)

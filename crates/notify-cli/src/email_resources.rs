@@ -38,6 +38,8 @@ impl Resources {
             b"api-email-provider-v1\0",
             &[
                 &profile.revision(),
+                &profile.timeout.as_secs().to_string(),
+                &profile.payload_limit.to_string(),
                 trust
                     .as_ref()
                     .map(|t| t.fingerprint())
@@ -117,11 +119,7 @@ impl Resources {
             .public_delivery(&item.event_id, &item.destination, &self.revision)
             .map_err(|_| Diagnostic::InvalidInput)?
             .ok_or(Diagnostic::InvalidInput)?;
-        let credential =
-            lookup(&self.profile.credential, 4096).map_err(|_| Diagnostic::EmailCredentials)?;
-        if !valid_key(&credential) {
-            return Err(Diagnostic::EmailCredentials);
-        }
+        let credential = self.credential(lookup)?;
         self.request(&credential, &public.payload, &frozen)
             .map_err(|_| Diagnostic::InvalidInput)
     }
@@ -139,13 +137,56 @@ impl Resources {
         let wire = crate::email_wire::prepare(&self.profile, &content)
             .map_err(|_| Diagnostic::InvalidInput)?;
         let payload=serde_json::to_vec(&serde_json::json!({"schema_version":"1.0","event_type":"TEST","event_id":id,"email_test_timestamp":now})).map_err(|_|Diagnostic::InvalidInput)?;
-        let credential =
-            lookup(&self.profile.credential, 4096).map_err(|_| Diagnostic::EmailCredentials)?;
-        if !valid_key(&credential) {
-            return Err(Diagnostic::EmailCredentials);
-        }
+        let credential = self.credential(lookup)?;
         self.request(&credential, &payload, &wire)
             .map_err(|_| Diagnostic::InvalidInput)
+    }
+    fn credential(
+        &self,
+        lookup: impl FnOnce(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+    ) -> Result<Zeroizing<Vec<u8>>, Diagnostic> {
+        self.credential_using(lookup, crate::gmail_auth::run_profile)
+    }
+    fn credential_using(
+        &self,
+        lookup: impl FnOnce(&str, usize) -> Result<Zeroizing<Vec<u8>>, ()>,
+        preflight: impl FnOnce(&Profile, Option<&crate::trust_snapshot::Trust>) -> Result<Outcome, ()>,
+    ) -> Result<Zeroizing<Vec<u8>>, Diagnostic> {
+        if self.profile.provider != crate::email_profile::Provider::Gmail {
+            let key =
+                lookup(&self.profile.credential, 4096).map_err(|_| Diagnostic::EmailCredentials)?;
+            if !valid_key(&key) {
+                return Err(Diagnostic::EmailCredentials);
+            }
+            return Ok(key);
+        }
+        let read = || -> Result<crate::gmail_credentials::Grant, Diagnostic> {
+            let bytes = crate::config_snapshot::read_limit(
+                std::path::Path::new(self.profile.credential.as_str()),
+                16384,
+            )
+            .map_err(|_| Diagnostic::EmailCredentials)?;
+            let grant = crate::gmail_credentials::Grant::parse(bytes.bytes())
+                .map_err(|_| Diagnostic::EmailCredentials)?;
+            if !grant.matches(&self.profile) {
+                return Err(Diagnostic::EmailPreflightPolicy);
+            }
+            Ok(grant)
+        };
+        read()?;
+        match preflight(&self.profile, self.trust.as_ref()) {
+            Ok(Outcome::Accepted) => {}
+            Ok(Outcome::Authentication) => return Err(Diagnostic::EmailPreflightAuthentication),
+            Ok(Outcome::Policy) => return Err(Diagnostic::EmailPreflightPolicy),
+            Ok(Outcome::Retry(seconds)) => return Err(Diagnostic::EmailPreflightRetry(seconds)),
+            _ => return Err(Diagnostic::EmailPreflightRetry(0)),
+        }
+        let grant = read()?;
+        let now = crate::provider_outcome::unix_time().ok_or(Diagnostic::EmailCredentials)? as u64;
+        if !grant.usable(now, self.profile.timeout.as_secs()) {
+            return Err(Diagnostic::EmailPreflightRetry(0));
+        }
+        Ok(Zeroizing::new(grant.access.as_bytes().to_vec()))
     }
     fn request(
         &self,
@@ -257,7 +298,10 @@ pub(super) fn serve(
         return Err(Error::InvalidInput);
     }
     let profile = Profile::parse(fields[0]).map_err(|_| Error::InvalidInput)?;
-    if profile.provider == crate::email_profile::Provider::Gmail || !valid_key(fields[1]) {
+    if !valid_key(fields[1])
+        || (profile.provider == crate::email_profile::Provider::Gmail
+            && profile.client_id.is_empty())
+    {
         return Err(Error::InvalidInput);
     }
     crate::config_decode::decode(fields[2]).map_err(|_| Error::InvalidInput)?;
@@ -303,7 +347,11 @@ pub(super) fn serve(
     let agent =
         crate::email_http::agent(profile.timeout, &roots).map_err(|_| Error::InvalidInput)?;
     let now = crate::provider_outcome::unix_time().ok_or(Error::InvalidInput)?;
-    let result = crate::email_http::send(&profile, fields[1], &wire, &agent, now);
+    let result = if profile.provider == crate::email_profile::Provider::Gmail {
+        crate::email_http::send_gmail_checked(&profile, fields[1], &wire, &agent, now)
+    } else {
+        crate::email_http::send(&profile, fields[1], &wire, &agent, now)
+    };
     output
         .write_all(result.encode().as_bytes())
         .map_err(|_| Error::Io)?;
@@ -441,6 +489,66 @@ mod tests {
                 Err(Diagnostic::EmailCredentials)
             ));
         }
+    }
+    #[test]
+    fn gmail_preflight_is_separate_bound_and_preserves_static_failure_categories() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::storage::tests::Directory::new();
+        let path = d
+            .path()
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .join("gmail-grant.json");
+        let mut v = crate::email_profile::tests::fixture("gmail_api");
+        v.as_object_mut().unwrap().remove("schema_version");
+        v["type"] = v.as_object_mut().unwrap().remove("provider").unwrap();
+        v["oauth_client_id"] = serde_json::json!("desktop-fixture");
+        v["credential_file"] = serde_json::json!(path);
+        let value = crate::config_decode::decode(&serde_json::to_vec(&v).unwrap()).unwrap();
+        let delivery = crate::config_decode::decode(br#"{"api_email_permissions":[]}"#).unwrap();
+        let r = Resources::new(&value, &delivery, "cluster", "email").unwrap();
+        let g = serde_json::json!({"schema_version":1,"client_id":"desktop-fixture","client_secret":"fake-secret","subject":"fixture-account","email":"s@fixture.invalid","refresh_token":"fake-refresh","access_token":"fake-access","expires_at":4_102_444_799u64,"scopes":[crate::gmail_credentials::SEND,"openid","email"]});
+        std::fs::write(&path, serde_json::to_vec(&g).unwrap()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let token = r
+            .credential_using(
+                |_, _| panic!("Gmail must not resolve environment keys"),
+                |_, _| Ok(Outcome::Accepted),
+            )
+            .unwrap();
+        assert_eq!(token.as_slice(), b"fake-access");
+        for (outcome, diagnostic) in [
+            (
+                Outcome::Authentication,
+                Diagnostic::EmailPreflightAuthentication,
+            ),
+            (Outcome::Policy, Diagnostic::EmailPreflightPolicy),
+            (Outcome::Retry(60), Diagnostic::EmailPreflightRetry(60)),
+            (Outcome::NotAttempted, Diagnostic::EmailPreflightRetry(0)),
+        ] {
+            assert_eq!(
+                r.credential_using(|_, _| panic!(), |_, _| Ok(outcome))
+                    .err(),
+                Some(diagnostic)
+            );
+        }
+        assert_eq!(
+            r.credential_using(|_, _| panic!(), |_, _| Err(())).err(),
+            Some(Diagnostic::EmailPreflightRetry(0))
+        );
+        let mut mismatch = g;
+        mismatch["subject"] = serde_json::json!("wrong-account");
+        std::fs::write(&path, serde_json::to_vec(&mismatch).unwrap()).unwrap();
+        assert_eq!(
+            r.credential_using(
+                |_, _| panic!(),
+                |_, _| panic!("identity mismatch must fail locally")
+            )
+            .err(),
+            Some(Diagnostic::EmailPreflightPolicy)
+        );
     }
     #[test]
     fn disclosure_changes_invalidate_enrollment_without_credentials() {

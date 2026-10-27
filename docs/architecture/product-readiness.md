@@ -13,7 +13,9 @@ current evidence by capability and identifies the remaining activation gates.
   supervised results. Gmail checks live account identity before submission.
   SendGrid/Mailgun also have exact enrollment, immutable foreground requests, durable
   isolated pauses and existing-only recovery. Controlled TLS/CLI/storage/worker
-  acceptance only; Gmail OAuth refresh and real-provider inbox receipt remain pending.
+  acceptance only. Gmail has explicit protected offline-grant preflight and atomic
+  refresh; experimental Gmail foreground integrates separate preflight and one-POST dispatch.
+  Real-provider inbox receipt remains pending.
 
 - Private shared presentation content and detailed Slack Block Kit v3, including
   all lifecycle headings, synthetic delivery, full fallback, plain-text-only blocks,

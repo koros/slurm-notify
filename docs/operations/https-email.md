@@ -3,8 +3,8 @@
 The installed `email test` command sends one synthetic email through SendGrid,
 Mailgun or Gmail API over verified HTTPS. It does not monitor jobs, create state,
 refresh OAuth tokens or retry automatically. SendGrid and Mailgun also support
-enrolled foreground monitoring. Gmail API remains a separate one-shot test until
-OAuth lifecycle acceptance. See the [roadmap](../architecture/https-email-delivery-roadmap.md).
+enrolled foreground monitoring. Gmail API supports experimental foreground monitoring with a client-bound offline
+grant and separate supervised credential preflight. See the [roadmap](../architecture/https-email-delivery-roadmap.md).
 
 ## Before sending
 
@@ -144,3 +144,108 @@ Retries can duplicate a remotely accepted message after an acknowledgement or
 local commit failure. A stable Message-ID helps investigation, not guaranteed
 provider deduplication. Check manual inbox receipt before claiming deployment
 acceptance. SendGrid/Mailgun real-account acceptance is still pending.
+
+## Protected Gmail offline credentials (experimental)
+
+Use an operator-owned **Desktop** OAuth client in a Gmail-enabled Google project.
+Add the intended account as a test user where required. On a Unix workstation
+with a browser, create a private directory, move the downloaded client JSON into
+it and set the client file to mode 0600. The helper requires Python 3.10+ and the
+optional official google-auth-oauthlib package in a workstation virtual environment;
+this adds no Python package requirement on the HPC.
+
+```bash
+python3 -m venv /absolute/private/oauth-venv
+/absolute/private/oauth-venv/bin/pip install google-auth-oauthlib
+/absolute/private/oauth-venv/bin/python scripts/gmail-authorize.py \
+  --client /absolute/private/google-desktop.json \
+  --output /absolute/private/gmail-grant.json
+```
+
+The helper opens a local browser and a loopback callback, requests only gmail.send,
+openid and email with offline consent, verifies the account through userinfo and
+creates a new protected grant. It never overwrites an existing output or sends an
+email. Keep OAuth URLs, codes and grant files out of logs, history and screenshots.
+If publication fails, inspect the private destination before retrying. The helper
+has a four-minute overall bound; a headless HPC is not its intended host.
+
+Transfer the grant securely to the intended HPC private directory. Add
+`oauth_client_id` to the standalone Gmail profile, matching client_id in the grant.
+Set account_identity to the grant's subject and sender to its verified email;
+credential_file points at the grant. Read these fields locally without printing
+access_token, refresh_token or client_secret. Then run:
+
+```bash
+./target/release/slurm-notify email auth --help
+./target/release/slurm-notify email auth refresh --profile /absolute/private/gmail-test.json
+./target/release/slurm-notify email test --profile /absolute/private/gmail-test.json
+```
+
+Refresh checks the live bound identity and only refreshes an expired/expiring or
+unambiguously rejected cached token. It makes no email request. Exit 0 means the
+grant was ready at preflight; exit 1 means preflight/publication failed; exit 2
+means invalid invocation/profile/resources. The separate test still sends at most
+one message and does not refresh or resend automatically. Confirm actual receipt
+in the selected inbox/spam before recording acceptance.
+
+Refresh uses fixed direct HTTPS to oauth2.googleapis.com and
+openidconnect.googleapis.com; sending also needs gmail.googleapis.com. Optional
+DER roots apply to all three. Concurrent credential use can fail the nonblocking
+lease; stop other operations before retrying. If consent is revoked or refresh
+fails permanently, authorize a new grant on the workstation, stop consumers and
+replace the private credential deliberately. Never change identity to force old
+pending work through. Revoke access in your Google account when finished and
+remove private local copies. Local metadata inspection and credential disposal are
+explicit operations:
+
+```bash
+./target/release/slurm-notify email auth status --profile /absolute/private/gmail-test.json
+# Stop credential consumers before local disposal:
+./target/release/slurm-notify email auth logout --profile /absolute/private/gmail-test.json
+```
+
+Status makes no network request and does not establish live token validity. Logout
+checks the client/account binding, takes the credential lease and removes only that
+protected local grant; it does not revoke Google consent or change queued work.
+The lock sidecar remains for safe synchronization. A publication/sync error can
+leave the local operation completed but unacknowledged: inspect privately before
+retrying. Browser login is provided only by the workstation helper.
+
+Google Testing grants may expire after seven days for these scopes; switching to
+production has separate consent/verification requirements. Review Google's
+[Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app),
+[refresh-token expiry rules](https://developers.google.com/identity/protocols/oauth2#expiration)
+and the [official Python flow API](https://googleapis.dev/python/google-auth-oauthlib/latest/reference/google_auth_oauthlib.flow.html).
+
+## Experimental Gmail foreground monitoring
+
+Use `gmail-api-v1.example.json` as the full monitoring draft. Set the actual Slurm
+cluster name, private state path, intended recipient and the grant's client ID,
+subject and verified sender. Set credential_file to the protected offline grant.
+Start with an empty api_email_permissions list, then run the same init, config
+validate, test primary, doctor and start sequence shown above. Configuration
+validation checks the local grant without refreshing or contacting Google.
+Configured test/foreground delivery can perform credential preflight before their
+single email POST; the standalone email test command retains explicit refresh.
+
+Temporary preflight failures create a durable provider cooldown without consuming
+send attempts. Historical status reports pause and active-cooldown samples. A stop
+arriving during preflight prevents the later email POST. Permanent grant/account
+problems pause the destination. Correct or reauthorize the grant, stop monitoring,
+run provider resume for the exact enrolled alias and restart. A messages.send 401
+pauses immediately for explicit recovery; it does not refresh and resend silently.
+Identity-endpoint 401 recovery is limited to one refresh during preflight.
+
+Back up stopped private state and credentials separately before upgrading. First
+API content uses schema v7; the first temporary credential-preflight deferral
+transaction upgrades state to v8. Old binaries reject the newer database. Restore
+an earlier backup only after reviewing accepted mail since that backup, because
+restored delivery history can produce duplicates. Never lower user_version or edit
+frozen content. Credential rotation uses a separate file lock and atomic synced
+replacement. An interrupted or failed remote rotation can still require fresh
+workstation consent; do not repeatedly send while investigating.
+
+Gmail remains experimental. This implementation has controlled acceptance only;
+real OAuth consent, inbox/spam receipt and authorized HPC dummy-job delivery need
+operator confirmation. SendGrid and Mailgun similarly need their own account and
+region acceptance. No installed release or supported platform matrix is claimed.

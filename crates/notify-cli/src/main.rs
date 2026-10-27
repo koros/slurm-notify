@@ -29,6 +29,12 @@ mod foreground_signals;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_wait;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod gmail_auth;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod gmail_credentials;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod gmail_store;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod http_destination;
 mod installed_config;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
@@ -249,6 +255,67 @@ fn main() -> std::process::ExitCode {
             },
         );
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if args == ["--internal-gmail-auth-v1"] {
+        return if gmail_auth::serve(std::io::stdin().lock(), std::io::stdout().lock()).is_ok() {
+            std::process::ExitCode::SUCCESS
+        } else {
+            std::process::ExitCode::from(2)
+        };
+    }
+    if args == ["email", "auth", "--help"] {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/email-auth-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if args.len() == 5
+        && args[0] == "email"
+        && args[1] == "auth"
+        && (args[2] == "status" || args[2] == "logout")
+        && args[3] == "--profile"
+        && std::path::Path::new(&args[4]).is_absolute()
+    {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            match gmail_auth::local(std::path::Path::new(&args[4]), args[2] == "logout") {
+                Ok(output) => {
+                    print!("{output}");
+                    return std::process::ExitCode::SUCCESS;
+                }
+                Err(()) => {
+                    eprintln!("Gmail credential operation failed; verify the protected profile, grant and account binding locally.");
+                    return std::process::ExitCode::from(2);
+                }
+            }
+        }
+    }
+    if args.len() == 5
+        && args[0] == "email"
+        && args[1] == "auth"
+        && args[2] == "refresh"
+        && args[3] == "--profile"
+        && std::path::Path::new(&args[4]).is_absolute()
+    {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            match gmail_auth::run(std::path::Path::new(&args[4])) {
+                Ok(email_result::Outcome::Accepted) => {
+                    println!("Gmail credentials ready; no email was sent.");
+                    return std::process::ExitCode::SUCCESS;
+                }
+                Ok(_) => {
+                    eprintln!("Gmail credential preflight failed; verify protected storage, consent and account identity. No email was sent.");
+                    return std::process::ExitCode::from(1);
+                }
+                Err(()) => {
+                    eprintln!("Gmail credential profile or resources invalid. No email was sent.");
+                    return std::process::ExitCode::from(2);
+                }
+            }
+        }
+    }
     if args.len() == 2 && args[0] == "--internal-provider-v1" && args[1] == "webhook" {
         return std::process::ExitCode::from(
             if installed_webhook_helper::serve(std::io::stdin(), std::io::stdout()).is_ok() {
@@ -382,6 +449,7 @@ fn main() -> std::process::ExitCode {
                 installed_provider_test::Error::Config=>(2,"Configuration invalid or required resource unavailable."),
                 installed_provider_test::Error::Permission=>(3,"SMTP delivery permission is not approved for the current profile."),
                 installed_provider_test::Error::ApiPermission=>(3,"API email delivery permission is not approved for the current profile."),
+                installed_provider_test::Error::Preflight=>(1,"Provider credential preflight failed; no email was submitted."),
                 installed_provider_test::Error::Transport=>(1,"Synthetic test was not acknowledged; acceptance may be unknown. No automatic retry was made."),
             };
                 eprintln!("{message}");

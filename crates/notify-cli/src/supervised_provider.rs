@@ -31,6 +31,9 @@ pub(super) enum Diagnostic {
     SmtpUpgradeTemporary,
     SmtpUpgradePermanent,
     EmailCredentials,
+    EmailPreflightAuthentication,
+    EmailPreflightPolicy,
+    EmailPreflightRetry(u64),
     EmailPermission,
     InvalidInput,
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]

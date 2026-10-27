@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "provider": "gmail_api",
+  "sender": "sender@example.invalid",
+  "recipient": "recipient@example.invalid",
+  "account_identity": "replace-with-approved-account-identity",
+  "request_timeout_seconds": 30,
+  "payload_limit_bytes": 16384,
+  "credential_file": "/home/researcher/.config/slurm-notify/gmail-grant.json",
+  "oauth_client_id": "replace-with-your-desktop-oauth-client-id"
+}

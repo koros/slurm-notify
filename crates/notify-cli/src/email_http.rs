@@ -35,7 +35,7 @@ pub(super) fn agent(timeout: Duration, roots: &[&[u8]]) -> Result<ureq::Agent, (
     };
     Ok(builder.build())
 }
-fn bounded(response: ureq::Response) -> Result<Zeroizing<Vec<u8>>, ()> {
+pub(super) fn bounded(response: ureq::Response) -> Result<Zeroizing<Vec<u8>>, ()> {
     if response
         .header("Content-Encoding")
         .is_some_and(|v| v != "identity")
@@ -63,6 +63,13 @@ fn token(bytes: &[u8]) -> Result<&str, ()> {
 fn gmail_token(profile: &Profile, credential: &[u8], now: i64) -> Result<Zeroizing<String>, ()> {
     if credential.len() > 16384 || now < 0 {
         return Err(());
+    }
+    if !profile.client_id.is_empty() {
+        let grant = crate::gmail_credentials::Grant::parse(credential)?;
+        if !grant.matches(profile) || !grant.usable(now as u64, profile.timeout.as_secs()) {
+            return Err(());
+        }
+        return Ok(grant.access);
     }
     let value = crate::config_decode::decode(credential).map_err(|_| ())?;
     let values = object(&value).map_err(|_| ())?;
@@ -142,13 +149,41 @@ pub(super) fn send(
             auth
         }
     };
+    submit(profile, &auth, request, client, now)
+}
+// Only the typed monitoring helper uses this after separate account preflight.
+// Its entire dispatch is one submission; no token or identity requests are counted.
+pub(super) fn send_gmail_checked(
+    profile: &Profile,
+    credential: &[u8],
+    request: &Request,
+    client: &ureq::Agent,
+    now: i64,
+) -> Outcome {
+    if profile.provider != Provider::Gmail || profile.client_id.is_empty() {
+        return Outcome::NotAttempted;
+    }
+    let token = match token(credential) {
+        Ok(t) => t,
+        Err(()) => return Outcome::NotAttempted,
+    };
+    let auth = Zeroizing::new(format!("Bearer {token}"));
+    submit(profile, &auth, request, client, now)
+}
+fn submit(
+    profile: &Profile,
+    auth: &str,
+    request: &Request,
+    client: &ureq::Agent,
+    now: i64,
+) -> Outcome {
     if request.body.len() > profile.payload_limit {
         return Outcome::NotAttempted;
     }
     let response = match client
         .post(&profile.endpoint())
         .set("Content-Type", &request.content_type)
-        .set("Authorization", &auth)
+        .set("Authorization", auth)
         .send_bytes(&request.body)
     {
         Ok(r) | Err(ureq::Error::Status(_, r)) => r,
@@ -221,4 +256,4 @@ mod tests {
 
 #[cfg(test)]
 #[path = "email_http_tests.rs"]
-mod acceptance;
+pub(crate) mod acceptance;

@@ -3973,3 +3973,30 @@ Shared checks passed; the final coverage run passed 455 Rust tests plus 31 CLI
 tests, controlled process acceptance, and the unchanged 90% gate at 96.59% Rust
 line coverage (29,924/30,981). No real API account/inbox acceptance is claimed.
 Gmail API remains explicit one-shot testing pending protected OAuth lifecycle work.
+
+## 2026-10-27: experimental Gmail offline grants and foreground integration
+
+ADRs 0080–0081 add strict client/account-bound offline grants, separate bounded
+refresh/identity preflight, credential-level ownership, expected-content atomic
+rotation, local status/logout and an optional official-library workstation consent
+helper. The HPC runtime gains no dependency. Configured Gmail foreground delivery
+uses a separate one-POST helper, so OAuth requests consume no send attempts.
+Temporary preflight failures persist provider cooldowns through lazy schema v8;
+permanent failures pause without fabricated submissions. Cancellation is rechecked
+before sending after preflight. Explicit recovery preserves budgets and cooldowns.
+Submission 401 deliberately requires operator correction/resume; no public
+exhausted-item requeue or implicit resend is introduced.
+
+Controlled acceptance covers refresh omission/rotation/expiry, revoked grants,
+identity/client/scope mismatch, lock exclusivity, stale contents and sync failures,
+local disposal, separate preflight outcomes, single Gmail POST, both Mailgun
+regional hosts, cooldown restart/new-job isolation and migration rollback.
+Legacy SMTP/webhook/Slack process acceptance and the shared checks pass. Final
+coverage passed 465 Rust tests plus 32 CLI tests and controlled process acceptance,
+at 96.20% Rust lines (30,908/32,128), above the unchanged 90% gate. Python helper
+checks use synthetic data with no Google packages, browser or account required.
+
+The operator guide and acceptance matrix distinguish this controlled evidence from
+pending real workstation consent, refresh/reauthorization, inbox/spam receipt and
+intended-node job/backup/restore acceptance. No live provider send, credential
+access, Slurm test, release or supported-platform acceptance was performed here.

@@ -316,3 +316,135 @@ fn worker_pauses_api_destinations_and_keeps_unrelated_delivery_live() {
         assert_eq!(pending[0].attempt_number, if preflight { 1 } else { 2 });
     }
 }
+
+#[test]
+fn preflight_cooldowns_survive_restart_cover_new_jobs_and_consume_no_attempts() {
+    use crate::delivery::{deliver_due_checked, CheckedHooks, ProviderOutcome, RetryPolicy};
+    let d = tests::Directory::new();
+    let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+    let p = profile("sendgrid");
+    seed(&mut store, &p).unwrap();
+    let policy = RetryPolicy {
+        max_attempts: 3,
+        initial_delay_seconds: 5,
+        max_delay_seconds: 30,
+        jitter_seconds: 0,
+        jitter_seed: 1,
+    };
+    let report = deliver_due_checked(
+        &mut store,
+        "cluster",
+        0,
+        10,
+        policy,
+        CheckedHooks {
+            authorize: |_: &Store, item: &DueDelivery| {
+                if item.destination == "email" {
+                    Err(crate::supervised_provider::Diagnostic::EmailPreflightRetry(
+                        200,
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            send: |_: &DueDelivery, ()| Ok(ProviderOutcome::Delivered),
+            clock: || Some(1),
+            cancelled: || false,
+        },
+    )
+    .unwrap();
+    assert_eq!(report.delivered, 1);
+    assert_eq!(report.retrying, 0);
+    assert!(store.due_deliveries("cluster", 200, 10).unwrap().is_empty());
+    assert_eq!(
+        store
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    let mut candidate = crate::lifecycle::Reconciler::with_capacity(10);
+    let events = candidate
+        .observe_snapshot(
+            "",
+            "cluster|456|alice|s|a|COMPLETED|0:0",
+            "cluster",
+            "alice",
+            true,
+        )
+        .unwrap();
+    let revision = p.revision();
+    store
+        .persist_public_webhooks(&candidate, &events, ("cluster", "window", 1), |_| {
+            vec![PublicRoute {
+                destination: "email",
+                revision: &revision,
+                slack: None,
+                email: Some(&p),
+            }]
+        })
+        .unwrap();
+    drop(store);
+    let store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+    assert!(store.due_deliveries("cluster", 200, 10).unwrap().is_empty());
+    let pending = store.due_deliveries("cluster", 201, 10).unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(pending.iter().all(|i| i.attempt_number == 1));
+}
+
+#[test]
+fn stop_during_preflight_prevents_submission_and_cooldown_failure_rolls_back() {
+    use crate::delivery::{deliver_due_checked, CheckedHooks, FailureKind, RetryPolicy};
+    let d = tests::Directory::new();
+    let mut store = Store::open(&d.path(), Duration::from_millis(50)).unwrap();
+    let p = profile("sendgrid");
+    let items = seed(&mut store, &p).unwrap();
+    let cancelled = std::cell::Cell::new(false);
+    let policy = RetryPolicy {
+        max_attempts: 3,
+        initial_delay_seconds: 5,
+        max_delay_seconds: 30,
+        jitter_seconds: 0,
+        jitter_seed: 1,
+    };
+    let failure = deliver_due_checked(
+        &mut store,
+        "cluster",
+        0,
+        10,
+        policy,
+        CheckedHooks {
+            authorize: |_: &Store, _: &DueDelivery| {
+                cancelled.set(true);
+                Ok(())
+            },
+            send: |_: &DueDelivery, ()| panic!("submission after cancellation"),
+            clock: || Some(1),
+            cancelled: || cancelled.get(),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(failure.kind, FailureKind::Cancelled);
+    assert!(!failure.acceptance_uncertain);
+    let item = items.iter().find(|i| i.destination == "email").unwrap();
+    store
+        .db
+        .execute_batch("CREATE TABLE email_provider_cooldowns(blocker INTEGER);")
+        .unwrap();
+    assert!(store.defer_email_preflight(item, 100, 0).is_err());
+    assert_eq!(
+        store
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        store
+            .db
+            .query_row("SELECT count(*) FROM delivery_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}

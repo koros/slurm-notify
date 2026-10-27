@@ -1,0 +1,8 @@
+Usage: slurm-notify email auth refresh --profile <absolute-path>
+       slurm-notify email auth status --profile <absolute-path>
+       slurm-notify email auth logout --profile <absolute-path>
+
+Check the bound Gmail identity and refresh an expiring protected offline grant.
+No email is submitted. Browser consent must be completed on a workstation.
+Status inspects local metadata only. Logout removes only the bound local grant;
+revoke Google consent separately. No command submits email or changes outbox state.

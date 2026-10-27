@@ -1,8 +1,8 @@
 # HTTPS email delivery v1: design notes
 
-> **Proposed monitoring design.** The separate one-shot test boundary is adopted
-> in [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md); monitoring config,
-> permissions, persistence and OAuth lifecycle contracts still require review.
+> **Design rationale.** Implemented contracts are specified in ADRs 0077–0081.
+> Those ADRs narrow automatic submission-401 recovery to explicit operator resume.
+> Real-provider acceptance remains pending.
 
 Updated: 2026-10-27. These notes preserve the security, transport and recovery
 requirements behind the [proposal](https-email-delivery-v1.md). Start with the

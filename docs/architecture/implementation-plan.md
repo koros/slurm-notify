@@ -80,21 +80,21 @@ privacy choices, frozen retries, payload budgets and generic webhook contracts.
 Discord and Teams are planned; this milestone adds no provider support for them.
 See [ADR 0076](../adr/0076-slack-block-kit-presentation.md).
 
-## Planned extension: HTTPS email
+## HTTPS email prototype
 
-The [HTTPS email delivery plan](../proposals/https-email-delivery-v1.md) proposes
-SendGrid, Mailgun and experimental Gmail API support after observed SMTP connection
-failures. It starts with an operator-run Gmail feasibility test, then reviewed
-contracts, shared durable email preparation and provider-specific vertical slices.
-OAuth refresh/account binding and provider pause/resume are explicit design work.
-The first increment implements an explicit supervised `email test --profile`
-boundary for all three providers, shared deterministic codecs and exact acceptance
-classification ([ADR 0077](../adr/0077-explicit-https-email-test-boundary.md)).
-SendGrid/Mailgun monitoring now uses transactional frozen requests (ADR 0078),
-exact API-email enrollment, configured tests, isolated durable pauses and explicit
-existing-only recovery (ADR 0079). The next increment is Gmail's protected OAuth
-lifecycle; real account receipt remains an independent operator gate. The
-[issue-linked roadmap](https-email-delivery-roadmap.md) tracks remaining acceptance.
+SendGrid, Mailgun and experimental Gmail API have enrolled foreground routes,
+minimal immutable requests, verified fixed-endpoint helpers, durable provider
+pauses/cooldowns and explicit recovery. Gmail uses a protected offline grant,
+separate refresh/identity preflight and one email POST; auth status/logout are local
+operations. See ADRs 0077–0081 and the [operator guide](../operations/https-email.md).
+A rejected submission pauses for explicit recovery; exhausted deliveries are never
+revived by resume. No public requeue action is provided in v1.
+
+The remaining acceptance gate is operator-run real account consent, inbox/spam
+receipt and authorized one-CPU job notifications. The [roadmap](https-email-delivery-roadmap.md)
+and [acceptance matrix](../operations/https-email-acceptance.md) distinguish
+controlled evidence from pending real-provider cases. Releases remain separate
+and need explicit authorization.
 
 ## Validation
 

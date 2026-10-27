@@ -7,6 +7,7 @@ Usage: slurm-notify --help | --version
        slurm-notify start --foreground --config <absolute-path>
        slurm-notify provider resume <provider-name> --config <absolute-path>
        slurm-notify email test --profile <absolute-path>
+       slurm-notify email auth refresh|status|logout --profile <absolute-path>
 
 Options:
   --help     Show this help
@@ -23,6 +24,7 @@ Commands:
   start            Run local foreground monitoring
   provider resume  Clear an enrolled API email provider pause
   email test       Send one experimental HTTPS email test
+  email auth       Inspect, refresh or remove a protected Gmail offline grant
 
-Foreground monitoring accepts HTTPS webhook, Slack, SMTP, SendGrid, Mailgun and mixed routes.
+Foreground monitoring accepts HTTPS webhook, Slack, SMTP, SendGrid, Mailgun, experimental Gmail API and mixed routes.
 Validate site polling/execution policy before monitoring a real cluster.

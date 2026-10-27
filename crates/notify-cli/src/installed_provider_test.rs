@@ -8,6 +8,7 @@ pub(super) enum Error {
     Config,
     Permission,
     ApiPermission,
+    Preflight,
     Transport,
 }
 pub(super) fn run(path: &Path, alias: &str) -> Result<(), Error> {
@@ -29,6 +30,7 @@ pub(super) fn run(path: &Path, alias: &str) -> Result<(), Error> {
             crate::mixed_config_composition::SyntheticError::Config => Error::Config,
             crate::mixed_config_composition::SyntheticError::Permission => Error::Permission,
             crate::mixed_config_composition::SyntheticError::ApiPermission => Error::ApiPermission,
+            crate::mixed_config_composition::SyntheticError::Preflight => Error::Preflight,
         })?;
     use crate::mixed_config_composition::{SyntheticRequest as Request, SMTP_TEST_BODY};
     let report = match request {

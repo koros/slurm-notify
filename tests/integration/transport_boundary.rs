@@ -22,6 +22,12 @@ mod email_resources;
 mod email_result;
 #[path = "../../crates/notify-cli/src/email_wire.rs"]
 mod email_wire;
+#[path = "../../crates/notify-cli/src/gmail_auth.rs"]
+mod gmail_auth;
+#[path = "../../crates/notify-cli/src/gmail_credentials.rs"]
+mod gmail_credentials;
+#[path = "../../crates/notify-cli/src/gmail_store.rs"]
+mod gmail_store;
 #[path = "../../crates/notify-cli/src/http_destination.rs"]
 mod http_destination;
 #[path = "../../crates/notify-cli/src/job_enrichment.rs"]
@@ -964,7 +970,7 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n",
         Duration::ZERO,
     );
-    let mut checks = 0;
+    let stop = std::cell::Cell::new(false);
     let mut sends = 0;
     let mut cycles = Cycles::new(1).unwrap();
     let cancelled = cycles.tick(
@@ -975,6 +981,9 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
             query: fixture,
             send: |item: &storage::DueDelivery| {
                 sends += 1;
+                if sends == 2 {
+                    stop.set(true);
+                }
                 let endpoint = if item.destination == "primary" {
                     &primary
                 } else {
@@ -983,10 +992,7 @@ fn orchestrated_cleanup_failure_and_post_delivery_cancellation() {
                 request_for(endpoint, &item.event_id, "--child", Duration::from_secs(3)).unwrap()
             },
             clock: || Some(7200),
-            cancelled: || {
-                checks += 1;
-                checks == 6
-            },
+            cancelled: || stop.get(),
         },
     );
     assert!(cancelled.cancelled);

@@ -20,9 +20,10 @@ running scheduler probes or monitoring. CI checks Linux and macOS; this is not a
 supported platform or Slurm-version matrix. Rust 1.88.0 is the development
 compiler, not a declared minimum supported Rust version.
 
-SendGrid and Mailgun also support enrolled foreground email over HTTPS;
-[Gmail API tests](docs/operations/https-email.md) remain experimental one-shot sends.
-Real API-email inbox acceptance and Gmail OAuth refresh remain pending.
+SendGrid, Mailgun and experimental Gmail API support enrolled foreground email
+over HTTPS. Gmail uses protected offline credentials and separate refresh/identity
+preflight. [Setup and limitations](docs/operations/https-email.md); real API-email
+inbox acceptance remains pending.
 
 ## What you receive
 
@@ -106,7 +107,7 @@ without returning an acknowledgement, so delivery can still be duplicated.
 | Slack incoming webhooks | Operator-confirmed synthetic and completed-job alerts on one HPC; detailed format covered by controlled tests |
 | SMTP with required STARTTLS | Controlled TLS acceptance; Gmail SMTP connections timed out on one HPC before authentication |
 | Generic HTTPS webhook | Controlled acceptance, retries and restart recovery |
-| HTTPS email APIs | SendGrid/Mailgun enrolled foreground delivery; Gmail one-shot experimental [guide](docs/operations/https-email.md); live inbox acceptance pending |
+| HTTPS email APIs | SendGrid/Mailgun and experimental Gmail foreground delivery [guide](docs/operations/https-email.md); live inbox acceptance pending |
 | Durable outbox, routing and observation deduplication | Implemented; delivery may duplicate after an unknown acknowledgement |
 | Platform and Slurm compatibility | Acceptance in progress; no support matrix established |
 | Teams, log analysis, remote SSH, background service | Not implemented |

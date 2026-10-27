@@ -13,6 +13,7 @@ pub(super) enum Provider {
 }
 pub(super) struct Profile {
     pub(super) provider: Provider,
+    pub(super) client_id: Zeroizing<String>,
     pub(super) sender: Zeroizing<String>,
     pub(super) recipient: Zeroizing<String>,
     pub(super) account: Zeroizing<String>,
@@ -33,8 +34,8 @@ impl Profile {
     }
     pub(super) fn from_monitor(value: &Value) -> Result<Self, ()> {
         let profile = Self::from_value(value, false)?;
-        // Gmail foreground requires the separately reviewed protected refresh lifecycle.
-        if profile.provider == Provider::Gmail {
+        // Foreground Gmail requires a client-bound versioned offline grant.
+        if profile.provider == Provider::Gmail && profile.client_id.is_empty() {
             return Err(());
         }
         Ok(profile)
@@ -70,7 +71,9 @@ impl Profile {
         }
         if required.iter().any(|key| get(p, key).is_err())
             || p.iter().any(|(key, _)| {
-                !required.contains(&key.as_str()) && key.as_str() != "trust_der_files"
+                !required.contains(&key.as_str())
+                    && key.as_str() != "trust_der_files"
+                    && !(provider == Provider::Gmail && key.as_str() == "oauth_client_id")
             })
         {
             return Err(());
@@ -78,6 +81,15 @@ impl Profile {
         if standalone && !matches!(get(p, "schema_version"), Ok(Value::Integer(1))) {
             return Err(());
         }
+        let client_id = if get(p, "oauth_client_id").is_ok() {
+            let v = field("oauth_client_id")?;
+            if v.is_empty() || v.len() > 256 || !v.bytes().all(|b| (33..=126).contains(&b)) {
+                return Err(());
+            }
+            v
+        } else {
+            ""
+        };
         let sender = field("sender")?;
         let recipient = field("recipient")?;
         crate::smtp_address::address(sender)?;
@@ -143,6 +155,7 @@ impl Profile {
         }
         Ok(Self {
             provider,
+            client_id: Zeroizing::new(client_id.into()),
             sender: Zeroizing::new(sender.into()),
             recipient: Zeroizing::new(recipient.into()),
             account: Zeroizing::new(account.into()),
@@ -161,6 +174,9 @@ impl Profile {
         } else {
             "api_key_env"
         }] = serde_json::json!(self.credential.as_str());
+        if !self.client_id.is_empty() {
+            value["oauth_client_id"] = serde_json::json!(self.client_id.as_str());
+        }
         if self.provider == Provider::Mailgun {
             value["domain"] = serde_json::json!(self.domain.as_str());
             value["region"] = serde_json::json!(self.region);
@@ -205,7 +221,7 @@ impl Profile {
             .map(|p| p.to_str().unwrap_or(""))
             .collect::<Vec<_>>()
             .join("\n");
-        crate::config_reference::reference(
+        let base = crate::config_reference::reference(
             b"api-email-profile-v1\0",
             &[
                 self.kind(),
@@ -217,7 +233,15 @@ impl Profile {
                 self.region,
                 &paths,
             ],
-        )
+        );
+        if self.client_id.is_empty() {
+            base
+        } else {
+            crate::config_reference::reference(
+                b"gmail-client-profile-v1\0",
+                &[&base, &self.client_id],
+            )
+        }
     }
 }
 fn valid_domain(s: &str) -> bool {

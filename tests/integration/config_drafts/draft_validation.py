@@ -175,17 +175,22 @@ def validate(data, manifest):
             env(provider['url_env'])
             if 'authorization_env' in provider:
                 env(provider['authorization_env'])
-        elif kind in ['sendgrid', 'mailgun']:
+        elif kind in ['sendgrid', 'mailgun', 'gmail_api']:
             api_names.append(name)
-            required = ['type', 'sender', 'recipient', 'account_identity', 'api_key_env',
+            required = ['type', 'sender', 'recipient', 'account_identity',
                         'request_timeout_seconds', 'payload_limit_bytes']
+            required += ['credential_file', 'oauth_client_id'] if kind == 'gmail_api' else ['api_key_env']
             if kind == 'mailgun':
                 required += ['domain', 'region']
             object_fields(provider, required, ['trust_der_files'])
             for field in ['sender', 'recipient']:
                 text(provider[field], r'[^\x00-\x20\x7f-\U0010ffff]+@[^\x00-\x20\x7f-\U0010ffff]+', 254)
             text(provider['account_identity'], r'[\x21-\x7e]+', 128)
-            env(provider['api_key_env'])
+            if kind == 'gmail_api':
+                path(provider['credential_file'])
+                text(provider['oauth_client_id'], r'[\x21-\x7e]+', 256)
+            else:
+                env(provider['api_key_env'])
             bounded_integer(provider['request_timeout_seconds'], {'minimum': 1, 'maximum': 30})
             bounded_integer(provider['payload_limit_bytes'], {'minimum': 1024, 'maximum': 16384})
             if kind == 'mailgun':
@@ -221,7 +226,7 @@ def validate(data, manifest):
             env(auth['password_env'])
         else:
             fail('Policy')
-        for key, bounds in ({} if kind in ['sendgrid', 'mailgun'] else manifest[('webhook' if kind == 'slack' else kind) + '_integer_ranges']).items():
+        for key, bounds in ({} if kind in ['sendgrid', 'mailgun', 'gmail_api'] else manifest[('webhook' if kind == 'slack' else kind) + '_integer_ranges']).items():
             bounded_integer(provider[key], bounds)
     events = {'JOB_STARTED', 'JOB_COMPLETED', 'JOB_FAILED', 'JOB_TIMEOUT', 'JOB_CANCELLED',
               'JOB_OUT_OF_MEMORY', 'JOB_NODE_FAILURE', 'JOB_BOOT_FAILURE', 'JOB_DEADLINE'}

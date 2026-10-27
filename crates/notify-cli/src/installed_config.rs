@@ -50,12 +50,26 @@ fn validate_content(
         #[cfg(any(test, target_os = "linux", target_os = "macos"))]
         if matches!(
             text(get(provider, "type").map_err(|_| Error::Invalid)?).map_err(|_| Error::Invalid)?,
-            "sendgrid" | "mailgun"
+            "sendgrid" | "mailgun" | "gmail_api"
         ) {
             let resource = crate::email_resources::Resources::new(value, delivery, cluster, name)
                 .map_err(|_| Error::Invalid)?;
             if !resource.approved() {
                 return Err(Error::ApiPermission);
+            }
+            if resource.profile.provider == crate::email_profile::Provider::Gmail {
+                let bytes = crate::config_snapshot::read_limit(
+                    std::path::Path::new(resource.profile.credential.as_str()),
+                    16384,
+                )
+                .map_err(|_| Error::Invalid)?;
+                let grant = crate::gmail_credentials::Grant::parse(bytes.bytes())
+                    .map_err(|_| Error::Invalid)?;
+                if !grant.matches(&resource.profile) {
+                    return Err(Error::Invalid);
+                }
+                api = true;
+                continue;
             }
             let key = lookup(&resource.profile.credential)?;
             if key.is_empty() || key.len() > 4096 || !key.iter().all(|b| (33..=126).contains(b)) {
@@ -221,6 +235,56 @@ mod tests {
                 lookup(name)
             }),
             Err(Error::Invalid)
+        );
+    }
+}
+
+#[cfg(test)]
+mod gmail_tests {
+    #[test]
+    fn gmail_validation_checks_offline_binding_without_refresh_or_environment_lookup() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::storage::tests::Directory::new();
+        let path = d
+            .path()
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .join("grant.json");
+        let mut v: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/config/gmail-api-v1.example.json"
+        ))
+        .unwrap();
+        v["providers"]["primary"]["credential_file"] = serde_json::json!(path);
+        let draft = crate::config_validate::validate(&serde_json::to_vec(&v).unwrap()).unwrap();
+        let root = crate::config_validate::object(&draft.value).unwrap();
+        let providers =
+            crate::config_validate::object(crate::config_validate::get(root, "providers").unwrap())
+                .unwrap();
+        let r = crate::email_resources::Resources::new(
+            crate::config_validate::get(providers, "primary").unwrap(),
+            crate::config_validate::get(root, "delivery").unwrap(),
+            "research-cluster",
+            "primary",
+        )
+        .unwrap();
+        let (rendering, provider) = r.revisions();
+        v["delivery"]["api_email_permissions"] = serde_json::json!([{"cluster_id":"research-cluster","destination":"primary","rendering_revision":rendering,"provider_revision":provider}]);
+        let mut grant = serde_json::json!({"schema_version":1,"client_id":r.profile.client_id.as_str(),"client_secret":"fake-secret","subject":r.profile.account.as_str(),"email":r.profile.sender.as_str(),"refresh_token":"fake-refresh","access_token":"fake-access","expires_at":0,"scopes":[crate::gmail_credentials::SEND,"openid","email"]});
+        std::fs::write(&path, serde_json::to_vec(&grant).unwrap()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let bytes = serde_json::to_vec(&v).unwrap();
+        assert!(super::validate_content(&bytes, |_| panic!(
+            "Gmail validation must not read environment"
+        ))
+        .unwrap()
+        .contains("api_email_permissions=approved"));
+        grant["client_id"] = serde_json::json!("wrong-client");
+        std::fs::write(&path, serde_json::to_vec(&grant).unwrap()).unwrap();
+        assert_eq!(
+            super::validate_content(&bytes, |_| panic!()).err(),
+            Some(super::Error::Invalid)
         );
     }
 }

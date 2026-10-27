@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "monitor": {
+    "mode": "local",
+    "cluster_id": "research-cluster",
+    "user_jobs_only": true,
+    "poll_seconds": 60,
+    "query_timeout_seconds": 10,
+    "accounting_lookback_seconds": 3600,
+    "accounting_overlap_seconds": 300,
+    "initial_observation": "suppress",
+    "command_output_limit_bytes": 1048576,
+    "retained_identity_limit": 10000,
+    "retained_event_limit": 20000,
+    "stale_after_seconds": 180
+  },
+  "storage": {
+    "path": "/home/researcher/.local/state/slurm-notify/state.sqlite3"
+  },
+  "providers": {
+    "primary": {
+      "sender": "sender@example.invalid",
+      "recipient": "recipient@example.invalid",
+      "account_identity": "replace-with-approved-account-identity",
+      "request_timeout_seconds": 30,
+      "payload_limit_bytes": 16384,
+      "credential_file": "/home/researcher/.config/slurm-notify/gmail-grant.json",
+      "oauth_client_id": "replace-with-your-desktop-oauth-client-id",
+      "type": "gmail_api"
+    }
+  },
+  "routes": [
+    {
+      "events": [
+        "JOB_COMPLETED",
+        "JOB_FAILED",
+        "JOB_TIMEOUT",
+        "JOB_OUT_OF_MEMORY",
+        "JOB_NODE_FAILURE",
+        "JOB_BOOT_FAILURE",
+        "JOB_DEADLINE",
+        "JOB_CANCELLED"
+      ],
+      "send_to": [
+        "primary"
+      ]
+    }
+  ],
+  "delivery": {
+    "max_attempts": 5,
+    "initial_backoff_seconds": 5,
+    "max_backoff_seconds": 300,
+    "jitter_seconds": 15,
+    "jitter_seed": "42",
+    "batch_limit": 50,
+    "api_email_permissions": []
+  },
+  "maintenance": {
+    "completed_delivery_retention_seconds": 604800,
+    "cleanup_batch_limit": 100,
+    "health_sample_limit": 100,
+    "smtp_revision_cleanup_limit": 0
+  }
+}

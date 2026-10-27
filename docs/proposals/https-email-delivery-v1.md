@@ -1,9 +1,10 @@
 # HTTPS email delivery plan v1
 
-> **Status: implementation started.** The separate experimental
+> **Status: implemented with controlled acceptance.** The separate experimental
 > `email test --profile` boundary is adopted in [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md).
 > SendGrid/Mailgun monitoring and recovery are adopted in ADRs 0078–0079.
-> Gmail protected OAuth lifecycle remains pending.
+> Experimental Gmail offline grants and foreground preflight/cooldowns are adopted
+> in ADRs 0080–0081. Real-provider acceptance remains pending.
 
 Updated: 2026-10-27 · [Roadmap and GitHub tracking](../architecture/https-email-delivery-roadmap.md)
 · [Technical design notes](https-email-delivery-v1-design-notes.md)
@@ -133,17 +134,20 @@ network path, observed inbox/spam receipt, and permitted one-CPU job scenarios.
 Record each provider/account/region separately. Untested cases remain pending;
 there is no supported-platform or automatic release claim.
 
-## Decisions still required
+## Adopted decisions and remaining gates
 
-- Exact provider config, permission enrollment and account-identity contracts.
-- Pause/resume, exhausted-item requeue and historical status/help wording.
-- OAuth file format, locking/rotation/identity scopes and distribution policy.
-- Request/response/token budgets, helper deadlines and migration version.
-- Available provider accounts, verified senders/domains and operator test timing.
+ADRs 0077–0081 settle strict provider config, API-email enrollment, minimal frozen
+content, pause/resume/status/help, protected OAuth ownership/rotation/identity,
+resource budgets and additive schema versions. They deliberately choose immediate
+operator recovery after a rejected Gmail submission instead of silent refresh and
+resend. Resume preserves attempt budgets; no exhausted-item requeue is exposed in
+v1. A future requeue needs a separate reviewed delivery-generation contract.
 
-Creating GitHub milestones records planned work; it does not adopt these public
-interfaces. The next engineering increment is the contract-review issue, while an
-operator can independently prepare the Gmail feasibility probe.
+Remaining work requires operator accounts and site authorization: real workstation
+consent/refresh, verified sender/domain setup where applicable, intended-node
+connectivity, inbox/spam receipt and one-CPU job scenarios. Google public-client
+production/distribution policy and any release/support claim remain separate.
+See the [acceptance matrix](../operations/https-email-acceptance.md).
 
 ## References
 

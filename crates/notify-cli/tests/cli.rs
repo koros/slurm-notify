@@ -2900,3 +2900,55 @@ fn api_email_recovery_help_and_unenrolled_tests_do_not_create_state_or_send() {
     assert!(!root.join("state").exists());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn gmail_auth_has_separate_bounded_no_send_preflight_and_private_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    expect(
+        command()
+            .args(["email", "auth", "--help"])
+            .output()
+            .unwrap(),
+        0,
+        include_bytes!("../../../contracts/cli/email-auth-help.stdout"),
+        b"",
+    );
+    for args in [
+        vec!["email", "auth", "refresh"],
+        vec!["email", "auth", "refresh", "--profile", "relative"],
+        vec!["email", "auth", "login"],
+        vec!["email", "auth", "refresh", "--profile", "/missing", "extra"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    let root = std::env::temp_dir().join(format!("sn-gmail-auth-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let profile = root.join("profile.json");
+    let grant = root.join("grant.json");
+    let mut v: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../contracts/config/email-gmail-test-v1.example.json"
+    ))
+    .unwrap();
+    v["oauth_client_id"] = serde_json::json!("desktop-fixture");
+    v["credential_file"] = serde_json::json!(grant);
+    v["account_identity"] = serde_json::json!("expected-subject");
+    std::fs::write(&profile, serde_json::to_vec(&v).unwrap()).unwrap();
+    std::fs::set_permissions(&profile, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let g = serde_json::json!({"schema_version":1,"client_id":"desktop-fixture","client_secret":"fake-client-secret","subject":"different-subject","email":"sender@example.invalid","access_token":"fake-access-token","refresh_token":"fake-refresh-token","expires_at":0,"scopes":["https://www.googleapis.com/auth/gmail.send","openid","email"]});
+    let original = serde_json::to_vec(&g).unwrap();
+    std::fs::write(&grant, &original).unwrap();
+    std::fs::set_permissions(&grant, std::fs::Permissions::from_mode(0o600)).unwrap();
+    expect(command().args(["email","auth","refresh","--profile"]).arg(&profile).output().unwrap(),1,b"",b"Gmail credential preflight failed; verify protected storage, consent and account identity. No email was sent.\n");
+    assert_eq!(std::fs::read(&grant).unwrap(), original);
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 3); // profile, grant, credential lock only
+    v["account_identity"] = serde_json::json!("different-subject");
+    std::fs::write(&profile, serde_json::to_vec(&v).unwrap()).unwrap();
+    expect(command().args(["email","auth","status","--profile"]).arg(&profile).output().unwrap(),0,b"Gmail credential snapshot: bound=true expiring=true live_identity=not_checked. No provider request was made.\n",b"");
+    expect(command().args(["email","auth","logout","--profile"]).arg(&profile).output().unwrap(),0,b"Local Gmail grant removed. Google consent was not revoked; revoke it separately in your Google account. No email was sent.\n",b"");
+    assert!(!grant.exists());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}

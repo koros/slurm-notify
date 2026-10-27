@@ -330,8 +330,12 @@ impl Store {
         )?;
         db.busy_timeout(timeout)?;
         db.pragma_update(None, "foreign_keys", true)?;
+        let enabled: i64 = db.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+        if enabled != 1 {
+            return Err(StorageError::InvalidInput);
+        }
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != 7 {
+        if !(7..=8).contains(&version) {
             return Err(StorageError::UnsupportedVersion);
         }
         crate::status_store::query_budget(&db, timeout)?;
@@ -380,7 +384,7 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1..=7 => {}
+            1..=8 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
@@ -596,7 +600,9 @@ impl Store {
         let version: i64 = self
             .db
             .pragma_query_value(None, "user_version", |r| r.get(0))?;
-        let exclusion = if version >= 7 {
+        let exclusion = if version >= 8 {
+            " AND NOT EXISTS(SELECT 1 FROM email_provider_pauses p WHERE p.cluster=e.cluster AND p.destination=o.destination) AND NOT EXISTS(SELECT 1 FROM email_provider_cooldowns c WHERE c.cluster=e.cluster AND c.destination=o.destination AND c.retry_at>?2) "
+        } else if version >= 7 {
             " AND NOT EXISTS(SELECT 1 FROM email_provider_pauses p WHERE p.cluster=e.cluster AND p.destination=o.destination) "
         } else {
             ""

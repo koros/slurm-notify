@@ -248,7 +248,7 @@ pub(super) fn prepare_draft(
             continue;
         }
         let kind = text(get(p, "type").map_err(shape)?).map_err(shape)?;
-        if matches!(kind, "sendgrid" | "mailgun") {
+        if matches!(kind, "sendgrid" | "mailgun" | "gmail_api") {
             let resource = crate::email_resources::Resources::new(
                 provider,
                 get(root, "delivery").map_err(shape)?,

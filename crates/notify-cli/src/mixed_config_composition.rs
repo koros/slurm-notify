@@ -28,6 +28,7 @@ pub(super) enum SyntheticError {
     Config,
     Permission,
     ApiPermission,
+    Preflight,
 }
 pub(super) enum SyntheticRequest {
     Email {
@@ -114,9 +115,9 @@ impl Plan {
                     .map_err(|e| {
                         if e == crate::supervised_provider::Diagnostic::EmailPermission {
                             Error::ApiPermission
-                        } else {
-                            Error::Config
-                        }
+                        } else if matches!(e,crate::supervised_provider::Diagnostic::EmailCredentials | crate::supervised_provider::Diagnostic::EmailPreflightAuthentication | crate::supervised_provider::Diagnostic::EmailPreflightPolicy | crate::supervised_provider::Diagnostic::EmailPreflightRetry(_)) {
+                            Error::Preflight
+                        } else { Error::Config }
                     })?;
                 return Ok(Request::Email {
                     request,

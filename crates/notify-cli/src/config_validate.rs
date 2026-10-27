@@ -242,7 +242,7 @@ pub(super) fn validate(bytes: &[u8]) -> Result<Draft, Error> {
                 number(get(p, "request_timeout_seconds")?, 1, 30)?;
                 number(get(p, "payload_limit_bytes")?, 1024, 16384)?;
             }
-            "sendgrid" | "mailgun" => {
+            "sendgrid" | "mailgun" | "gmail_api" => {
                 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
                 {
                     let profile = crate::email_profile::Profile::from_monitor(value)

@@ -8,7 +8,7 @@ use std::{
     time::Instant,
 };
 type Captured = Vec<(String, Vec<u8>)>;
-fn fixture(
+pub(crate) fn fixture(
     replies: Vec<(u16, Vec<u8>, &'static str)>,
 ) -> (ureq::Agent, thread::JoinHandle<Captured>) {
     fixture_tls(replies, true, true)
@@ -25,6 +25,7 @@ fn fixture_tls(
             "api.eu.mailgun.net".into(),
             "gmail.googleapis.com".into(),
             "openidconnect.googleapis.com".into(),
+            "oauth2.googleapis.com".into(),
         ]
     } else {
         vec!["wrong.fixture.invalid".into()]
@@ -238,5 +239,54 @@ fn untrusted_or_wrong_hostname_tls_never_submits_email() {
             Outcome::Unknown
         );
         assert!(server.join().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn preflighted_gmail_dispatch_makes_only_one_email_post() {
+    let mut p = profile("gmail_api");
+    p.client_id = Zeroizing::new("desktop-fixture".into());
+    let wire = request(&p);
+    for (status, body, expected) in [
+        (
+            200,
+            br#"{"id":"gmail-fixture"}"#.to_vec(),
+            Outcome::Accepted,
+        ),
+        (401, Vec::new(), Outcome::Authentication),
+        (
+            403,
+            br#"{"error":{"errors":[{"reason":"insufficientPermissions"}]}}"#.to_vec(),
+            Outcome::Policy,
+        ),
+    ] {
+        let (agent, server) = fixture(vec![(status, body, "")]);
+        assert_eq!(
+            send_gmail_checked(&p, b"fake-access-token", &wire, &agent, 0),
+            expected
+        );
+        let captured = server.join().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert!(captured[0]
+            .0
+            .starts_with("POST /gmail/v1/users/me/messages/send "));
+        assert_eq!(captured[0].1, wire.body.as_slice());
+    }
+}
+
+#[test]
+fn mailgun_region_selection_uses_exact_fixed_host_without_failover() {
+    for (region, host) in [("us", "api.mailgun.net"), ("eu", "api.eu.mailgun.net")] {
+        let mut p = profile("mailgun");
+        p.region = region;
+        let wire = request(&p);
+        let (agent, server) = fixture(vec![(200, br#"{"id":"<fixture-id>"}"#.to_vec(), "")]);
+        assert_eq!(send(&p, b"fake-key", &wire, &agent, 0), Outcome::Accepted);
+        let captured = server.join().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert!(captured[0]
+            .0
+            .to_ascii_lowercase()
+            .contains(&format!("host: {host}\r\n")));
     }
 }

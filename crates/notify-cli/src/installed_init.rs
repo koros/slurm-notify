@@ -37,8 +37,17 @@ fn review(bytes: &[u8]) -> Result<Review, Error> {
     let mut summary=format!("Configuration review: schema_version=1 cluster={cluster} initial_observation={policy} destinations={} routes={}\n",providers.len(),source["routes"].as_array().ok_or(Error::Input)?.len());
     summary.push_str("Initial observation suppress avoids catch-up alerts; emit can notify selected existing history.\n");
     for (alias, provider) in providers {
-        if provider["type"] == "sendgrid" || provider["type"] == "mailgun" {
+        if matches!(
+            provider["type"].as_str(),
+            Some("sendgrid" | "mailgun" | "gmail_api")
+        ) {
             summary.push_str(&format!("API email: alias={alias} provider={} sender={} recipient={} account_identity={} fields=state,job_identifier,cluster_id,observed_at,event_id retention=state_lifetime\n",provider["type"].as_str().ok_or(Error::Input)?,provider["sender"].as_str().ok_or(Error::Input)?,provider["recipient"].as_str().ok_or(Error::Input)?,provider["account_identity"].as_str().ok_or(Error::Input)?));
+            if provider["type"] == "gmail_api" {
+                summary.push_str(&format!(
+                    "Gmail binding: oauth_client_id={} verified_sender_required=true\n",
+                    provider["oauth_client_id"].as_str().ok_or(Error::Input)?
+                ));
+            }
             if provider["type"] == "mailgun" {
                 summary.push_str(&format!(
                     "Mailgun routing: domain={} region={}\n",
@@ -161,7 +170,7 @@ mod tests {
 mod api_tests {
     #[test]
     fn api_review_enrolls_only_current_pairs_without_api_key_lookup() {
-        for kind in ["sendgrid", "mailgun"] {
+        for kind in ["sendgrid", "mailgun", "gmail-api"] {
             let bytes =
                 std::fs::read(format!("../../contracts/config/{kind}-v1.example.json")).unwrap();
             let reviewed = super::review(&bytes).unwrap();

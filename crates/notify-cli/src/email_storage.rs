@@ -56,16 +56,44 @@ impl Store {
         }
         Ok(revision)
     }
-    pub(crate) fn email_paused(&self, item: &DueDelivery) -> Result<bool, StorageError> {
+    pub(crate) fn email_paused(&self, item: &DueDelivery, now: i64) -> Result<bool, StorageError> {
         let version: i64 = self
             .db
             .pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version < 7 {
             return Ok(false);
         }
-        self.db.query_row("SELECT EXISTS(SELECT 1 FROM email_provider_pauses WHERE cluster=?1 AND destination=?2)",params![item.event.identity.cluster,item.destination],|r|r.get(0)).map_err(StorageError::from)
+        let paused:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM email_provider_pauses WHERE cluster=?1 AND destination=?2)",params![item.event.identity.cluster,item.destination],|r|r.get(0))?;
+        if paused || version < 8 {
+            return Ok(paused);
+        }
+        self.db.query_row("SELECT EXISTS(SELECT 1 FROM email_provider_cooldowns WHERE cluster=?1 AND destination=?2 AND retry_at>?3)",params![item.event.identity.cluster,item.destination,now],|r|r.get(0)).map_err(StorageError::from)
     }
 
+    pub(crate) fn defer_email_preflight(
+        &mut self,
+        item: &DueDelivery,
+        retry_at: i64,
+        now: i64,
+    ) -> Result<(), StorageError> {
+        if now < 0 || retry_at <= now || !(0..=4_102_444_799).contains(&retry_at) {
+            return Err(StorageError::InvalidInput);
+        }
+        let revision = self.email_bound_revision(item)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version == 7 {
+            tx.execute_batch(include_str!("../../notify-storage/migrations/0008.sql"))?;
+        }
+        let changed=tx.execute("INSERT INTO email_provider_cooldowns VALUES(?1,?2,?3,?4) ON CONFLICT(cluster,destination) DO UPDATE SET revision=excluded.revision,retry_at=MAX(retry_at,excluded.retry_at) WHERE revision=excluded.revision OR (retry_at<=?5 AND NOT EXISTS(SELECT 1 FROM public_event_routes r JOIN events e ON e.event_id=r.internal_event_id JOIN outbox o ON o.event_id=e.event_id AND o.destination=r.destination WHERE e.cluster=?1 AND r.destination=?2 AND o.status='pending' AND r.revision<>?3))",params![item.event.identity.cluster,item.destination,revision,retry_at,now])?;
+        if changed != 1 {
+            return Err(StorageError::Conflict);
+        }
+        tx.commit()?;
+        Ok(())
+    }
     // Revision guard and canonical-frame integrity must pass before materializing
     // the bounded credential-free provider request.
     pub(crate) fn email_delivery(

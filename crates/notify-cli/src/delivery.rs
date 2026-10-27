@@ -270,12 +270,36 @@ where
             if (hooks.cancelled)() {
                 return Err(WorkerError::Cancelled);
             }
-            if store.email_paused(&item).map_err(WorkerError::Storage)? {
+            if store
+                .email_paused(&item, now)
+                .map_err(WorkerError::Storage)?
+            {
                 continue;
             }
             let context = match (hooks.authorize)(store, &item) {
                 Ok(context) => context,
-                Err(super::supervised_provider::Diagnostic::EmailCredentials) => {
+                Err(super::supervised_provider::Diagnostic::EmailPreflightRetry(seconds)) => {
+                    let completed = (hooks.clock)()
+                        .filter(|t| *t >= previous_completion)
+                        .ok_or(WorkerError::InvalidTime)?;
+                    previous_completion = completed;
+                    let delay = i64::try_from(seconds)
+                        .map_err(|_| WorkerError::InvalidPolicy)?
+                        .max(policy.delay(item.attempt_number));
+                    let next = completed
+                        .checked_add(delay)
+                        .and_then(|t| t.checked_add(policy.jitter(&item)))
+                        .ok_or(WorkerError::InvalidPolicy)?;
+                    store
+                        .defer_email_preflight(&item, next, completed)
+                        .map_err(WorkerError::Storage)?;
+                    continue;
+                }
+                Err(
+                    error @ (super::supervised_provider::Diagnostic::EmailCredentials
+                    | super::supervised_provider::Diagnostic::EmailPreflightAuthentication
+                    | super::supervised_provider::Diagnostic::EmailPreflightPolicy),
+                ) => {
                     let revision = store
                         .email_bound_revision(&item)
                         .map_err(WorkerError::Storage)?;
@@ -284,7 +308,11 @@ where
                             cluster,
                             &item.destination,
                             &revision,
-                            super::storage::email::PauseReason::Credentials,
+                            match error {
+                                super::supervised_provider::Diagnostic::EmailPreflightAuthentication=>super::storage::email::PauseReason::Authentication,
+                                super::supervised_provider::Diagnostic::EmailPreflightPolicy=>super::storage::email::PauseReason::Policy,
+                                _=>super::storage::email::PauseReason::Credentials
+                            },
                             previous_completion,
                         )
                         .map_err(WorkerError::Storage)?;
@@ -292,6 +320,11 @@ where
                 }
                 Err(error) => return Err(WorkerError::DispatchBlocked(error)),
             };
+            // Authorization can include bounded OAuth/identity preflight. A stop
+            // arriving during it must prevent the subsequent email submission.
+            if (hooks.cancelled)() {
+                return Err(WorkerError::Cancelled);
+            }
             if item.attempt_number > i64::from(policy.max_attempts) {
                 store
                     .retire_exhausted(&item, policy.max_attempts)
@@ -534,7 +567,7 @@ mod tests {
     fn cancellation_between_destinations_preserves_committed_retry_deadline() {
         let directory = Directory::new();
         let mut store = seeded(&directory, &["a", "b"]);
-        let mut checks = 0;
+        let cancelled = std::cell::Cell::new(false);
         let failure = deliver_due_controlled(
             &mut store,
             "cluster",
@@ -544,13 +577,11 @@ mod tests {
             DeliveryHooks {
                 send: |item: &DueDelivery| {
                     assert_eq!(item.destination, "a");
+                    cancelled.set(true);
                     Ok(ProviderOutcome::RetryAfter(60))
                 },
                 clock: || Some(20),
-                cancelled: || {
-                    checks += 1;
-                    checks == 3
-                },
+                cancelled: || cancelled.get(),
             },
         )
         .unwrap_err();

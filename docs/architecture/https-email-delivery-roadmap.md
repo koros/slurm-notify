@@ -1,14 +1,15 @@
 # HTTPS email delivery v1 roadmap
 
-> **Implementation in progress.** Experimental one-shot tests are implemented;
-> SendGrid/Mailgun foreground delivery is implemented; Gmail OAuth refresh remains gated. Linked issues track
-> current progress.
+> **Implemented with controlled acceptance.** SendGrid, Mailgun and experimental
+> Gmail API have enrolled foreground routes, protected resources, immutable
+> requests and explicit recovery. Real OAuth/account/inbox/job acceptance remains
+> pending; linked issues track those external gates.
 
 Updated: 2026-10-27. Read the [proposal](../proposals/https-email-delivery-v1.md)
 for scope and the [design notes](../proposals/https-email-delivery-v1-design-notes.md)
 for transport, permissions, privacy, OAuth and recovery requirements.
 
-## First implemented increment
+## Implementation evidence
 
 [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md) adopts the separate
 `email test --profile` contract. Shared JSON/multipart/MIME codecs, fixed verified
@@ -16,13 +17,16 @@ HTTPS endpoints, bounded responses, typed acceptance and Gmail live identity che
 are implemented. Ordinary tests use fake credentials and controlled TLS fixtures.
 See the [test guide](../operations/https-email.md).
 
-The next foundation increment ([ADR 0078](../adr/0078-transactional-api-email-storage.md))
+The foundation increment ([ADR 0078](../adr/0078-transactional-api-email-storage.md))
 adds transactional v7 request frames and private pause/recovery primitives with
 rollback, integrity, restart, isolation and attempt-count tests. [ADR 0079](../adr/0079-api-email-enrollment-and-recovery.md) integrates SendGrid/Mailgun
 monitoring, exact enrollment, configured tests and explicit public recovery.
 
-This is partial progress on #18–#25, not completion of those issues:
-operator receipt and unattended Gmail OAuth still require their acceptance gates.
+[ADR 0080](../adr/0080-protected-gmail-offline-grant-preflight.md) adds protected
+Gmail credential preflight and workstation consent; [ADR 0081](../adr/0081-gmail-foreground-preflight-and-cooldown.md)
+integrates separate Gmail foreground submission and durable provider cooldowns.
+Real operator receipt remains pending; code completion does not close account
+acceptance gates.
 
 ## Milestones
 
@@ -91,15 +95,16 @@ creation, payments, DNS changes, consent and real sends are operator actions.
 
 ## Required review outputs
 
-The contract issue must settle these before implementation consumes them:
+ADRs 0077–0081 settle the implemented contracts below. Exhausted-item requeue is
+explicitly excluded from v1, and submission-401 recovery requires explicit resume:
 
 - Strict provider config and CLI grammar, credential references and sender/recipient
-  validation; no executable examples until the supported contract exists.
+  validation; separate standalone profiles and full enrolled monitoring drafts.
 - API-email permission enrollment and disclosure/retention previews separate from
   existing SMTP permissions and Slack metadata choices.
 - Frozen body/content-type/result frames, exact success/error taxonomy, receipt
   retention, Retry-After horizons and accurate attempt counts.
-- Durable pause/resume and exhausted-item requeue behavior; account changes versus
+- Durable pause/resume and explicit no-requeue semantics; account changes versus
   same-account credential rotation.
 - OAuth identity/scopes, credential file ownership/locking, atomic token rotation,
   helper deadlines, resource budgets and distribution limits.
@@ -129,3 +134,5 @@ broad platform support. Releases require separate explicit authorization.
 Start with [#19](https://github.com/koros/slurm-notify/issues/19) for the exact contract package. In parallel with
 that review, an operator can prepare [#18](https://github.com/koros/slurm-notify/issues/18) to answer the immediate Gmail
 HTTPS connectivity/receipt question. This roadmap authorizes no automatic live send.
+
+Current external acceptance is recorded in the [operator matrix](../operations/https-email-acceptance.md).
