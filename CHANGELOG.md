@@ -52,6 +52,10 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Publish a GitHub-friendly HTTPS email v1 proposal, technical design notes and
+  issue-linked milestones for shared contracts, SendGrid, Mailgun, experimental
+  Gmail API and compatibility acceptance. No email API adapter is implemented.
+
 - User-focused README, current contributor/security guidance, Contributor Covenant
   3.0 with private reporting contact, issue forms and repository social-preview assets.
 - Full-graph advisory/license/source checks, OpenSSF Scorecard and measured Codecov

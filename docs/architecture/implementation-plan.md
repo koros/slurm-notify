@@ -80,6 +80,20 @@ privacy choices, frozen retries, payload budgets and generic webhook contracts.
 Discord and Teams are planned; this milestone adds no provider support for them.
 See [ADR 0076](../adr/0076-slack-block-kit-presentation.md).
 
+## Planned extension: HTTPS email
+
+The [HTTPS email delivery plan](../proposals/https-email-delivery-v1.md) proposes
+SendGrid, Mailgun and experimental Gmail API support after observed SMTP connection
+failures. It starts with an operator-run Gmail feasibility test, then reviewed
+contracts, shared durable email preparation and provider-specific vertical slices.
+OAuth refresh/account binding and provider pause/resume are explicit design work.
+This is a proposal, not adopted interfaces or implemented provider support; existing
+SMTP, webhook and Slack behavior remains unchanged. The
+[issue-linked roadmap](https-email-delivery-roadmap.md) tracks five workstreams:
+contracts/foundation, SendGrid, Mailgun, experimental Gmail API and compatibility
+acceptance. The next increment is exact contract review; the Gmail probe is
+independent. Review the plan before coding.
+
 ## Validation
 
 `sh scripts/check.sh` is the shared local/CI suite; staged and pre-push hooks must pass.
