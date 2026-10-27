@@ -218,3 +218,12 @@ does not establish identity. Accounting mismatch is fatal with
 Init reviews detailed fields, name inclusion and state-lifetime retention when
 v2 is enabled. Existing v1 previews remain unchanged; synthetic tests contain no
 real scheduler data. No new CLI flags. See ADRs 0074/0075 for persistence/compatibility.
+
+## Experimental HTTPS email tests
+
+`email --help` is resource-free. `email test --profile <absolute-path>` reads a
+separate protected test profile and sends at most one labelled synthetic email.
+It is not a normal monitoring provider/config command. See
+[email help baseline](email-help.stdout) and [ADR 0077](../../docs/adr/0077-explicit-https-email-test-boundary.md).
+Exit codes: 0 API-accepted; 1 refused/not-submitted/unknown; 2 invalid profile,
+resources or grammar. No scheduler, state, token refresh or automatic retry.

@@ -5,6 +5,7 @@ Usage: slurm-notify --help | --version
        slurm-notify doctor --config <absolute-path>
        slurm-notify test <provider-name> --config <absolute-path>
        slurm-notify start --foreground --config <absolute-path>
+       slurm-notify email test --profile <absolute-path>
 
 Options:
   --help     Show this help
@@ -19,6 +20,7 @@ Commands:
   doctor           Check local resources and bounded Slurm probes
   test             Send one synthetic alert to a selected provider
   start            Run local foreground monitoring
+  email test       Send one experimental HTTPS email test
 
 Foreground monitoring accepts HTTPS webhook, Slack, SMTP and mixed routes.
 Validate site polling/execution policy before monitoring a real cluster.

@@ -88,3 +88,32 @@ cleanup. See ADR 0074 and the Slack upgrade guide for v6 backup/downgrade requir
 label. Setup discovers ClusterName; doctor/start optionally verify it via sibling
 scontrol before state acquisition. Every accounting snapshot rejects mismatches
 before reconciliation/persistence. Namespaces are never renamed automatically.
+
+## Standalone HTTPS email test profiles
+
+These profiles belong to `email test --profile`, not the normal monitoring config.
+The normal config's provider map still rejects SendGrid/Mailgun/Gmail API types.
+See [ADR 0077](../../docs/adr/0077-explicit-https-email-test-boundary.md) and the
+[operator guide](../../docs/operations/https-email.md). All budgets are explicit;
+no example address/account is a usable credential.
+
+- [SendGrid example](email-sendgrid-test-v1.example.json)
+- [Mailgun example](email-mailgun-test-v1.example.json)
+- [Gmail API example](email-gmail-test-v1.example.json)
+
+Required common keys: schema_version=1, provider, sender, recipient,
+account_identity, request_timeout_seconds (1–30), payload_limit_bytes (1024–16384).
+SendGrid requires api_key_env. Mailgun additionally requires domain and region us/eu.
+Gmail requires credential_file instead of api_key_env; account_identity is the
+verified Google OIDC subject. Optional trust_der_files is a protected array of
+1–32 absolute DER paths. API credentials are never inline profile fields.
+
+The protected Gmail credential file has exactly access_token and expires_at
+(integer Unix seconds). Token expiry must exceed the current time plus the profile
+timeout and 30 seconds. Files are strict duplicate-free bounded JSON; profile and
+Gmail token files are capped at 16384 bytes. Unsafe ownership/modes/symlinks fail.
+
+The metadata-only profile fingerprint includes provider, sender/recipient, account,
+credential reference, Mailgun domain/region and trust references. It does not
+represent enrolled monitoring permission. No new durable storage semantics are
+introduced by this test command.

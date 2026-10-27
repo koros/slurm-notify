@@ -102,7 +102,7 @@ without returning an acknowledgement, so delivery can still be duplicated.
 | Slack incoming webhooks | Operator-confirmed synthetic and completed-job alerts on one HPC; detailed format covered by controlled tests |
 | SMTP with required STARTTLS | Controlled TLS acceptance; Gmail SMTP connections timed out on one HPC before authentication |
 | Generic HTTPS webhook | Controlled acceptance, retries and restart recovery |
-| HTTPS email APIs (SendGrid, Mailgun, Gmail) | [Planned](docs/architecture/https-email-delivery-roadmap.md); no adapters implemented |
+| HTTPS email APIs (SendGrid, Mailgun, Gmail) | Experimental [one-shot tests](docs/operations/https-email.md); durable monitoring adapters planned |
 | Durable outbox, routing and observation deduplication | Implemented; delivery may duplicate after an unknown acknowledgement |
 | Platform and Slurm compatibility | Acceptance in progress; no support matrix established |
 | Teams, log analysis, remote SSH, background service | Not implemented |

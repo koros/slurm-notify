@@ -2754,3 +2754,92 @@ fn relocated_mvp_setup_doctor_and_mixed_delivery_recover_without_smtp_replay() {
         .contains("Historical"));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn explicit_email_help_and_expired_gmail_test_are_resource_bounded() {
+    use std::{
+        io::Write,
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
+    expect(
+        command()
+            .args(["email", "--help"])
+            .env("PATH", "relative-private-fixture")
+            .output()
+            .unwrap(),
+        0,
+        include_bytes!("../../../contracts/cli/email-help.stdout"),
+        b"",
+    );
+    for args in [
+        vec!["email", "test"],
+        vec!["email", "test", "--profile", "relative"],
+        vec!["email", "test", "--config", "/private-fixture"],
+        vec!["email", "test", "--profile", "/private-fixture", "extra"],
+    ] {
+        expect(command().args(args).output().unwrap(), 2, b"", INVALID);
+    }
+    let root = std::env::temp_dir().join(format!("sn-email-test-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let profile = root.join("profile.json");
+    let token = root.join("token.json");
+    let mut value: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../contracts/config/email-gmail-test-v1.example.json"
+    ))
+    .unwrap();
+    value["credential_file"] = serde_json::json!(token);
+    let write = |path: &std::path::Path, bytes: &[u8]| {
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap()
+    };
+    write(&profile, &serde_json::to_vec(&value).unwrap());
+    write(
+        &token,
+        b"{\"access_token\":\"private-expired-fixture-token\",\"expires_at\":0}",
+    );
+    for _ in 0..2 {
+        let output = command()
+            .args(["email", "test", "--profile"])
+            .arg(&profile)
+            .env("PATH", "relative-private-fixture")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("Synthetic HTTPS email test: provider=gmail_api"));
+        assert!(text.contains("no scheduler data"));
+        for hidden in [
+            "private-expired-fixture-token",
+            "sender@example.invalid",
+            "replace-with-approved-account-identity",
+        ] {
+            assert!(!text.contains(hidden));
+        }
+        assert_eq!(
+            output.stderr,
+            b"HTTPS email was not submitted; verify credentials, expiry and account identity.\n"
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    }
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+    expect(
+        command()
+            .args(["email", "test", "--profile"])
+            .arg(&profile)
+            .output()
+            .unwrap(),
+        2,
+        b"",
+        b"HTTPS email profile or required resources are invalid.\n",
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

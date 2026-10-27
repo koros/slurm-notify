@@ -1,7 +1,8 @@
 # HTTPS email delivery plan v1
 
-> **Status: proposed.** This plan adds no working provider, CLI command, config
-> field or database contract. Implementation starts with an exact contract review.
+> **Status: implementation started.** The separate experimental
+> `email test --profile` boundary is adopted in [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md).
+> Monitoring, persistence and OAuth lifecycle contracts remain under review.
 
 Updated: 2026-10-27 · [Roadmap and GitHub tracking](../architecture/https-email-delivery-roadmap.md)
 · [Technical design notes](https-email-delivery-v1-design-notes.md)

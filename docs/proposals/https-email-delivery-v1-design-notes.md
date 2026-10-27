@@ -1,7 +1,8 @@
 # HTTPS email delivery v1: design notes
 
-> **Proposed design, not an implemented interface.** Exact config, CLI, permissions,
-> resource budgets and persistence contracts require review before implementation.
+> **Proposed monitoring design.** The separate one-shot test boundary is adopted
+> in [ADR 0077](../adr/0077-explicit-https-email-test-boundary.md); monitoring config,
+> permissions, persistence and OAuth lifecycle contracts still require review.
 
 Updated: 2026-10-27. These notes preserve the security, transport and recovery
 requirements behind the [proposal](https-email-delivery-v1.md). Start with the

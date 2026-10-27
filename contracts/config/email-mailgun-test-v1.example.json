@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "provider": "mailgun",
+  "sender": "sender@example.invalid",
+  "recipient": "recipient@example.invalid",
+  "account_identity": "replace-with-approved-account-identity",
+  "request_timeout_seconds": 30,
+  "payload_limit_bytes": 16384,
+  "api_key_env": "SLURM_NOTIFY_EMAIL_API_KEY",
+  "domain": "mg.example.invalid",
+  "region": "us"
+}

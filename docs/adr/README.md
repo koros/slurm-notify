@@ -32,3 +32,6 @@ prevents hostname/ClusterName confusion before monitoring state is opened.
 
 [Shared presentation and Slack Block Kit](0076-slack-block-kit-presentation.md)
 adds a private reusable content model and version-bound detailed Slack layout.
+
+[Explicit HTTPS email tests](0077-explicit-https-email-test-boundary.md) adds a
+supervised one-shot boundary and shared encoders; API-email monitoring stays gated.

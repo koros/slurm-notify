@@ -1,11 +1,24 @@
 # HTTPS email delivery v1 roadmap
 
-> **Planning baseline.** No SendGrid, Mailgun or Gmail API adapter is implemented
-> by this documentation increment. Linked GitHub issues track current progress.
+> **Implementation in progress.** Experimental one-shot tests are implemented;
+> durable API-email monitoring and OAuth refresh remain gated. Linked issues track
+> current progress.
 
 Updated: 2026-10-27. Read the [proposal](../proposals/https-email-delivery-v1.md)
 for scope and the [design notes](../proposals/https-email-delivery-v1-design-notes.md)
 for transport, permissions, privacy, OAuth and recovery requirements.
+
+## First implemented increment
+
+[ADR 0077](../adr/0077-explicit-https-email-test-boundary.md) adopts the separate
+`email test --profile` contract. Shared JSON/multipart/MIME codecs, fixed verified
+HTTPS endpoints, bounded responses, typed acceptance and Gmail live identity checks
+are implemented. Ordinary tests use fake credentials and controlled TLS fixtures.
+See the [test guide](../operations/https-email.md).
+
+This is partial progress on #18–#20 and #22–#24, not completion of those issues:
+operator receipt, normal monitoring config, transactional freezing, permissions,
+durable pause/resume and unattended OAuth still require their acceptance gates.
 
 ## Milestones
 

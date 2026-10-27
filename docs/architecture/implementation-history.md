@@ -3918,3 +3918,23 @@ Coverage passed at 97.17% Rust lines (27,616/28,419), above the 90% gate. Contro
 acceptance covers all lifecycle states, synthetic HTTPS preview/send, forged blocks,
 privacy, changed revisions and identical Slack retry bytes across restart. Real
 HPC layout acceptance and hosted CI are separate gates. No real provider was contacted.
+
+## 2026-10-27: explicit HTTPS email test boundary
+
+Added `email test --profile` and resource-free `email --help`, with strict separate
+protected profiles for SendGrid, Mailgun and experimental Gmail API. Same-executable
+supervision clears the child environment and bounds stdin/output/total lifetime.
+The child uses fixed verified HTTPS endpoints and provider-specific results; Gmail
+checks live OIDC userinfo against the configured subject and sender before sending.
+No normal monitor-config provider, state migration, automatic resend, token refresh
+or real-provider acceptance is introduced. Shared minimal content/codecs preserve
+SMTP DATA/MIME separation, deterministic multipart/base64url and tracking-off options.
+
+Shared checks passed with 446 Rust tests (five private helper entries ignored),
+30 CLI tests, process boundary/Python suites and build/smoke baselines. Fresh Rust
+coverage passed at 97.04% lines (28,653/29,528), retaining the 90% gate. Controlled
+TLS tests cover three providers, identity mismatch, untrusted/wrong-name certificates,
+redirect refusal, malformed/oversized/compressed bodies and bounded acknowledgements.
+Installed tests verify expired credentials submit no email, leak no credential or
+address, create no state and never query Slurm. Hosted checks and real inbox receipt
+remain separate gates. Next: durable request storage and provider recovery.

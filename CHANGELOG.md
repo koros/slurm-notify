@@ -52,6 +52,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Experimental `email test --profile` for bounded one-shot SendGrid, Mailgun and
+  Gmail API submission, with protected credential references, fixed verified HTTPS
+  endpoints, Gmail live account binding, deterministic encoders and typed results.
+  API-email monitoring, OAuth refresh and durable pauses are not yet enabled.
+
 - Publish a GitHub-friendly HTTPS email v1 proposal, technical design notes and
   issue-linked milestones for shared contracts, SendGrid, Mailgun, experimental
   Gmail API and compatibility acceptance. No email API adapter is implemented.

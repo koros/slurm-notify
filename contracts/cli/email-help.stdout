@@ -1,0 +1,8 @@
+Usage: slurm-notify email test --profile <absolute-path>
+       slurm-notify email --help
+
+Send one experimental synthetic email through SendGrid, Mailgun or Gmail API.
+Requires a protected profile and explicit credential references. No scheduler,
+state, token refresh, automatic retries or foreground email-API monitoring.
+Gmail requires an unexpired access token and verified account identity.
+API acceptance does not establish inbox delivery or human receipt.

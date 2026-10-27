@@ -3,6 +3,18 @@ mod config_reference;
 mod control_validation;
 mod credential_policy;
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_content;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_http;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_profile;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_result;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_test;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod email_wire;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 mod foreground_report;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod foreground_runtime;
@@ -170,6 +182,57 @@ const CONFIG_HELP: &str = include_str!("../../../contracts/cli/config-help.stdou
 
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).take(8).collect();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if args.len() == 1 && args[0] == "--internal-email-test-v1" {
+        return std::process::ExitCode::from(
+            if email_test::serve(std::io::stdin(), std::io::stdout()).is_ok() {
+                0
+            } else {
+                2
+            },
+        );
+    }
+    if args.len() == 2 && args[0] == "email" && args[1] == "--help" {
+        print!(
+            "{}",
+            include_str!("../../../contracts/cli/email-help.stdout")
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+    if args.len() == 4
+        && args[0] == "email"
+        && args[1] == "test"
+        && args[2] == "--profile"
+        && std::path::Path::new(&args[3]).is_absolute()
+    {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        return match email_test::run(std::path::Path::new(&args[3])) {
+            Ok(email_result::Outcome::Accepted) => {
+                println!("HTTPS email test accepted by the provider; inbox delivery and human receipt are not established.");
+                std::process::ExitCode::SUCCESS
+            }
+            Ok(outcome) => {
+                let message=match outcome {
+                    email_result::Outcome::Authentication=>"HTTPS email authentication was rejected; review credentials before another explicit test.",
+                    email_result::Outcome::Policy=>"HTTPS email policy or quota horizon requires operator review.",
+                    email_result::Outcome::NotAttempted=>"HTTPS email was not submitted; verify credentials, expiry and account identity.",
+                    email_result::Outcome::Rejected=>"HTTPS email request was rejected. No automatic retry was made.",
+                    _=>"HTTPS email test was not acknowledged; acceptance may be unknown. No automatic retry was made.",
+                };
+                eprintln!("{message}");
+                std::process::ExitCode::from(1)
+            }
+            Err(()) => {
+                eprintln!("HTTPS email profile or required resources are invalid.");
+                std::process::ExitCode::from(2)
+            }
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            eprintln!("HTTPS email testing is unavailable on this platform.");
+            return std::process::ExitCode::from(2);
+        }
+    }
     if args.len() == 2 && args[0] == "--internal-provider-v1" && args[1] == "webhook" {
         return std::process::ExitCode::from(
             if installed_webhook_helper::serve(std::io::stdin(), std::io::stdout()).is_ok() {
