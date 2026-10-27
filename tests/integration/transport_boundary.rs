@@ -10,6 +10,12 @@ mod credential_policy;
 mod credential_resolution;
 #[path = "../../crates/notify-cli/src/delivery.rs"]
 mod delivery;
+#[path = "../../crates/notify-cli/src/email_content.rs"]
+mod email_content;
+#[path = "../../crates/notify-cli/src/email_profile.rs"]
+mod email_profile;
+#[path = "../../crates/notify-cli/src/email_wire.rs"]
+mod email_wire;
 #[path = "../../crates/notify-cli/src/job_enrichment.rs"]
 mod job_enrichment;
 #[path = "../../crates/notify-cli/src/lifecycle.rs"]

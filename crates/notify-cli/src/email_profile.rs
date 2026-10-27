@@ -202,6 +202,7 @@ fn valid_domain(s: &str) -> bool {
 }
 #[cfg(test)]
 pub(super) mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
     use super::*;
     pub(crate) fn fixture(provider: &str) -> serde_json::Value {
         let mut v = serde_json::json!({"schema_version":1,"provider":provider,"sender":"s@fixture.invalid","recipient":"r@fixture.invalid","account_identity":"fixture-account","request_timeout_seconds":2,"payload_limit_bytes":16384});

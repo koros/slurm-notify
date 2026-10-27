@@ -3,6 +3,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
+#[path = "email_storage.rs"]
+mod email;
 const PROVIDER_MIGRATION: &str = include_str!("../../notify-storage/migrations/0004.sql");
 const REVISION_MIGRATION: &str = include_str!("../../notify-storage/migrations/0003.sql");
 const SMTP_MIGRATION: &str = include_str!("../../notify-storage/migrations/0002.sql");
@@ -142,6 +144,7 @@ struct SmtpPlan<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct PublicRoute<'a> {
+    pub(super) email: Option<&'a crate::email_profile::Profile>,
     pub(super) destination: &'a str,
     pub(super) revision: &'a str,
     pub(super) slack: Option<crate::job_enrichment::SlackOptions>,
@@ -210,10 +213,19 @@ fn freeze_public_event(
     if version == 4 {
         tx.execute_batch(include_str!("../../notify-storage/migrations/0005.sql"))?;
     }
-    if routes.iter().any(|route| route.slack.is_some()) {
+    if routes
+        .iter()
+        .any(|route| route.slack.is_some() || route.email.is_some())
+    {
         let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version == 5 {
             tx.execute_batch(include_str!("../../notify-storage/migrations/0006.sql"))?;
+        }
+    }
+    if routes.iter().any(|route| route.email.is_some()) {
+        let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version == 6 {
+            tx.execute_batch(include_str!("../../notify-storage/migrations/0007.sql"))?;
         }
     }
     let mut id = None;
@@ -245,6 +257,30 @@ fn freeze_public_event(
             "INSERT INTO public_event_routes VALUES (?1,?2,?3)",
             params![event.id, route.destination, route.revision],
         )?;
+        if let Some(profile) = route.email {
+            if route.slack.is_some() {
+                return Err(StorageError::InvalidInput);
+            }
+            let content = crate::email_content::Content::from_event(&payload)
+                .map_err(|_| StorageError::InvalidInput)?;
+            let request = crate::email_wire::prepare(profile, &content)
+                .map_err(|_| StorageError::InvalidInput)?;
+            if payload.len() > profile.payload_limit {
+                return Err(StorageError::InvalidInput);
+            }
+            let hash = request.fingerprint();
+            tx.execute(
+                "INSERT INTO email_event_frames VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    event.id,
+                    route.destination,
+                    profile.revision(),
+                    request.content_type,
+                    request.body.as_slice(),
+                    hash.as_slice()
+                ],
+            )?;
+        }
         if let Some(options) = route.slack {
             let wire = crate::job_enrichment::render(&payload, details, options.include_job_name)
                 .map_err(|_| StorageError::InvalidInput)?;
@@ -325,7 +361,7 @@ impl Store {
                     return Err(error.into());
                 }
             }
-            1..=6 => {}
+            1..=7 => {}
             _ => return Err(StorageError::UnsupportedVersion),
         }
         if version < 2 {
@@ -538,12 +574,21 @@ impl Store {
             return Err(StorageError::InvalidInput);
         }
         let limit = i64::try_from(limit).map_err(|_| StorageError::InvalidInput)?;
-        let mut statement = self.db.prepare("SELECT o.event_id,o.destination,e.job_id,e.submitted_at,
+        let version: i64 = self
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let exclusion = if version >= 7 {
+            " AND NOT EXISTS(SELECT 1 FROM email_provider_pauses p WHERE p.cluster=e.cluster AND p.destination=o.destination) "
+        } else {
+            ""
+        };
+        let sql=format!("SELECT o.event_id,o.destination,e.job_id,e.submitted_at,
             e.started_at,e.event_type,COALESCE((SELECT MAX(a.attempt_number) FROM delivery_attempts a
                 WHERE a.event_id=o.event_id AND a.destination=o.destination),0)+1
             FROM outbox o JOIN events e ON e.event_id=o.event_id
             WHERE e.cluster=?1 AND o.status='pending' AND o.next_attempt_at<=?2
-            ORDER BY o.next_attempt_at,o.event_id,o.destination LIMIT ?3")?;
+            {exclusion} ORDER BY o.next_attempt_at,o.event_id,o.destination LIMIT ?3");
+        let mut statement = self.db.prepare(&sql)?;
         let rows = statement.query_map(params![cluster, now, limit], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -590,6 +635,16 @@ impl Store {
         outcome: DeliveryOutcome,
         attempted_at: i64,
         retry_at: Option<i64>,
+    ) -> Result<(), StorageError> {
+        self.record_delivery_using(item, outcome, attempted_at, retry_at, |_| Ok(()))
+    }
+    fn record_delivery_using(
+        &mut self,
+        item: &DueDelivery,
+        outcome: DeliveryOutcome,
+        attempted_at: i64,
+        retry_at: Option<i64>,
+        after: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
         if attempted_at < 0
             || item.attempt_number <= 0
@@ -644,6 +699,7 @@ impl Store {
                 item.destination
             ],
         )?;
+        after(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -1813,11 +1869,13 @@ pub(super) mod tests {
                 |_| {
                     vec![
                         PublicRoute {
+                            email: None,
                             slack: None,
                             destination: "a",
                             revision: &revision,
                         },
                         PublicRoute {
+                            email: None,
                             slack: None,
                             destination: "b",
                             revision: &revision,
@@ -1867,6 +1925,7 @@ pub(super) mod tests {
                 ("cluster", "1970-01-01T00:00:40", 40),
                 |_| {
                     vec![PublicRoute {
+                        email: None,
                         slack: None,
                         destination: "new",
                         revision: &changed,
@@ -1926,6 +1985,7 @@ pub(super) mod tests {
                 ("cluster", "1970-01-01T00:00:50", 50),
                 |_| {
                     vec![PublicRoute {
+                        email: None,
                         slack: None,
                         destination: "a",
                         revision: &revision,
@@ -1964,6 +2024,7 @@ pub(super) mod tests {
                 ("cluster", "window", 10),
                 |_| {
                     vec![PublicRoute {
+                        email: None,
                         slack: None,
                         destination: "a",
                         revision: &revision,
@@ -2013,6 +2074,7 @@ pub(super) mod tests {
                 &events,
                 ("cluster", "window", 10),
                 |_| vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "a",
                     revision: &revision
@@ -2030,6 +2092,7 @@ pub(super) mod tests {
                 &events,
                 ("cluster", "window", 10),
                 |_| vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "a",
                     revision: &revision
@@ -2052,6 +2115,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&one, &events, ("cluster", "window", 10), |_| {
                 vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "a",
                     revision: &revision,
@@ -2107,6 +2171,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&restored, &events, ("cluster", "window-3", 30), |_| {
                 vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "new",
                     revision: &revision,
@@ -2132,11 +2197,13 @@ pub(super) mod tests {
                 ("cluster", "window-4", 40),
                 |_| vec![
                     PublicRoute {
+                        email: None,
                         slack: None,
                         destination: "new",
                         revision: &revision
                     },
                     PublicRoute {
+                        email: None,
                         slack: None,
                         destination: "new",
                         revision: &revision
@@ -2154,6 +2221,7 @@ pub(super) mod tests {
         legacy
             .persist_public_webhooks(&candidate, &events, ("cluster", "window-2", 20), |_| {
                 vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "old",
                     revision: &revision,
@@ -2175,6 +2243,7 @@ pub(super) mod tests {
         store
             .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "a",
                     revision: &revision,
@@ -2961,6 +3030,7 @@ pub(super) mod tests {
             .collect();
         let revision = "a".repeat(64);
         let valid = PublicRoute {
+            email: None,
             slack: None,
             destination: "plain",
             revision: &revision,
@@ -2969,16 +3039,19 @@ pub(super) mod tests {
             vec![],
             vec![valid, valid],
             vec![PublicRoute {
+                email: None,
                 slack: None,
                 destination: "smtp",
                 revision: &revision,
             }],
             vec![PublicRoute {
+                email: None,
                 slack: None,
                 destination: "missing",
                 revision: &revision,
             }],
             vec![PublicRoute {
+                email: None,
                 slack: None,
                 destination: "plain",
                 revision: "bad",
@@ -3038,6 +3111,7 @@ pub(super) mod tests {
                 ("cluster", "window-1", 10),
                 &selected,
                 &[PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "plain",
                     revision: &revision,
@@ -4505,3 +4579,7 @@ pub(super) mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "email_storage_tests.rs"]
+mod email_acceptance;

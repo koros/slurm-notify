@@ -35,3 +35,7 @@ adds a private reusable content model and version-bound detailed Slack layout.
 
 [Explicit HTTPS email tests](0077-explicit-https-email-test-boundary.md) adds a
 supervised one-shot boundary and shared encoders; API-email monitoring stays gated.
+
+[Transactional API-email storage](0078-transactional-api-email-storage.md) adds
+immutable v7 request frames and privately tested provider-scoped pause/recovery
+primitives before normal API-email monitoring is enabled.

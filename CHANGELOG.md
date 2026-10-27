@@ -52,6 +52,11 @@ the design handoff; no release has been published.
 
 ### Added
 
+- Private API-email storage foundation: atomic immutable request preparation with
+  migration 0007, content-type/body integrity, provider-scoped pause isolation and
+  transactional attempt/resume tests. Normal API-email monitoring and public
+  recovery commands remain gated; legacy routes retain their existing behavior.
+
 - Experimental `email test --profile` for bounded one-shot SendGrid, Mailgun and
   Gmail API submission, with protected credential references, fixed verified HTTPS
   endpoints, Gmail live account binding, deterministic encoders and typed results.

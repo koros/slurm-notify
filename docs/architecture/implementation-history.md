@@ -3938,3 +3938,20 @@ redirect refusal, malformed/oversized/compressed bodies and bounded acknowledgem
 Installed tests verify expired credentials submit no email, leak no credential or
 address, create no state and never query Slurm. Hosted checks and real inbox receipt
 remain separate gates. Next: durable request storage and provider recovery.
+
+## 2026-10-27: transactional API-email storage foundation
+
+Added additive migration 0007 for immutable per-route API-email content type/body,
+profile references and integrity, plus provider-scoped static pause records. The
+selected route transaction prepares exact provider bytes with the canonical UUID,
+checkpoint and outbox; failures roll back migration and poll. Legacy route selections
+explicitly choose no email preparation. Historical state inspection recognizes v7.
+
+Privately tested recovery primitives preserve preflight/post-submission attempt
+accounting, persist pauses, exclude affected destinations before batch sampling and
+resume without resetting attempts. Normal monitoring config, public API-email
+permission/recovery CLI and OAuth lifecycle remain gated. Controlled acceptance
+covers three wire formats, immutable data, changed identities, restart replay,
+late schema/preparation rollback and unrelated-route progress. Shared checks passed;
+fresh Rust line coverage is 97.07% (29,115/29,993), above the unchanged 90% gate.
+No real provider/account/cluster or upgrade acceptance is claimed.

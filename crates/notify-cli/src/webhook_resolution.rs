@@ -409,6 +409,7 @@ mod tests {
         store
             .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![crate::storage::PublicRoute {
+                    email: None,
                     slack: None,
                     destination: "primary",
                     revision: resources.public_revision().unwrap(),
@@ -431,11 +432,13 @@ mod tests {
             .persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![
                     crate::storage::PublicRoute {
+                        email: None,
                         destination: "rich",
                         revision: rich.public_revision().unwrap(),
                         slack: rich.slack_options(),
                     },
                     crate::storage::PublicRoute {
+                        email: None,
                         destination: "generic",
                         revision: generic.public_revision().unwrap(),
                         slack: None,
@@ -487,6 +490,7 @@ mod tests {
         let result =
             store.persist_public_webhooks(&candidate, &events, ("cluster", "window", 10), |_| {
                 vec![crate::storage::PublicRoute {
+                    email: None,
                     destination: "rich",
                     revision: &revision,
                     slack: Some(crate::job_enrichment::SlackOptions {

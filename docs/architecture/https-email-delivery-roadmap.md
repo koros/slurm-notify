@@ -16,9 +16,14 @@ HTTPS endpoints, bounded responses, typed acceptance and Gmail live identity che
 are implemented. Ordinary tests use fake credentials and controlled TLS fixtures.
 See the [test guide](../operations/https-email.md).
 
-This is partial progress on #18–#20 and #22–#24, not completion of those issues:
-operator receipt, normal monitoring config, transactional freezing, permissions,
-durable pause/resume and unattended OAuth still require their acceptance gates.
+The next foundation increment ([ADR 0078](../adr/0078-transactional-api-email-storage.md))
+adds transactional v7 request frames and private pause/recovery primitives with
+rollback, integrity, restart, isolation and attempt-count tests. Normal monitoring
+configuration and public recovery commands remain gated.
+
+This is partial progress on #18–#25, not completion of those issues:
+operator receipt, normal monitoring config, permission enrollment, runtime pause/resume integration and unattended OAuth still
+require their acceptance gates.
 
 ## Milestones
 

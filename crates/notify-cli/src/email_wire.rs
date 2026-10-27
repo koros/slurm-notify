@@ -9,6 +9,16 @@ pub(super) struct Request {
     pub(super) content_type: String,
     pub(super) body: Zeroizing<Vec<u8>>,
 }
+impl Request {
+    pub(super) fn fingerprint(&self) -> [u8; 32] {
+        let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+        context.update(b"slurm-notify-api-email-wire-v1\0");
+        context.update(&(self.content_type.len() as u64).to_be_bytes());
+        context.update(self.content_type.as_bytes());
+        context.update(&self.body);
+        context.finish().as_ref().try_into().unwrap()
+    }
+}
 pub(super) fn prepare(profile: &Profile, content: &Content) -> Result<Request, ()> {
     let (content_type,body)=match profile.provider {
         Provider::SendGrid => ("application/json".into(),serde_json::to_vec(&serde_json::json!({
@@ -45,6 +55,7 @@ pub(super) fn prepare(profile: &Profile, content: &Content) -> Result<Request, (
 }
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
     use super::*;
     #[test]
     fn deterministic_provider_requests_and_expansion_bounds() {

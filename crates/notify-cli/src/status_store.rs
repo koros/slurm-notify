@@ -29,7 +29,7 @@ pub(super) fn open(directory: &Path, timeout: Duration) -> Result<ReadStatus, Er
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(Error::Database)?;
-    if !matches!(version, 4..=6) {
+    if !matches!(version, 4..=7) {
         return Err(Error::Version);
     }
     Ok(ReadStatus { db, _owner: owner })

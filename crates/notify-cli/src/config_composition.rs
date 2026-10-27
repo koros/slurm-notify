@@ -124,6 +124,7 @@ impl Plan {
                         .destinations(&event.state)
                         .into_iter()
                         .map(|destination| crate::storage::PublicRoute {
+                            email: None,
                             slack: self
                                 .webhooks
                                 .iter()

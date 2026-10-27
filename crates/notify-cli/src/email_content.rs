@@ -1,5 +1,4 @@
 //! Private immutable API-email content. No provider credentials or Slack metadata.
-#[cfg(test)]
 use serde_json::Value;
 use zeroize::Zeroizing;
 pub(super) struct Content {
@@ -22,7 +21,6 @@ impl Content {
             timestamp,
         })
     }
-    #[cfg(test)]
     pub(super) fn from_event(payload: &[u8]) -> Result<Self, ()> {
         crate::slack_message::render(payload)?;
         let v: Value = serde_json::from_slice(payload).map_err(|_| ())?;
@@ -76,6 +74,7 @@ impl Content {
 }
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)] // Custom process harness omits unit-test bodies.
     use super::*;
     #[test]
     fn minimal_frozen_content_ignores_private_fields_and_has_real_mime() {
