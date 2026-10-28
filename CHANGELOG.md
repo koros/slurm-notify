@@ -5,6 +5,8 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Distinguish busy Gmail credential leases from unsafe/unavailable resources; bound test-only reacquisition across parallel fork/exec descriptor inheritance without relaxing production locks.
+
 - Add separate protected Gmail offline-grant preflight, bounded verified refresh/identity checks, credential-level locking and atomic token rotation, plus a workstation-only official-library consent helper. Experimental Gmail foreground uses separate no-send preflight and one-POST dispatch, durable provider cooldowns (lazy schema v8), explicit pause recovery and cancellation before submission. Live-provider acceptance remains pending.
 - Bind API-email enrollment to explicit timeout and payload budgets as well as account, destination and trust metadata.
 

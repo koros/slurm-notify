@@ -174,9 +174,10 @@ pub(super) fn local(path: &Path, logout: bool) -> Result<String, ()> {
         return Err(());
     }
     let lease = if logout {
-        Some(crate::gmail_store::Lease::acquire(Path::new(
-            profile.credential.as_str(),
-        ))?)
+        Some(
+            crate::gmail_store::Lease::acquire(Path::new(profile.credential.as_str()))
+                .map_err(|_| ())?,
+        )
     } else {
         None
     };
@@ -269,7 +270,7 @@ pub(super) fn serve(
                 crate::provider_outcome::unix_time().ok_or(Error::InvalidInput)? as u64,
             )
         }
-        Err(()) => Outcome::NotAttempted,
+        Err(_) => Outcome::NotAttempted,
     };
     output
         .write_all(result.encode().as_bytes())

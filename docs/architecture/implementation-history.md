@@ -4009,3 +4009,14 @@ SMTP and API-specific frozen content, separate revision guards and identical API
 bytes after reopening. Cross-provider preparation fails before credential lookup.
 This adds controlled composition evidence without a provider account or live send;
 real operator receipt and deployment backup/restore gates remain pending.
+
+## 2026-10-28: Linux credential-lock test contention
+
+Hosted Linux shared checks exposed a brief inherited-lock-descriptor window in the
+credential rotation test's immediate reacquisition after drop. macOS, hosted Rust
+coverage, dependency policy and Scorecard passed at that checkpoint. The private
+lease now distinguishes Busy from Unavailable, and test-only reacquisition waits
+up to one second only for Busy, matching the existing state-owner fixture pattern.
+Unsafe lock metadata fails immediately; production acquisition remains nonblocking
+and no credential or delivery permission is weakened. The operator guide also
+clarifies Gmail's separate preflight and submission timeout budgets.

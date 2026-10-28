@@ -14,6 +14,11 @@ use std::{
     path::Path,
 };
 use zeroize::Zeroizing;
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum AcquireError {
+    Busy,
+    Unavailable,
+}
 pub(super) struct Lease {
     directory: File,
     name: CString,
@@ -32,11 +37,15 @@ impl Drop for Temporary<'_> {
     }
 }
 impl Lease {
-    pub(super) fn acquire(path: &Path) -> Result<Self, ()> {
-        let (directory, name) = crate::config_snapshot::protected_parent(path).map_err(|_| ())?;
-        let name = CString::new(name.as_bytes()).map_err(|_| ())?;
-        let lock_name = CString::new(format!(".{}.gmail.lock", name.to_str().map_err(|_| ())?))
-            .map_err(|_| ())?;
+    pub(super) fn acquire(path: &Path) -> Result<Self, AcquireError> {
+        let (directory, name) = crate::config_snapshot::protected_parent(path)
+            .map_err(|_| AcquireError::Unavailable)?;
+        let name = CString::new(name.as_bytes()).map_err(|_| AcquireError::Unavailable)?;
+        let lock_name = CString::new(format!(
+            ".{}.gmail.lock",
+            name.to_str().map_err(|_| AcquireError::Unavailable)?
+        ))
+        .map_err(|_| AcquireError::Unavailable)?;
         // SAFETY: live descriptor and NUL-terminated name; reject links and inherited FDs.
         let fd = unsafe {
             libc::openat(
@@ -51,22 +60,28 @@ impl Lease {
             )
         };
         if fd < 0 {
-            return Err(());
+            return Err(AcquireError::Unavailable);
         }
         // SAFETY: successful openat returned a new owned descriptor.
         let lock = unsafe { File::from_raw_fd(fd) };
-        let m = lock.metadata().map_err(|_| ())?;
+        let m = lock.metadata().map_err(|_| AcquireError::Unavailable)?;
         // SAFETY: geteuid has no preconditions.
         if !m.is_file()
             || m.uid() != unsafe { libc::geteuid() }
             || m.nlink() != 1
             || m.mode() & 0o7777 != 0o600
         {
-            return Err(());
+            return Err(AcquireError::Unavailable);
         }
         // SAFETY: nonblocking flock on an owned descriptor.
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err(());
+            return Err(
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::WouldBlock {
+                    AcquireError::Busy
+                } else {
+                    AcquireError::Unavailable
+                },
+            );
         }
         Ok(Self {
             directory,
@@ -174,6 +189,20 @@ impl Lease {
 }
 #[cfg(test)]
 mod tests {
+    fn reacquire(path: &std::path::Path) -> super::Lease {
+        // A parallel suite child can briefly inherit the CLOEXEC lock descriptor
+        // between fork and exec. Only lock contention may wait; leaks still fail.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match super::Lease::acquire(path) {
+                Ok(lease) => return lease,
+                Err(super::AcquireError::Busy) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(2))
+                }
+                Err(error) => panic!("credential reacquisition failed: {error:?}"),
+            }
+        }
+    }
     #[test]
     fn exclusive_atomic_rotation_rejects_stale_inputs_and_preserves_old_on_write_failure() {
         use std::os::unix::fs::PermissionsExt;
@@ -188,7 +217,10 @@ mod tests {
         std::fs::write(&path, b"old").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let lease = super::Lease::acquire(&path).unwrap();
-        assert!(super::Lease::acquire(&path).is_err());
+        assert!(matches!(
+            super::Lease::acquire(&path),
+            Err(super::AcquireError::Busy)
+        ));
         assert!(lease.replace(b"wrong", b"new").is_err());
         assert!(lease
             .replace_using(b"old", b"new", |_| Err(std::io::Error::other("fixture")))
@@ -211,10 +243,27 @@ mod tests {
         assert_eq!(lease.read().unwrap().as_slice(), b"published");
 
         drop(lease);
-        let lease = super::Lease::acquire(&path).unwrap();
+        let lease = reacquire(&path);
         assert_eq!(lease.read().unwrap().as_slice(), b"published");
         drop(lease);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(super::Lease::acquire(&path).unwrap().read().is_err());
+        assert!(reacquire(&path).read().is_err());
+    }
+    #[test]
+    fn unsafe_lock_is_unavailable_rather_than_retryable_contention() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::storage::tests::Directory::new();
+        let root = d.path().parent().unwrap().canonicalize().unwrap();
+        let path = root.join("grant.json");
+        drop(super::Lease::acquire(&path).unwrap());
+        std::fs::set_permissions(
+            root.join(".grant.json.gmail.lock"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(matches!(
+            super::Lease::acquire(&path),
+            Err(super::AcquireError::Unavailable)
+        ));
     }
 }

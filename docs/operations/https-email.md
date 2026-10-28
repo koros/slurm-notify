@@ -226,7 +226,8 @@ Start with an empty api_email_permissions list, then run the same init, config
 validate, test primary, doctor and start sequence shown above. Configuration
 validation checks the local grant without refreshing or contacting Google.
 Configured test/foreground delivery can perform credential preflight before their
-single email POST; the standalone email test command retains explicit refresh.
+single email POST. Preflight and submission each have the configured request timeout
+(up to twice that budget in total, plus process cleanup/OS-call latency); the standalone email test command retains explicit refresh.
 
 Temporary preflight failures create a durable provider cooldown without consuming
 send attempts. Historical status reports pause and active-cooldown samples. A stop

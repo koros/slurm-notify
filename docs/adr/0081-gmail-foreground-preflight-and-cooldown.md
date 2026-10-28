@@ -18,7 +18,9 @@ Runtime checks the exact frozen revision before resolving credentials or preflig
 
 Before a Gmail submission, a separate bounded helper obtains a valid access token,
 refreshes when needed, saves rotations and verifies live subject/verified email.
-The parent rereads the protected matching grant. Only its access token enters the
+Each helper has its own request_timeout_seconds deadline; preflight plus
+submission uses at most twice that configured helper budget, plus process cleanup
+and synchronous OS-call latency. The parent rereads the protected matching grant. Only its access token enters the
 separate email-submission helper, which makes exactly one fixed-endpoint POST and
 no identity/token requests. Thus OAuth and identity work never consume email-send
 attempts. No mailbox read API or sender alias is used.
