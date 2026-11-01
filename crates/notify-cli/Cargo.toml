@@ -15,7 +15,7 @@ serde_json = "=1.0.154"
 serde_core = "=1.0.229"
 zeroize = "=1.9.1"
 url = "=2.5.8"
-libc = "=0.2.190"
+libc = "=0.2.191"
 
 # Existing locked hashing, strict address parsing and trust-anchor validation.
 ring = "=0.17.14"
