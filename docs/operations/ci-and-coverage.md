@@ -115,7 +115,9 @@ platform baseline. Hosted execution must be verified separately from local check
 
 Coverage uses per-process `slurm-notify-%p.profraw` files, without LLVM's `%m`
 online merge pool. The forced-termination harness can interrupt pool writes;
-profiles are merged only after tests finish. Corrupt profiles still fail and no
-profile exclusions or threshold reductions are applied. Main coverage publication
+profiles are merged only after tests finish. The collector removes only zero-byte runtime placeholders (no header or counters)
+left by killed children, reporting their count. Every nonempty profile, including
+truncated/corrupt files, remains subject to strict LLVM validation. No counter
+data is discarded and the threshold is unchanged. Main coverage publication
 runs only after a successful coverage job, avoiding a second missing-artifact
 failure when measurement fails. The original coverage failure stays visible.

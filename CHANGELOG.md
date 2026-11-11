@@ -5,6 +5,10 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Remove only empty LLVM runtime profile placeholders left by killed test
+  processes before strict merging. Retain every nonempty profile, reject
+  collection collisions, and keep the unchanged 90% coverage gate.
+
 - Use per-process coverage profiles without LLVM online merging to avoid
   interrupted merge-pool writes in termination tests. Keep strict offline merging
   and the 90% gate; publish main coverage only after successful measurement.

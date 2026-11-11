@@ -16,11 +16,7 @@ for profile in Path("crates/notify-cli").glob("default_*.profraw"):
     profile.unlink()
 PY_START
 cargo llvm-cov --workspace --locked --no-report
-python3 - <<'PY_COLLECT'
-from pathlib import Path
-for profile in Path("crates/notify-cli").glob("default_*.profraw"):
-    profile.rename(Path("target/llvm-cov-target") / profile.name)
-PY_COLLECT
+python3 scripts/collect-coverage.py
 # Write reports before enforcing the threshold so failed gates remain inspectable.
 cargo llvm-cov report --json --output-path target/coverage/rust.json
 cargo llvm-cov report --lcov --output-path target/coverage/lcov.info
