@@ -5,6 +5,9 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Move macOS CI from the retired macos-14 runner to macos-15. This changes
+  the CI environment only; no supported deployment baseline is declared.
+
 - Upgrade rusqlite to 0.41.0 and bundled libsqlite3-sys to 0.39.1
   (SQLite 3.54.1) for RUSTSEC-2026-0459. Raise the development/CI compiler
   to Rust 1.89.0 as required by rusqlite; no supported MSRV is declared.

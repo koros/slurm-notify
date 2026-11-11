@@ -108,3 +108,7 @@ OpenSSF's public API, which supplies the live Scorecard badge. SARIF is retained
 as an artifact for 14 days. This workflow does not upload GitHub code-scanning
 alerts or promise a particular score. New services may show unavailable until their
 first successful publication. Third-party Actions are pinned to reviewed commits.
+
+The shared CI matrix uses `ubuntu-22.04` and `macos-15`. GitHub retired
+`macos-14` on 2026-11-02; the runner update does not establish a supported
+platform baseline. Hosted execution must be verified separately from local checks.
