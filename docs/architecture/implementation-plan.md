@@ -98,6 +98,9 @@ and need explicit authorization.
 
 ## Validation
 
+The [2026-11-11 dependency review](../operations/dependabot-review-2026-11-11.md)
+records the integration of Dependabot PRs 28–31 without changing public contracts.
+
 Development and CI use Rust 1.89.0 for the patched bundled SQLite dependency
 ([ADR 0088](../adr/0088-bundled-sqlite-security-update.md)). This is not a supported MSRV.
 

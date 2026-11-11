@@ -5,6 +5,10 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Integrate reviewed Dependabot updates: lettre 0.11.23, libc 0.2.191,
+  rusqlite 0.41.1 and SHA-pinned install-action 2.90.3. Retain Rust 1.89.0,
+  bundled SQLite 3.54.1, existing features, exact CI tool pins and contracts.
+
 - Move macOS CI from the retired macos-14 runner to macos-15. This changes
   the CI environment only; no supported deployment baseline is declared.
 
