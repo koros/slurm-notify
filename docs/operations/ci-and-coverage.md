@@ -13,14 +13,14 @@ compiler compatibility and existing dependency pins still require review.
 ## Coverage gate
 
 The coverage job fails below **90% aggregate Rust workspace line coverage** using
-cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.88.0 compiler.
+cargo-llvm-cov 0.6.21 and LLVM tools matching the pinned Rust 1.89.0 compiler.
 The prebuilt coverage tool keeps the coverage installation reproducible. Third-party Actions are commit-pinned;
 installation disables fallback and retains checksum verification.
 
 Run locally from the repository root:
 
 ```sh
-rustup component add llvm-tools-preview --toolchain 1.88.0
+rustup component add llvm-tools-preview --toolchain 1.89.0
 # Install cargo-llvm-cov 0.6.21 using its upstream prebuilt installation instructions.
 sh scripts/check-coverage.sh
 ```

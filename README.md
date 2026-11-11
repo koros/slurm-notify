@@ -5,7 +5,7 @@
 [![Dependency policy](https://github.com/koros/slurm-notify/actions/workflows/dependencies.yml/badge.svg?branch=main)](https://github.com/koros/slurm-notify/actions/workflows/dependencies.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/koros/slurm-notify/badge)](https://scorecard.dev/viewer/?uri=github.com/koros/slurm-notify)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Development Rust 1.88.0](https://img.shields.io/badge/development_Rust-1.88.0-orange?logo=rust)](rust-toolchain.toml)
+[![Development Rust 1.89.0](https://img.shields.io/badge/development_Rust-1.89.0-orange?logo=rust)](rust-toolchain.toml)
 [![Status: prototype](https://img.shields.io/badge/status-prototype-yellow)](docs/architecture/product-readiness.md)
 [![Contributor Covenant 3.0](https://img.shields.io/badge/Contributor_Covenant-3.0-purple)](CODE_OF_CONDUCT.md)
 [![Last commit](https://img.shields.io/github/last-commit/koros/slurm-notify)](https://github.com/koros/slurm-notify/commits/main/)
@@ -17,7 +17,7 @@ locally, and retries delivery after temporary failures or restarts.
 
 **Unreleased prototype.** Check your site's polling and execution policy before
 running scheduler probes or monitoring. CI checks Linux and macOS; this is not a
-supported platform or Slurm-version matrix. Rust 1.88.0 is the development
+supported platform or Slurm-version matrix. Rust 1.89.0 is the development
 compiler, not a declared minimum supported Rust version.
 
 SendGrid, Mailgun and experimental Gmail API support enrolled foreground email

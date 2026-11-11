@@ -37,7 +37,7 @@ pub(super) fn open(directory: &Path, timeout: Duration) -> Result<ReadStatus, Er
 
 // Cooperatively interrupt expensive SQL using the configured query timeout.
 // SQLite busy waiting is configured separately; filesystem calls have no hard deadline.
-pub(super) fn query_budget(db: &Connection, timeout: Duration) -> rusqlite::Result<()> {
+pub(super) fn query_budget(db: &mut Connection, timeout: Duration) -> rusqlite::Result<()> {
     let start = std::time::Instant::now();
     db.progress_handler(1000, Some(move || start.elapsed() >= timeout))
 }
@@ -48,9 +48,9 @@ mod tests {
     use super::*;
     #[test]
     fn query_budget_interrupts_expensive_read_work() {
-        let db = Connection::open_in_memory().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
         db.pragma_update(None, "query_only", true).unwrap();
-        query_budget(&db, Duration::ZERO).unwrap();
+        query_budget(&mut db, Duration::ZERO).unwrap();
         let result = db.query_row(
             "WITH RECURSIVE work(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM work WHERE n<1000000) SELECT sum(n) FROM work",
             [], |row| row.get::<_, i64>(0));

@@ -322,7 +322,7 @@ impl Store {
     ) -> Result<Self, StorageError> {
         let owner =
             crate::state_path::Guard::inspect(directory).map_err(StorageError::StatePath)?;
-        let db = Connection::open_with_flags(
+        let mut db = Connection::open_with_flags(
             &owner.database,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
                 | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -338,7 +338,7 @@ impl Store {
         if !(7..=8).contains(&version) {
             return Err(StorageError::UnsupportedVersion);
         }
-        crate::status_store::query_budget(&db, timeout)?;
+        crate::status_store::query_budget(&mut db, timeout)?;
         Ok(Self {
             db,
             _owner: Some(owner),

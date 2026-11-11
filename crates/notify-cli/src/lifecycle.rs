@@ -431,7 +431,7 @@ mod tests {
             let mut r = Reconciler::default();
             let record = row("1", "actual", state);
             assert!(record.state.terminal());
-            assert_eq!(r.observe(&[record.clone()], true).len(), 1);
+            assert_eq!(r.observe(std::slice::from_ref(&record), true).len(), 1);
             assert!(r.observe(&[record], true).is_empty());
         }
         assert!(Reconciler::default()
@@ -668,11 +668,13 @@ mod tests {
     fn short_jobs_have_explicit_catch_up_policy() {
         let record = row("1", "t", "COMPLETED");
         assert_eq!(
-            Reconciler::default().observe(&[record.clone()], true).len(),
+            Reconciler::default()
+                .observe(std::slice::from_ref(&record), true)
+                .len(),
             1
         );
         let mut r = Reconciler::default();
-        assert!(r.observe(&[record.clone()], false).is_empty());
+        assert!(r.observe(std::slice::from_ref(&record), false).is_empty());
         assert!(r.observe(&[record], true).is_empty());
         assert!(r.observe(&[row("1", "t", "RUNNING")], true).is_empty());
         assert!(r.observe(&[row("1", "t", "FAILED")], true).is_empty());

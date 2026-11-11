@@ -8,6 +8,14 @@ current evidence by capability and identifies the remaining activation gates.
 
 ## Verified prototype
 
+- Bundled SQLite security update: rusqlite 0.41.0 / libsqlite3-sys 0.39.1
+  (SQLite 3.54.1), development/CI Rust 1.89.0. Local dependency policy and
+  shared checks pass on 2026-11-11; Rust line coverage is 96.35%.
+  The protected system Python was used for unattended helper tests; the default
+  framework interpreter has group-writable ancestors and is rejected.
+  See [ADR 0088](../adr/0088-bundled-sqlite-security-update.md).
+  Hosted checks and deployment acceptance remain unverified for this increment.
+
 - Experimental explicit HTTPS email tests for SendGrid, Mailgun and Gmail API with
   fixed verified endpoints, protected resources, deterministic encoders and bounded
   supervised results. Gmail checks live account identity before submission.

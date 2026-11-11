@@ -45,3 +45,5 @@ primitives before normal API-email monitoring is enabled.
 - [0080: protected Gmail offline-grant preflight](0080-protected-gmail-offline-grant-preflight.md)
 
 - [0081: Gmail foreground preflight and cooldowns](0081-gmail-foreground-preflight-and-cooldown.md)
+
+- [0088: bundled SQLite security update](0088-bundled-sqlite-security-update.md)

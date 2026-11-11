@@ -5,6 +5,11 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Upgrade rusqlite to 0.41.0 and bundled libsqlite3-sys to 0.39.1
+  (SQLite 3.54.1) for RUSTSEC-2026-0459. Raise the development/CI compiler
+  to Rust 1.89.0 as required by rusqlite; no supported MSRV is declared.
+  Keep advisory enforcement, storage schemas and public contracts unchanged.
+
 - Distinguish busy Gmail credential leases from unsafe/unavailable resources; bound test-only reacquisition across parallel fork/exec descriptor inheritance without relaxing production locks.
 
 - Add separate protected Gmail offline-grant preflight, bounded verified refresh/identity checks, credential-level locking and atomic token rotation, plus a workstation-only official-library consent helper. Experimental Gmail foreground uses separate no-send preflight and one-POST dispatch, durable provider cooldowns (lazy schema v8), explicit pause recovery and cancellation before submission. Live-provider acceptance remains pending.

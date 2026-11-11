@@ -8,7 +8,7 @@ and relevant [ADRs](docs/adr/README.md) before changing behavior. Follow the
 
 ## Development setup
 
-Use the pinned Rust 1.88.0 development toolchain, Python 3, Git and a native C
+Use the pinned Rust 1.89.0 development toolchain, Python 3, Git and a native C
 compiler for bundled SQLite. No minimum supported Rust version is declared.
 The workspace currently has one package, `crates/notify-cli`; other crate folders
 reserve possible future boundaries.
@@ -33,7 +33,7 @@ For Rust behavior or coverage configuration changes, install cargo-llvm-cov 0.6.
 and matching compiler tools, then run the 90% line-coverage gate:
 
 ```sh
-rustup component add llvm-tools-preview --toolchain 1.88.0
+rustup component add llvm-tools-preview --toolchain 1.89.0
 cargo install cargo-llvm-cov --version 0.6.21 --locked
 sh scripts/check-coverage.sh
 ```

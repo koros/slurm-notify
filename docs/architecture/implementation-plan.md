@@ -98,6 +98,9 @@ and need explicit authorization.
 
 ## Validation
 
+Development and CI use Rust 1.89.0 for the patched bundled SQLite dependency
+([ADR 0088](../adr/0088-bundled-sqlite-security-update.md)). This is not a supported MSRV.
+
 `sh scripts/check.sh` is the shared local/CI suite; staged and pre-push hooks must pass.
 `sh scripts/check-coverage.sh` enforces at least 90% aggregate Rust line coverage.
 Record current results in product readiness, without appending obsolete status to

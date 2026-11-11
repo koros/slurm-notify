@@ -62,7 +62,7 @@ fn inspect_at(path: &Path, now: i64) -> Result<String, Error> {
         }
     })?;
     crate::status_store::query_budget(
-        &status.db,
+        &mut status.db,
         std::time::Duration::from_secs(number(monitor, "query_timeout_seconds")?),
     )
     .map_err(|_| Error::Database)?;
