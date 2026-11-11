@@ -5,6 +5,10 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Use per-process coverage profiles without LLVM online merging to avoid
+  interrupted merge-pool writes in termination tests. Keep strict offline merging
+  and the 90% gate; publish main coverage only after successful measurement.
+
 - Integrate reviewed Dependabot updates: lettre 0.11.23, libc 0.2.191,
   rusqlite 0.41.1 and SHA-pinned install-action 2.90.3. Retain Rust 1.89.0,
   bundled SQLite 3.54.1, existing features, exact CI tool pins and contracts.

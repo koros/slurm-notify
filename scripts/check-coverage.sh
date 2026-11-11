@@ -3,6 +3,9 @@
 set -eu
 mkdir -p target/coverage
 export CARGO_LLVM_COV_TARGET_DIR="$PWD/target/llvm-cov-target"
+# Do not use %m online merging: forced-termination tests can interrupt its
+# file initialization/updates. Each process writes on normal exit; merge later.
+export LLVM_PROFILE_FILE_NAME='slurm-notify-%p.profraw'
 # Do not merge earlier runs or LLVM formats into this run's measurement.
 cargo llvm-cov clean --workspace --profraw-only
 # The supervisor deliberately clears LLVM_PROFILE_FILE in children. Remove stale

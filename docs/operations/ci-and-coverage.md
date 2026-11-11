@@ -112,3 +112,10 @@ first successful publication. Third-party Actions are pinned to reviewed commits
 The shared CI matrix uses `ubuntu-22.04` and `macos-15`. GitHub retired
 `macos-14` on 2026-11-02; the runner update does not establish a supported
 platform baseline. Hosted execution must be verified separately from local checks.
+
+Coverage uses per-process `slurm-notify-%p.profraw` files, without LLVM's `%m`
+online merge pool. The forced-termination harness can interrupt pool writes;
+profiles are merged only after tests finish. Corrupt profiles still fail and no
+profile exclusions or threshold reductions are applied. Main coverage publication
+runs only after a successful coverage job, avoiding a second missing-artifact
+failure when measurement fails. The original coverage failure stays visible.

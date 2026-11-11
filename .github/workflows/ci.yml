@@ -134,7 +134,7 @@ jobs:
   coverage-report:
     name: Publish main coverage
     needs: [coverage]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ needs.coverage.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
