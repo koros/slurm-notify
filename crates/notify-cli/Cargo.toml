@@ -35,7 +35,7 @@ base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Pin builder and hostname-normalization dependencies for reviewed locked builds.
-email-encoding = "=0.4.2"
+email-encoding = "=0.4.3"
 idna_adapter = "=1.2.2"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
