@@ -13,17 +13,17 @@ path = "src/main.rs"
 # Installed strict bounded configuration boundary; retain existing locked versions.
 serde_json = "=1.0.154"
 serde_core = "=1.0.229"
-zeroize = "=1.9.1"
-url = "=2.5.8"
+zeroize = "=1.9.2"
+url = "=2.5.9"
 libc = "=0.2.191"
 
 # Existing locked hashing, strict address parsing and trust-anchor validation.
 ring = "=0.17.14"
-lettre = { version = "=0.11.23", default-features = false, features = ["builder"] }
+lettre = { version = "=0.11.24", default-features = false, features = ["builder"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 
 # Existing read-only SQLite inspection and strict checkpoint timestamps.
-rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "hooks"] }
+rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "hooks"] }
 time = "=0.3.55"
 
 # Installed bounded HTTPS helper; reuse locked TLS client without proxy discovery/decompression.
@@ -35,7 +35,7 @@ base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Pin builder and hostname-normalization dependencies for reviewed locked builds.
-email-encoding = "=0.4.2"
+email-encoding = "=0.4.3"
 idna_adapter = "=1.2.2"
 # Loopback TLS fixtures generated in memory; no checked-in private keys.
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }

@@ -98,6 +98,9 @@ and need explicit authorization.
 
 ## Validation
 
+The [2026-11-23 dependency review](../operations/dependabot-review-2026-11-23.md)
+records PRs 33–38 and required lettre/URL security patches on Rust 1.89.0.
+
 The [2026-11-11 dependency review](../operations/dependabot-review-2026-11-11.md)
 records the integration of Dependabot PRs 28–31 without changing public contracts.
 

@@ -129,9 +129,9 @@ dependencies = [
 
 [[package]]
 name = "email-encoding"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+checksum = "9f690ae2169f2ceb3f45b28b6fcd8fa16839f2f5c8818546774b9425f5f71004"
 dependencies = [
  "base64 0.23.1",
  "memchr",
@@ -169,9 +169,9 @@ checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -311,9 +311,9 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "lettre"
-version = "0.11.23"
+version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+checksum = "f294f3d7cdb313e578acef7d7727d4e8d897e0fcd0d6d58c19959cec95073f19"
 dependencies = [
  "email-encoding",
  "email_address",
@@ -333,9 +333,9 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.39.1"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
+checksum = "b06e69070b7e12262b0cd90832f0a7396f142a2b330181255562decf9f0c6215"
 dependencies = [
  "cc",
  "pkg-config",
@@ -520,9 +520,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.41.1"
+version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
+checksum = "f172c4812a19b26d1c23cdb0070e69db335503dfa378b910eb857386e5b8beba"
 dependencies = [
  "bitflags",
  "fallible-iterator",
@@ -798,9 +798,9 @@ dependencies = [
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -997,9 +997,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
 
 [[package]]
 name = "zerotrie"

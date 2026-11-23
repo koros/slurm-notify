@@ -5,6 +5,13 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Integrate Dependabot PRs 33–38: email-encoding 0.4.3, zeroize 1.9.2,
+  rusqlite 0.43.0, dependency-review-action 5.0.1, install-action 2.90.6
+  and Scorecard 2.6.0. Also patch lettre to 0.11.24 and url to 2.5.9
+  for current advisories. Keep Rust 1.89.0, existing features and contracts.
+  Scorecard explicitly fails permanent publication rejection; upstream transient
+  publication failures warn after retries. No release/platform acceptance is implied.
+
 - Remove only empty LLVM runtime profile placeholders left by killed test
   processes before strict merging. Retain every nonempty profile, reject
   collection collisions, and keep the unchanged 90% coverage gate.
