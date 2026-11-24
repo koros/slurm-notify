@@ -5,6 +5,8 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Add a README screenshot showing Slack job notifications.
+
 - Integrate Dependabot PRs 33–38: email-encoding 0.4.3, zeroize 1.9.2,
   rusqlite 0.43.0, dependency-review-action 5.0.1, install-action 2.90.6
   and Scorecard 2.6.0. Also patch lettre to 0.11.24 and url to 2.5.9

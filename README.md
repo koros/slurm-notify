@@ -47,6 +47,12 @@ state/backups for the ledger's lifetime. Missing details say unavailable. Email 
 generic webhooks use their own minimal payloads. See the [Slack guide](docs/operations/slack.md)
 for setup, disclosure controls and upgrades from the original message format.
 
+## Screenshot
+
+Slack notifications for completed, failed and timed-out jobs:
+
+![Slurm Notify alerts in Slack showing completed, failed and timed-out jobs](screenshots/Screenshot%202026-10-26%20at%2020.33.17.png)
+
 ## Quick start
 
 Build from source with the [pinned Rust toolchain](rust-toolchain.toml), Python 3
