@@ -5,6 +5,10 @@ the design handoff; no release has been published.
 
 ## [Unreleased]
 
+- Restore the SHA-pinned Scorecard 2.5.0 action after hosted runners repeatedly
+  failed to pull the 2.6.0 container. Preserve scanning/publication failure handling
+  and existing permissions; defer the 2.6.0 upgrade pending image availability.
+
 - Add a README screenshot showing Slack job notifications.
 
 - Integrate Dependabot PRs 33–38: email-encoding 0.4.3, zeroize 1.9.2,

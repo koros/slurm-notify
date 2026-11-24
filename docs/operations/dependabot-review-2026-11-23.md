@@ -68,3 +68,16 @@ policy changes; the existing duplicate Base64 and unused Zlib allowance warnings
 remain. Workspace Rust line coverage is 96.35% (90% gate unchanged), including
 pre-existing uncommitted local features; staged-snapshot hooks independently
 validate the focused commit. Hosted results remain separate until observed.
+
+## Scorecard deployment correction — 2026-11-24
+
+The screenshot commit's Scorecard run failed before checkout or scanning because
+GitHub runners could not pull `ghcr.io/ossf/scorecard-action:v2.6.0`
+(`manifest unknown`). A rerun reproduced the failure even though an anonymous
+manifest query from the development host returned HTTP 200. That response is not
+proof the runner can pull the complete image. Restore the previously working
+full-SHA v2.5.0 action pin and remove the v2.6-only fail_on_publish_error input.
+Version 2.5 retains its original fatal publication-error handling; permissions,
+publication enablement and SARIF artifact checks remain unchanged. Defer PR 38's
+upgrade until the exact image is usable on the hosted runner. All Rust/security
+and other action updates from this review remain applied.
